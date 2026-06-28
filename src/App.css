@@ -455,6 +455,39 @@ input[type='color'] {
   border: 1px solid var(--border);
 }
 
+.inspector-body input,
+.inspector-body select {
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 3px 6px;
+  font: inherit;
+  font-size: 12px;
+  width: 96px;
+}
+
+/* Arrangement panel */
+.arrange {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.arrange .field-row .num {
+  min-width: 34px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.arrange-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 2px;
+}
+
 /* Timeline lanes */
 .timeline-lanes {
   flex: 1;

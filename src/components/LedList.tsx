@@ -5,16 +5,20 @@ export function LedList() {
   const leds = useStore((s) => s.leds)
   const tracks = useStore((s) => s.project.tracks)
   const assignments = useStore((s) => s.project.assignments)
-  const selected = useStore((s) => s.selectedLed)
+  const selection = useStore((s) => s.selection)
   const selectLed = useStore((s) => s.selectLed)
   const assignLed = useStore((s) => s.assignLed)
 
   return (
     <div className="led-list">
-      <div className="led-list-head muted">{leds.length} LEDs</div>
+      <div className="led-list-head muted">{leds.length} LEDs · Shift-click for multiple</div>
       <ul>
         {leds.map((p, i) => (
-          <li key={i} className={i === selected ? 'sel' : ''} onClick={() => selectLed(i)}>
+          <li
+            key={i}
+            className={selection.includes(i) ? 'sel' : ''}
+            onClick={(e) => selectLed(i, e.shiftKey || e.metaKey || e.ctrlKey)}
+          >
             <span className="idx">#{i}</span>
             <span className="muted">
               {p.x.toFixed(1)}, {p.y.toFixed(1)}, {p.z.toFixed(1)}

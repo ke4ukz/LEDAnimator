@@ -15,6 +15,7 @@ const tmpColor = new Color()
 export function Leds() {
   const ref = useRef<InstancedMesh>(null!)
   const leds = useStore((s) => s.leds)
+  const selectLed = useStore((s) => s.selectLed)
 
   // Lay out instance positions whenever the arrangement changes.
   useLayoutEffect(() => {
@@ -41,23 +42,37 @@ export function Leds() {
   })
 
   return (
-    <instancedMesh key={leds.length} ref={ref} args={[undefined, undefined, leds.length]}>
+    <instancedMesh
+      key={leds.length}
+      ref={ref}
+      args={[undefined, undefined, leds.length]}
+      onClick={(e) => {
+        e.stopPropagation()
+        if (e.instanceId != null) selectLed(e.instanceId, e.shiftKey)
+      }}
+    >
       <sphereGeometry args={[0.35, 16, 16]} />
       <meshBasicMaterial toneMapped={false} />
     </instancedMesh>
   )
 }
 
-/** A wireframe ring around the currently selected LED. */
+/** Wireframe rings around the currently selected LEDs. */
 export function SelectionMarker() {
   const leds = useStore((s) => s.leds)
-  const selected = useStore((s) => s.selectedLed)
-  if (selected == null || !leds[selected]) return null
-  const p = leds[selected]
+  const selection = useStore((s) => s.selection)
   return (
-    <mesh position={[p.x, p.y, p.z]}>
-      <sphereGeometry args={[0.5, 20, 20]} />
-      <meshBasicMaterial color="#ffffff" wireframe toneMapped={false} />
-    </mesh>
+    <>
+      {selection.map((i) => {
+        const p = leds[i]
+        if (!p) return null
+        return (
+          <mesh key={i} position={[p.x, p.y, p.z]}>
+            <sphereGeometry args={[0.5, 20, 20]} />
+            <meshBasicMaterial color="#ffffff" wireframe toneMapped={false} />
+          </mesh>
+        )
+      })}
+    </>
   )
 }

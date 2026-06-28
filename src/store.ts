@@ -21,7 +21,8 @@ interface AppState {
   raster: Raster
   frame: number
   playing: boolean
-  selectedLed: number | null
+  /** Selected LED indices (multi-select). */
+  selection: number[]
   selectedTrack: string | null
 
   // Track / source editing (all re-bake the raster).
@@ -32,9 +33,17 @@ interface AppState {
   /** Set (or clear, when auto is null) an automation curve for a track param. */
   setAutomation: (trackId: string, param: AutoParam, auto: Automation | null) => void
   assignLed: (led: number, trackId: string) => void
+  assignLeds: (leds: number[], trackId: string) => void
+  /** Patch position fields on the given LED indices (does not re-bake — position
+   *  doesn't affect baked colors). */
+  updateLeds: (indices: number[], patch: Partial<LedPosition>) => void
+  /** Replace the whole arrangement (resizes assignments + re-bakes). */
+  applyArrangement: (leds: LedPosition[]) => void
 
   selectTrack: (id: string | null) => void
-  selectLed: (i: number | null) => void
+  selectLed: (i: number, additive?: boolean) => void
+  setSelection: (indices: number[]) => void
+  clearSelection: () => void
 
   play: () => void
   pause: () => void
@@ -61,7 +70,7 @@ export const useStore = create<AppState>((set, get) => {
     raster: bakeProject(initialProject, DEMO_LEDS),
     frame: 0,
     playing: true,
-    selectedLed: 0,
+    selection: [0],
     selectedTrack: initialProject.tracks[0]?.id ?? null,
 
     updateGradient: (g) => {
@@ -138,8 +147,39 @@ export const useStore = create<AppState>((set, get) => {
       commit({ ...project, assignments })
     },
 
+    assignLeds: (leds, trackId) => {
+      const { project } = get()
+      const set2 = new Set(leds)
+      const assignments = project.assignments.map((tid, i) => (set2.has(i) ? trackId : tid))
+      commit({ ...project, assignments })
+    },
+
+    updateLeds: (indices, patch) => {
+      const set2 = new Set(indices)
+      set((s) => ({ leds: s.leds.map((p, i) => (set2.has(i) ? { ...p, ...patch } : p)) }))
+    },
+
+    applyArrangement: (leds) => {
+      const { project, raster } = get()
+      const fallback = project.tracks[0]?.id ?? ''
+      const assignments = leds.map((_, i) => project.assignments[i] ?? fallback)
+      const next = { ...project, assignments }
+      set((s) => ({
+        leds,
+        project: next,
+        selection: s.selection.filter((i) => i < leds.length),
+        raster: bakeProject(next, leds.length, raster.numFrames, raster.fps),
+      }))
+    },
+
     selectTrack: (id) => set({ selectedTrack: id }),
-    selectLed: (i) => set({ selectedLed: i }),
+    selectLed: (i, additive = false) =>
+      set((s) => {
+        if (!additive) return { selection: [i] }
+        return { selection: s.selection.includes(i) ? s.selection.filter((x) => x !== i) : [...s.selection, i] }
+      }),
+    setSelection: (indices) => set({ selection: indices }),
+    clearSelection: () => set({ selection: [] }),
 
     play: () => set({ playing: true }),
     pause: () => set({ playing: false }),

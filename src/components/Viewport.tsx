@@ -4,6 +4,7 @@ import { GizmoHelper, GizmoViewport, OrbitControls } from '@react-three/drei'
 import { MOUSE, Vector3 } from 'three'
 import { Leds, SelectionMarker } from './Leds'
 import { HOME_DISTANCE, goHome, viewportRefs } from '../viewportControls'
+import { useStore } from '../store'
 
 const HOME_DURATION = 0.5 // seconds
 const easeInOut = (p: number) => (p < 0.5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2)
@@ -80,9 +81,16 @@ function Rig() {
 
 /** The 3D simulation viewport: orbitable camera playing the baked animation. */
 export function Viewport() {
+  const clearSelection = useStore((s) => s.clearSelection)
   return (
     <>
-      <Canvas camera={{ position: [HOME_DISTANCE, HOME_DISTANCE, HOME_DISTANCE], fov: 50 }} dpr={[1, 2]}>
+      <Canvas
+        camera={{ position: [HOME_DISTANCE, HOME_DISTANCE, HOME_DISTANCE], fov: 50 }}
+        dpr={[1, 2]}
+        onPointerMissed={(e) => {
+          if (!(e as PointerEvent).shiftKey) clearSelection()
+        }}
+      >
         <color attach="background" args={['#0b0d12']} />
         <gridHelper args={[20, 20, '#252b3b', '#161a24']} />
         <Leds />

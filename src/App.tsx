@@ -5,6 +5,7 @@ import { Transport } from './components/Transport'
 import { GradientEditor } from './components/GradientEditor'
 import { TrackPanel } from './components/TrackPanel'
 import { TrackInspector } from './components/TrackInspector'
+import { ArrangementPanel } from './components/ArrangementPanel'
 import { LedList } from './components/LedList'
 import { Inspector } from './components/Inspector'
 import { Timeline } from './components/Timeline'
@@ -60,6 +61,9 @@ export default function App() {
       </main>
 
       <aside className="inspector">
+        <Panel title="Arrangement">
+          <ArrangementPanel />
+        </Panel>
         <Panel title="LEDs">
           <LedList />
         </Panel>
