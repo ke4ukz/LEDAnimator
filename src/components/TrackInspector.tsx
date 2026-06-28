@@ -23,7 +23,7 @@ export function TrackInspector() {
       { id: newId('kf'), t: 0, value: track.speed, ease: 'linear' },
       { id: newId('kf'), t: 1, value: track.speed, ease: 'linear' },
     ]
-    setAutomation(track.id, 'speed', { keys, linkEnds: true })
+    setAutomation(track.id, 'speed', { keys, linkEnds: false })
   }
   const removeSpeedAuto = () => {
     const n = track.automations?.speed?.keys.length ?? 0

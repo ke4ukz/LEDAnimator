@@ -34,15 +34,6 @@ export function GradientPreview({
       }
     }
     ctx.putImageData(img, 0, 0)
-
-    // Mark the v = 0.5 sampling path.
-    ctx.strokeStyle = 'rgba(255,255,255,0.55)'
-    ctx.setLineDash([4, 4])
-    ctx.lineWidth = 1
-    ctx.beginPath()
-    ctx.moveTo(0, height / 2)
-    ctx.lineTo(width, height / 2)
-    ctx.stroke()
   }, [gradient, width, height])
 
   return <canvas ref={ref} width={width} height={height} className="grad-preview" />

@@ -10,6 +10,7 @@ import {
   makeStop,
 } from '../gradient'
 import { GradientPreview } from './GradientPreview'
+import { PathOverlay } from './PathOverlay'
 import { RampEditor } from './RampEditor'
 
 const DEG = 180 / Math.PI
@@ -54,14 +55,18 @@ export function GradientEditor() {
   const source = project.sources.find((s) => s.id === track?.sourceId)
   const gradient = source?.gradient
 
-  if (!gradient) return <p className="placeholder">Select a track to edit its source.</p>
+  if (!track || !gradient) return <p className="placeholder">Select a track to edit its source.</p>
 
   // Spread-and-cast patch: the discriminated union keeps the active variant.
   const patch = (p: Partial<Gradient>) => setGradient({ ...gradient, ...p } as Gradient)
 
   return (
     <div className="grad-editor">
-      <GradientPreview gradient={gradient} />
+      <div className="preview-wrap">
+        <GradientPreview gradient={gradient} />
+        <PathOverlay track={track} />
+      </div>
+      <span className="muted preview-hint">Drag the handles to edit this track's sampling path.</span>
 
       <Row label="Preset">
         <select
