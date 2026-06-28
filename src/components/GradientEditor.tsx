@@ -18,6 +18,7 @@ const TYPES: { value: Gradient['type']; label: string }[] = [
   { value: 'radial', label: 'Radial' },
   { value: 'conic', label: 'Conic' },
   { value: 'dualRadial', label: 'Dual radial' },
+  { value: 'noise', label: 'Noise / flicker' },
   { value: 'bilinear', label: 'Bilinear (corners)' },
 ]
 
@@ -37,6 +38,8 @@ function withType(g: Gradient, type: Gradient['type']): Gradient {
     case 'conic': return { type, cx: 0.5, cy: 0.5, angle: 0, interp, stops }
     case 'dualRadial':
       return { type, c1x: 0.25, c1y: 0.5, c2x: 0.75, c2y: 0.5, radius: 0.5, combine: 'nearest', interp, stops }
+    case 'noise':
+      return { type, scale: 12, octaves: 3, seed: 1337, interp, stops }
     case 'bilinear':
       return { type, interp, tl: [230, 40, 90], tr: [250, 210, 40], bl: [40, 90, 230], br: [40, 220, 140] }
   }
@@ -131,6 +134,25 @@ export function GradientEditor() {
               <option value="blend">Blend (soft basin)</option>
               <option value="difference">Difference (curved)</option>
             </select>
+          </Row>
+        </>
+      )}
+
+      {gradient.type === 'noise' && (
+        <>
+          <Row label="Scale">
+            <input type="range" min={1} max={40} step={1} value={gradient.scale} onChange={(e) => patch({ scale: Number(e.target.value) })} />
+            <span className="muted">{gradient.scale}</span>
+          </Row>
+          <Row label="Octaves">
+            <input type="range" min={1} max={5} step={1} value={gradient.octaves} onChange={(e) => patch({ octaves: Number(e.target.value) })} />
+            <span className="muted">{gradient.octaves}</span>
+          </Row>
+          <Row label="Seed">
+            <span className="muted">{gradient.seed}</span>
+            <button className="btn" onClick={() => patch({ seed: Math.floor(Math.random() * 1e9) })}>
+              Randomize
+            </button>
           </Row>
         </>
       )}

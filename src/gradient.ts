@@ -28,12 +28,58 @@ export type Gradient =
       radius: number
       combine: DualCombine
     } & RampBased)
+  | ({ type: 'noise'; scale: number; octaves: number; seed: number } & RampBased)
   | { type: 'bilinear'; tl: RGB; tr: RGB; bl: RGB; br: RGB; interp: InterpSpace }
 
 const TAU = Math.PI * 2
 const clamp01 = (x: number) => (x < 0 ? 0 : x > 1 ? 1 : x)
 const dist = (dx: number, dy: number, metric: RadialMetric) =>
   metric === 'chebyshev' ? Math.max(Math.abs(dx), Math.abs(dy)) : Math.hypot(dx, dy)
+
+// ---- Tileable value noise (for the flicker field) -----------------------
+
+/** Integer hash → [0,1). */
+function hash2(ix: number, iy: number, seed: number): number {
+  let h = (ix * 374761393 + iy * 668265263 + seed * 0x9e3779b1) | 0
+  h = Math.imul(h ^ (h >>> 13), 1274126177)
+  h ^= h >>> 16
+  return (h >>> 0) / 4294967296
+}
+
+const fade = (t: number) => t * t * t * (t * (t * 6 - 15) + 10)
+
+/** Value noise that tiles over [0,1) with integer period `freq`. */
+function valueNoise(u: number, v: number, freq: number, seed: number): number {
+  const x = u * freq
+  const y = v * freq
+  const x0 = Math.floor(x)
+  const y0 = Math.floor(y)
+  const fx = fade(x - x0)
+  const fy = fade(y - y0)
+  const wrap = (n: number) => ((n % freq) + freq) % freq
+  const X0 = wrap(x0)
+  const X1 = wrap(x0 + 1)
+  const Y0 = wrap(y0)
+  const Y1 = wrap(y0 + 1)
+  const nx0 = hash2(X0, Y0, seed) + (hash2(X1, Y0, seed) - hash2(X0, Y0, seed)) * fx
+  const nx1 = hash2(X0, Y1, seed) + (hash2(X1, Y1, seed) - hash2(X0, Y1, seed)) * fx
+  return nx0 + (nx1 - nx0) * fy
+}
+
+/** Fractal (multi-octave) tileable value noise in [0,1]. */
+function fbm(u: number, v: number, baseFreq: number, octaves: number, seed: number): number {
+  let sum = 0
+  let amp = 1
+  let norm = 0
+  let f = Math.max(1, Math.round(baseFreq))
+  for (let o = 0; o < octaves; o++) {
+    sum += amp * valueNoise(u, v, f, seed + o * 101)
+    norm += amp
+    amp *= 0.5
+    f *= 2
+  }
+  return sum / norm
+}
 
 /** Map (u,v) to a ramp parameter t in [0,1] for field-based gradients. */
 function fieldT(g: Gradient, u: number, v: number): number {
@@ -59,6 +105,10 @@ function fieldT(g: Gradient, u: number, v: number): number {
       if (g.combine === 'blend') return clamp01((d1 + d2) / 2 / r)
       return clamp01(0.5 + (d1 - d2) / (2 * r)) // difference
     }
+    case 'noise':
+      // Expand contrast around 0.5: fbm averages to the middle, so stretch it
+      // to recover full dark/bright flicker pops (clipping at the extremes).
+      return clamp01((fbm(u, v, g.scale, g.octaves, g.seed) - 0.5) * 1.7 + 0.5)
     default:
       return 0
   }
@@ -155,6 +205,20 @@ export const PRESETS: GradientPreset[] = [
     make: () => ({
       type: 'bilinear', interp: 'oklch',
       tl: [230, 40, 90], tr: [250, 210, 40], bl: [40, 90, 230], br: [40, 220, 140],
+    }),
+  },
+  {
+    name: 'Flame flicker',
+    make: () => ({
+      type: 'noise', scale: 12, octaves: 3, seed: 1337, interp: 'oklch',
+      stops: [
+        makeStop(0, [8, 0, 0]),
+        makeStop(0.3, [120, 14, 0]),
+        makeStop(0.55, [230, 50, 0]),
+        makeStop(0.75, [255, 130, 15]),
+        makeStop(0.9, [255, 205, 60]),
+        makeStop(1, [255, 245, 200]),
+      ],
     }),
   },
 ]
