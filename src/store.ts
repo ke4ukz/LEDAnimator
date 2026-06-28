@@ -1,65 +1,142 @@
 import { create } from 'zustand'
 import type { LedPosition, Raster } from './types'
 import { ringArrangement } from './demo'
-import { type Gradient, defaultGradient } from './gradient'
-import { bakeGradientRaster } from './bake'
+import type { Gradient } from './gradient'
+import { defaultGradient } from './gradient'
+import {
+  type Project,
+  type Source,
+  type Track,
+  defaultLinePath,
+  defaultProject,
+  newId,
+} from './project'
+import { bakeProject } from './bake'
 
 interface AppState {
-  /** 3D positions of every LED. Index === LED index in the raster. */
   leds: LedPosition[]
-  /** The active, non-destructive gradient source. */
-  gradient: Gradient
-  /** The baked animation currently loaded into the emulator. */
+  project: Project
   raster: Raster
-  /** Current frame index being displayed. */
   frame: number
-  /** Whether the fixed-rate player is advancing frames. */
   playing: boolean
-  /** Index of the LED selected in the list / inspector, if any. */
   selectedLed: number | null
+  selectedTrack: string | null
 
-  /** Replace the gradient and re-bake the raster (live, non-destructive). */
-  setGradient: (g: Gradient) => void
+  // Track / source editing (all re-bake the raster).
+  updateGradient: (g: Gradient) => void
+  addTrack: () => void
+  deleteTrack: (id: string) => void
+  updateTrack: (id: string, patch: Partial<Track>) => void
+  assignLed: (led: number, trackId: string) => void
+
+  selectTrack: (id: string | null) => void
   selectLed: (i: number | null) => void
 
   play: () => void
   pause: () => void
   togglePlay: () => void
   setFrame: (frame: number) => void
-  /** Advance by `n` frames (wrapping when the raster loops). */
   advance: (n: number) => void
 }
 
 const DEMO_LEDS = 24
 const demoLeds = ringArrangement(DEMO_LEDS)
-const initialGradient = defaultGradient()
+const initialProject = defaultProject(DEMO_LEDS)
 
-export const useStore = create<AppState>((set, get) => ({
-  leds: demoLeds,
-  gradient: initialGradient,
-  raster: bakeGradientRaster(initialGradient, DEMO_LEDS),
-  frame: 0,
-  playing: true,
-  selectedLed: 0,
-
-  selectLed: (i) => set({ selectedLed: i }),
-
-  setGradient: (g) => {
+export const useStore = create<AppState>((set, get) => {
+  /** Re-bake the raster from the current project, preserving frames/fps. */
+  const rebake = (project: Project): Raster => {
     const { leds, raster } = get()
-    set({ gradient: g, raster: bakeGradientRaster(g, leds.length, raster.numFrames, raster.fps) })
-  },
+    return bakeProject(project, leds.length, raster.numFrames, raster.fps)
+  }
+  const commit = (project: Project) => set({ project, raster: rebake(project) })
 
-  play: () => set({ playing: true }),
-  pause: () => set({ playing: false }),
-  togglePlay: () => set((s) => ({ playing: !s.playing })),
-  setFrame: (frame) => set({ frame }),
-  advance: (n) => {
-    const { frame, raster } = get()
-    const next = frame + n
-    set({
-      frame: raster.loop
-        ? ((next % raster.numFrames) + raster.numFrames) % raster.numFrames
-        : Math.max(0, Math.min(raster.numFrames - 1, next)),
-    })
-  },
-}))
+  return {
+    leds: demoLeds,
+    project: initialProject,
+    raster: bakeProject(initialProject, DEMO_LEDS),
+    frame: 0,
+    playing: true,
+    selectedLed: 0,
+    selectedTrack: initialProject.tracks[0]?.id ?? null,
+
+    updateGradient: (g) => {
+      const { project, selectedTrack } = get()
+      const track = project.tracks.find((t) => t.id === selectedTrack)
+      if (!track) return
+      const sources = project.sources.map((s) =>
+        s.id === track.sourceId ? { ...s, gradient: g } : s,
+      )
+      commit({ ...project, sources })
+    },
+
+    addTrack: () => {
+      const { project } = get()
+      const source: Source = {
+        id: newId('src'),
+        name: `Source ${project.sources.length + 1}`,
+        kind: 'gradient',
+        gradient: defaultGradient(),
+      }
+      const track: Track = {
+        id: newId('trk'),
+        name: `Track ${project.tracks.length + 1}`,
+        sourceId: source.id,
+        path: defaultLinePath(),
+        speed: 1,
+        offset: 0,
+        chase: 0,
+      }
+      const next = {
+        ...project,
+        sources: [...project.sources, source],
+        tracks: [...project.tracks, track],
+      }
+      set({ selectedTrack: track.id })
+      commit(next)
+    },
+
+    deleteTrack: (id) => {
+      const { project } = get()
+      if (project.tracks.length <= 1) return // keep at least one
+      const tracks = project.tracks.filter((t) => t.id !== id)
+      const removed = project.tracks.find((t) => t.id === id)
+      const fallback = tracks[0].id
+      // Drop the track's now-orphaned source and reassign its LEDs.
+      const sources = project.sources.filter((s) => s.id !== removed?.sourceId)
+      const assignments = project.assignments.map((tid) => (tid === id ? fallback : tid))
+      set((st) => ({ selectedTrack: st.selectedTrack === id ? fallback : st.selectedTrack }))
+      commit({ sources, tracks, assignments })
+    },
+
+    updateTrack: (id, patch) => {
+      const { project } = get()
+      const tracks = project.tracks.map((t) => (t.id === id ? { ...t, ...patch } : t))
+      commit({ ...project, tracks })
+    },
+
+    assignLed: (led, trackId) => {
+      const { project } = get()
+      const assignments = project.assignments.slice()
+      assignments[led] = trackId
+      commit({ ...project, assignments })
+    },
+
+    selectTrack: (id) => set({ selectedTrack: id }),
+    selectLed: (i) => set({ selectedLed: i }),
+
+    play: () => set({ playing: true }),
+    pause: () => set({ playing: false }),
+    togglePlay: () => set((s) => ({ playing: !s.playing })),
+    setFrame: (frame) => set({ frame }),
+    advance: (n) => {
+      const { frame, raster } = get()
+      const next = frame + n
+      set({
+        frame: raster.loop
+          ? ((next % raster.numFrames) + raster.numFrames) % raster.numFrames
+          : Math.max(0, Math.min(raster.numFrames - 1, next)),
+      })
+    },
+  }
+})

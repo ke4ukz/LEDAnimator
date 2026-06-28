@@ -2,6 +2,8 @@ import type { ReactNode } from 'react'
 import { Viewport } from './components/Viewport'
 import { Transport } from './components/Transport'
 import { GradientEditor } from './components/GradientEditor'
+import { TrackPanel } from './components/TrackPanel'
+import { TrackInspector } from './components/TrackInspector'
 import { LedList } from './components/LedList'
 import { Inspector } from './components/Inspector'
 import { Timeline } from './components/Timeline'
@@ -24,11 +26,11 @@ export default function App() {
       </header>
 
       <aside className="sidebar">
+        <Panel title="Tracks">
+          <TrackPanel />
+        </Panel>
         <Panel title="Source · Gradient">
           <GradientEditor />
-        </Panel>
-        <Panel title="Arrangement · LEDs">
-          <LedList />
         </Panel>
       </aside>
 
@@ -37,7 +39,13 @@ export default function App() {
       </main>
 
       <aside className="inspector">
-        <Panel title="Inspector">
+        <Panel title="Track">
+          <TrackInspector />
+        </Panel>
+        <Panel title="LEDs">
+          <LedList />
+        </Panel>
+        <Panel title="Selected LED">
           <Inspector />
         </Panel>
       </aside>

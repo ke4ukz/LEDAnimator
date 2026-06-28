@@ -1,21 +1,47 @@
 import { useEffect, useRef } from 'react'
 import { useStore } from '../store'
-import { evalGradient } from '../gradient'
+import { type Source, type Track, evalSource, pathPoint } from '../project'
 
 const STRIP_W = 600
-const STRIP_H = 40
+const STRIP_H = 36
+const frac = (x: number) => x - Math.floor(x)
 
-/**
- * Minimal timeline: one lane for the current (single, implicit) track, showing
- * the gradient's sampled strip with a live playhead. Real multi-track editing
- * arrives with the track system.
- */
+/** One lane per track: the source sampled along the track's path, with a playhead. */
 export function Timeline() {
-  const gradient = useStore((s) => s.gradient)
+  const tracks = useStore((s) => s.project.tracks)
+  const sources = useStore((s) => s.project.sources)
+  const selectTrack = useStore((s) => s.selectTrack)
+  const selected = useStore((s) => s.selectedTrack)
+
+  return (
+    <div className="timeline-lanes">
+      {tracks.map((t) => {
+        const source = sources.find((s) => s.id === t.sourceId)
+        if (!source) return null
+        return (
+          <Lane
+            key={t.id}
+            track={t}
+            source={source}
+            selected={t.id === selected}
+            onSelect={() => selectTrack(t.id)}
+          />
+        )
+      })}
+    </div>
+  )
+}
+
+function Lane({
+  track, source, selected, onSelect,
+}: {
+  track: Track; source: Source; selected: boolean; onSelect: () => void
+}) {
   const frame = useStore((s) => s.frame)
   const raster = useStore((s) => s.raster)
   const canvasRef = useRef<HTMLCanvasElement>(null)
 
+  // Repaint the strip: the source sampled along the path over s ∈ [0,1).
   useEffect(() => {
     const canvas = canvasRef.current
     if (!canvas) return
@@ -23,7 +49,8 @@ export function Timeline() {
     if (!ctx) return
     const img = ctx.createImageData(STRIP_W, 1)
     for (let x = 0; x < STRIP_W; x++) {
-      const [r, g, b] = evalGradient(gradient, x / (STRIP_W - 1), 0.5)
+      const [u, v] = pathPoint(track.path, x / STRIP_W)
+      const [r, g, b] = evalSource(source, u, v)
       const i = x * 4
       img.data[i] = r
       img.data[i + 1] = g
@@ -33,24 +60,21 @@ export function Timeline() {
     ctx.putImageData(img, 0, 0)
     ctx.imageSmoothingEnabled = false
     ctx.drawImage(canvas, 0, 0, STRIP_W, 1, 0, 0, STRIP_W, STRIP_H)
-  }, [gradient])
+  }, [track.path, source])
 
-  const playheadPct = (frame / raster.numFrames) * 100
+  // Playhead = where the lead LED (order 0) reads right now.
+  const s0 = frac(track.offset + (frame / raster.numFrames) * track.speed)
 
   return (
-    <div className="timeline-lanes">
-      <div className="lane">
-        <div className="lane-label">
-          <span className="dot" />
-          Track 1
-          <span className="muted">gradient · all LEDs</span>
-        </div>
-        <div className="lane-strip">
-          <canvas ref={canvasRef} width={STRIP_W} height={STRIP_H} className="lane-canvas" />
-          <div className="playhead" style={{ left: `${playheadPct}%` }} />
-        </div>
+    <div className={`lane${selected ? ' sel' : ''}`} onClick={onSelect}>
+      <div className="lane-label">
+        <span className="dot" />
+        {track.name}
       </div>
-      <div className="lane add-lane muted">+ Add track (coming with the track system)</div>
+      <div className="lane-strip">
+        <canvas ref={canvasRef} width={STRIP_W} height={STRIP_H} className="lane-canvas" />
+        <div className="playhead" style={{ left: `${s0 * 100}%` }} />
+      </div>
     </div>
   )
 }

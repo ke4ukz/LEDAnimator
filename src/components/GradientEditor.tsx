@@ -43,8 +43,15 @@ function withType(g: Gradient, type: Gradient['type']): Gradient {
 }
 
 export function GradientEditor() {
-  const gradient = useStore((s) => s.gradient)
-  const setGradient = useStore((s) => s.setGradient)
+  const project = useStore((s) => s.project)
+  const selectedTrack = useStore((s) => s.selectedTrack)
+  const setGradient = useStore((s) => s.updateGradient)
+
+  const track = project.tracks.find((t) => t.id === selectedTrack)
+  const source = project.sources.find((s) => s.id === track?.sourceId)
+  const gradient = source?.gradient
+
+  if (!gradient) return <p className="placeholder">Select a track to edit its source.</p>
 
   // Spread-and-cast patch: the discriminated union keeps the active variant.
   const patch = (p: Partial<Gradient>) => setGradient({ ...gradient, ...p } as Gradient)

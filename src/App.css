@@ -438,3 +438,102 @@ input[type='color'] {
   border-radius: 6px;
   padding: 8px 12px;
 }
+
+/* Track panel */
+.track-list {
+  list-style: none;
+  margin: 0 0 8px;
+  padding: 0;
+}
+
+.track-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  border-radius: 5px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.track-list li:hover {
+  background: var(--panel-2);
+}
+
+.track-list li.sel {
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  outline: 1px solid var(--accent);
+}
+
+.track-list .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  flex: 0 0 auto;
+}
+
+.track-list .t-name {
+  font-weight: 600;
+}
+
+.track-list .muted {
+  margin-left: auto;
+}
+
+.track-list .x {
+  background: none;
+  border: none;
+  color: var(--muted);
+  font-size: 16px;
+  line-height: 1;
+  padding: 0 2px;
+}
+
+.track-list .x:hover:not(:disabled) {
+  color: #e0586b;
+}
+
+.track-list .x:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.add-track {
+  width: 100%;
+}
+
+/* Track inspector */
+.track-insp {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.track-insp .text {
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 3px 6px;
+  font: inherit;
+  font-size: 12px;
+  width: 130px;
+}
+
+.track-insp .sep {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 4px 0;
+}
+
+/* LED assignment dropdown */
+.led-track {
+  margin-left: auto;
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 11px;
+  padding: 1px 4px;
+}

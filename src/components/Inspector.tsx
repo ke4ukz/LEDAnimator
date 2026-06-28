@@ -8,6 +8,7 @@ export function Inspector() {
   const leds = useStore((s) => s.leds)
   const raster = useStore((s) => s.raster)
   const frame = useStore((s) => s.frame)
+  const project = useStore((s) => s.project)
 
   if (sel == null || !leds[sel]) {
     return <p className="placeholder">Select an LED in the list to inspect it.</p>
@@ -15,6 +16,7 @@ export function Inspector() {
 
   const p = leds[sel]
   const color = sampleRaster(raster, Math.min(frame, raster.numFrames - 1), sel)
+  const trackName = project.tracks.find((t) => t.id === project.assignments[sel])?.name ?? 'unassigned'
 
   return (
     <div className="inspector-body">
@@ -28,7 +30,7 @@ export function Inspector() {
       </div>
       <div className="insp-row">
         <span className="muted">Track</span>
-        <span>Track 1 (gradient)</span>
+        <span>{trackName}</span>
       </div>
       <div className="insp-row">
         <span className="muted">Color @ frame {frame}</span>
