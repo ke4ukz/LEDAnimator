@@ -2,6 +2,9 @@ import type { ReactNode } from 'react'
 import { Viewport } from './components/Viewport'
 import { Transport } from './components/Transport'
 import { GradientEditor } from './components/GradientEditor'
+import { LedList } from './components/LedList'
+import { Inspector } from './components/Inspector'
+import { Timeline } from './components/Timeline'
 import { usePlayer } from './usePlayer'
 import './App.css'
 
@@ -24,8 +27,8 @@ export default function App() {
         <Panel title="Source · Gradient">
           <GradientEditor />
         </Panel>
-        <Panel title="Arrangement">
-          <p className="placeholder">Place LEDs in 3D (presets + manual).</p>
+        <Panel title="Arrangement · LEDs">
+          <LedList />
         </Panel>
       </aside>
 
@@ -35,13 +38,13 @@ export default function App() {
 
       <aside className="inspector">
         <Panel title="Inspector">
-          <p className="placeholder">Select a track or LED to edit its parameters.</p>
+          <Inspector />
         </Panel>
       </aside>
 
       <footer className="timeline">
         <Transport />
-        <div className="lanes placeholder">Track lanes &amp; speed-automation go here.</div>
+        <Timeline />
       </footer>
     </div>
   )

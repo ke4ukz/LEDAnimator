@@ -47,3 +47,17 @@ export function Leds() {
     </instancedMesh>
   )
 }
+
+/** A wireframe ring around the currently selected LED. */
+export function SelectionMarker() {
+  const leds = useStore((s) => s.leds)
+  const selected = useStore((s) => s.selectedLed)
+  if (selected == null || !leds[selected]) return null
+  const p = leds[selected]
+  return (
+    <mesh position={[p.x, p.y, p.z]}>
+      <sphereGeometry args={[0.5, 20, 20]} />
+      <meshBasicMaterial color="#ffffff" wireframe toneMapped={false} />
+    </mesh>
+  )
+}

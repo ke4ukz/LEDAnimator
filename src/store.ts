@@ -15,9 +15,12 @@ interface AppState {
   frame: number
   /** Whether the fixed-rate player is advancing frames. */
   playing: boolean
+  /** Index of the LED selected in the list / inspector, if any. */
+  selectedLed: number | null
 
   /** Replace the gradient and re-bake the raster (live, non-destructive). */
   setGradient: (g: Gradient) => void
+  selectLed: (i: number | null) => void
 
   play: () => void
   pause: () => void
@@ -37,6 +40,9 @@ export const useStore = create<AppState>((set, get) => ({
   raster: bakeGradientRaster(initialGradient, DEMO_LEDS),
   frame: 0,
   playing: true,
+  selectedLed: 0,
+
+  selectLed: (i) => set({ selectedLed: i }),
 
   setGradient: (g) => {
     const { leds, raster } = get()
