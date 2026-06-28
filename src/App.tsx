@@ -50,6 +50,9 @@ export default function App() {
         <Panel title="Source · Gradient">
           <GradientEditor />
         </Panel>
+        <Panel title="Track properties">
+          <TrackInspector />
+        </Panel>
       </aside>
 
       <main className="viewport">
@@ -57,13 +60,10 @@ export default function App() {
       </main>
 
       <aside className="inspector">
-        <Panel title="Track">
-          <TrackInspector />
-        </Panel>
         <Panel title="LEDs">
           <LedList />
         </Panel>
-        <Panel title="Selected LED">
+        <Panel title="LED properties">
           <Inspector />
         </Panel>
       </aside>

@@ -8,7 +8,7 @@ import { type Gradient, evalGradient } from '../gradient'
 export function GradientPreview({
   gradient,
   width = 224,
-  height = 120,
+  height = 224,
 }: {
   gradient: Gradient
   width?: number

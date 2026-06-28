@@ -3,6 +3,7 @@ import { useStore } from '../store'
 import { type PathDef, type Track, pathPoint } from '../project'
 
 const clamp01 = (x: number) => (x < 0 ? 0 : x > 1 ? 1 : x)
+const clamp = (x: number, lo: number, hi: number) => (x < lo ? lo : x > hi ? hi : x)
 
 interface Handle {
   id: string
@@ -34,19 +35,28 @@ export function PathOverlay({ track }: { track: Track }) {
     const { u, v } = fromEvent(e)
     if (path.type === 'line') {
       setPath(id === 'a' ? { ...path, x0: u, y0: v } : { ...path, x1: u, y1: v })
-    } else if (path.type === 'circle') {
-      setPath(id === 'c' ? { ...path, cx: u, cy: v } : { ...path, r: Math.hypot(u - path.cx, v - path.cy) })
+    } else if (path.type === 'ellipse') {
+      if (id === 'c') setPath({ ...path, cx: u, cy: v })
+      else if (id === 'rx') setPath({ ...path, rx: Math.abs(u - path.cx) })
+      else setPath({ ...path, ry: Math.abs(v - path.cy) })
     } else {
-      setPath(id === 'mid' ? { ...path, midV: v } : { ...path, amp: clamp01(Math.abs(v - path.midV)) })
+      // sine: bias node sets vertical (midV) and horizontal (phase);
+      // amplitude is signed so dragging past the midline flips the wave.
+      if (id === 'mid') setPath({ ...path, midV: v, phase: clamp01(u) })
+      else setPath({ ...path, amp: clamp(path.midV - v, -1, 1) })
     }
   }
 
   const handles: Handle[] =
     path.type === 'line'
       ? [{ id: 'a', u: path.x0, v: path.y0 }, { id: 'b', u: path.x1, v: path.y1 }]
-      : path.type === 'circle'
-        ? [{ id: 'c', u: path.cx, v: path.cy }, { id: 'r', u: clamp01(path.cx + path.r), v: path.cy }]
-        : [{ id: 'mid', u: 0.5, v: path.midV }, { id: 'amp', u: 0.25, v: clamp01(path.midV - path.amp) }]
+      : path.type === 'ellipse'
+        ? [
+            { id: 'c', u: path.cx, v: path.cy },
+            { id: 'rx', u: clamp01(path.cx + path.rx), v: path.cy },
+            { id: 'ry', u: path.cx, v: clamp01(path.cy + path.ry) },
+          ]
+        : [{ id: 'mid', u: clamp01(path.phase), v: path.midV }, { id: 'amp', u: 0.25, v: clamp01(path.midV - path.amp) }]
 
   const curve = Array.from({ length: 65 }, (_, i) => {
     const [u, v] = pathPoint(path, i / 64)

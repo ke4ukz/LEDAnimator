@@ -20,7 +20,7 @@ export type Source = GradientSource
 export type PathDef =
   | { type: 'line'; x0: number; y0: number; x1: number; y1: number }
   | { type: 'sine'; midV: number; amp: number; freq: number; phase: number }
-  | { type: 'circle'; cx: number; cy: number; r: number }
+  | { type: 'ellipse'; cx: number; cy: number; rx: number; ry: number }
 
 /** Easing of the segment leaving a keyframe toward the next one. */
 export type EaseType = 'linear' | 'smooth' | 'hold'
@@ -64,9 +64,9 @@ export function pathPoint(path: PathDef, s: number): [number, number] {
       return [path.x0 + (path.x1 - path.x0) * s, path.y0 + (path.y1 - path.y0) * s]
     case 'sine':
       return [s, path.midV + path.amp * Math.sin(2 * Math.PI * (path.freq * s + path.phase))]
-    case 'circle': {
+    case 'ellipse': {
       const a = 2 * Math.PI * s
-      return [path.cx + path.r * Math.cos(a), path.cy + path.r * Math.sin(a)]
+      return [path.cx + path.rx * Math.cos(a), path.cy + path.ry * Math.sin(a)]
     }
   }
 }

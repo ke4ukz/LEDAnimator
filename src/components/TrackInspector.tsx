@@ -45,8 +45,11 @@ export function TrackInspector() {
         >
           <option value="line">Line</option>
           <option value="sine">Sine</option>
-          <option value="circle">Circle</option>
+          <option value="ellipse">Ellipse</option>
         </select>
+        <button className="btn" title="Reset this path to its defaults" onClick={() => setPath(pathOfType(track.path.type))}>
+          Reset
+        </button>
       </Row>
 
       {track.path.type === 'line' && (
@@ -60,16 +63,17 @@ export function TrackInspector() {
       {track.path.type === 'sine' && (
         <>
           <Num label="Mid Y" value={track.path.midV} onChange={(midV) => setPath({ ...track.path, midV } as PathDef)} />
-          <Num label="Amplitude" value={track.path.amp} onChange={(amp) => setPath({ ...track.path, amp } as PathDef)} />
+          <Num label="Amplitude" value={track.path.amp} min={-1} max={1} onChange={(amp) => setPath({ ...track.path, amp } as PathDef)} />
           <Num label="Frequency" value={track.path.freq} min={0} max={8} step={0.25} onChange={(freq) => setPath({ ...track.path, freq } as PathDef)} />
           <Num label="Phase" value={track.path.phase} onChange={(phase) => setPath({ ...track.path, phase } as PathDef)} />
         </>
       )}
-      {track.path.type === 'circle' && (
+      {track.path.type === 'ellipse' && (
         <>
           <Num label="Center X" value={track.path.cx} onChange={(cx) => setPath({ ...track.path, cx } as PathDef)} />
           <Num label="Center Y" value={track.path.cy} onChange={(cy) => setPath({ ...track.path, cy } as PathDef)} />
-          <Num label="Radius" value={track.path.r} onChange={(r) => setPath({ ...track.path, r } as PathDef)} />
+          <Num label="Radius X" value={track.path.rx} onChange={(rx) => setPath({ ...track.path, rx } as PathDef)} />
+          <Num label="Radius Y" value={track.path.ry} onChange={(ry) => setPath({ ...track.path, ry } as PathDef)} />
         </>
       )}
 
@@ -121,7 +125,7 @@ function pathOfType(type: PathDef['type']): PathDef {
   switch (type) {
     case 'line': return { type, x0: 0, y0: 0.5, x1: 1, y1: 0.5 }
     case 'sine': return { type, midV: 0.5, amp: 0.4, freq: 1, phase: 0 }
-    case 'circle': return { type, cx: 0.5, cy: 0.5, r: 0.4 }
+    case 'ellipse': return { type, cx: 0.5, cy: 0.5, rx: 0.4, ry: 0.4 }
   }
 }
 
