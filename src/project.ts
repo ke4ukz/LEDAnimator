@@ -22,6 +22,24 @@ export type PathDef =
   | { type: 'sine'; midV: number; amp: number; freq: number; phase: number }
   | { type: 'circle'; cx: number; cy: number; r: number }
 
+/** Easing of the segment leaving a keyframe toward the next one. */
+export type EaseType = 'linear' | 'smooth' | 'hold'
+
+export interface Keyframe {
+  id: string
+  /** Time within the loop, 0-1. */
+  t: number
+  value: number
+  ease: EaseType
+}
+
+export interface Automation {
+  keys: Keyframe[] // kept sorted by t
+}
+
+/** Track scalars that can be animated with an automation lane. */
+export type AutoParam = 'speed' | 'offset' | 'chase'
+
 export interface Track {
   id: string
   name: string
@@ -33,9 +51,9 @@ export interface Track {
   offset: number
   /** Per-LED stagger along the path (fraction). 0 = synchronized. */
   chase: number
+  /** Optional per-parameter automation; when present it overrides the scalar. */
+  automations?: Partial<Record<AutoParam, Automation>>
 }
-
-const frac = (x: number) => x - Math.floor(x)
 
 /** Evaluate a path at parameter s, returning normalized (u, v). */
 export function pathPoint(path: PathDef, s: number): [number, number] {
@@ -55,20 +73,45 @@ export function evalSource(source: Source, u: number, v: number): RGB {
   return evalGradient(source.gradient, u, v)
 }
 
+function applyEase(ease: EaseType, x: number): number {
+  if (ease === 'hold') return 0 // value stays at the segment's start until the next key
+  if (ease === 'smooth') return x * x * (3 - 2 * x)
+  return x
+}
+
+/** Evaluate an automation curve at time t (0-1). Flat outside the key range. */
+export function evalAutomation(auto: Automation, t: number): number {
+  const k = auto.keys
+  if (k.length === 0) return 0
+  if (t <= k[0].t) return k[0].value
+  if (t >= k[k.length - 1].t) return k[k.length - 1].value
+  for (let i = 0; i < k.length - 1; i++) {
+    const a = k[i]
+    const b = k[i + 1]
+    if (t >= a.t && t <= b.t) {
+      const span = b.t - a.t
+      const local = span === 0 ? 0 : (t - a.t) / span
+      return a.value + (b.value - a.value) * applyEase(a.ease, local)
+    }
+  }
+  return k[k.length - 1].value
+}
+
+/** A track parameter at time t: the automation curve if animated, else the scalar. */
+export function trackParamAt(track: Track, param: AutoParam, t: number): number {
+  const auto = track.automations?.[param]
+  if (auto && auto.keys.length) return evalAutomation(auto, t)
+  return track[param]
+}
+
 /**
- * Sample one LED's color for a frame: walk the track's path by time (speed) and
- * the LED's order within the track (chase), then read the source there.
+ * Integrated path phase at a frame: ∫ speed dt. Speed is a rate, so position
+ * accumulates. Matches frame*speed/numFrames when speed is constant.
  */
-export function sampleTrack(
-  source: Source,
-  track: Track,
-  orderInTrack: number,
-  frame: number,
-  numFrames: number,
-): RGB {
-  const s = frac(track.offset + orderInTrack * track.chase + (frame / numFrames) * track.speed)
-  const [u, v] = pathPoint(track.path, s)
-  return evalSource(source, u, v)
+export function trackPhaseAt(track: Track, frame: number, numFrames: number): number {
+  let acc = 0
+  for (let f = 0; f < frame; f++) acc += trackParamAt(track, 'speed', f / numFrames) / numFrames
+  return acc
 }
 
 // ---- ids + defaults -----------------------------------------------------

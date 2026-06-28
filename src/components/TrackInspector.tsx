@@ -1,12 +1,13 @@
 import type { ReactNode } from 'react'
 import { useStore } from '../store'
-import type { PathDef, Track } from '../project'
+import { type Keyframe, type PathDef, type Track, newId } from '../project'
 
 /** Edits the selected track: name, sampling path, speed, offset, chase. */
 export function TrackInspector() {
   const project = useStore((s) => s.project)
   const selected = useStore((s) => s.selectedTrack)
   const updateTrack = useStore((s) => s.updateTrack)
+  const setAutomation = useStore((s) => s.setAutomation)
   const assignments = useStore((s) => s.project.assignments)
 
   const track = project.tracks.find((t) => t.id === selected)
@@ -15,6 +16,19 @@ export function TrackInspector() {
   const memberCount = assignments.filter((id) => id === track.id).length
   const set = (patch: Partial<Track>) => updateTrack(track.id, patch)
   const setPath = (path: PathDef) => set({ path })
+
+  const speedAnimated = !!track.automations?.speed
+  const animateSpeed = () => {
+    const keys: Keyframe[] = [
+      { id: newId('kf'), t: 0, value: track.speed, ease: 'linear' },
+      { id: newId('kf'), t: 1, value: track.speed, ease: 'linear' },
+    ]
+    setAutomation(track.id, 'speed', { keys })
+  }
+  const removeSpeedAuto = () => {
+    set({ speed: track.automations?.speed?.keys[0]?.value ?? track.speed })
+    setAutomation(track.id, 'speed', null)
+  }
 
   return (
     <div className="track-insp">
@@ -59,7 +73,26 @@ export function TrackInspector() {
 
       <hr className="sep" />
 
-      <Num label="Speed" value={track.speed} min={-4} max={4} step={0.1} onChange={(speed) => set({ speed })} />
+      <Row label="Speed">
+        {speedAnimated ? (
+          <>
+            <span className="muted">animated · timeline</span>
+            <button className="btn" onClick={removeSpeedAuto}>Remove</button>
+          </>
+        ) : (
+          <>
+            <input
+              type="number"
+              min={-4}
+              max={4}
+              step={0.1}
+              value={Number(track.speed.toFixed(3))}
+              onChange={(e) => set({ speed: Number(e.target.value) })}
+            />
+            <button className="btn" onClick={animateSpeed}>Animate</button>
+          </>
+        )}
+      </Row>
       <Num label="Offset" value={track.offset} onChange={(offset) => set({ offset })} />
       <Row label="Chase">
         <input

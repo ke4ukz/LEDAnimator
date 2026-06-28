@@ -527,6 +527,90 @@ input[type='color'] {
   margin: 4px 0;
 }
 
+/* Lane grouping + speed automation lane */
+.lane-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border-radius: 8px;
+  padding: 2px;
+}
+
+.lane-group.sel {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  outline: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+}
+
+.lane-label.sub {
+  font-size: 11px;
+}
+
+.speed-lane {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.speed-svg {
+  width: 100%;
+  height: 44px;
+  display: block;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  touch-action: none;
+  cursor: copy;
+}
+
+.speed-svg .zero-line {
+  stroke: var(--border);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.speed-svg .speed-curve {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+
+.speed-svg .lane-playhead {
+  stroke: rgba(255, 255, 255, 0.6);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.speed-svg .kf {
+  fill: #fff;
+  stroke: var(--accent);
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+  cursor: grab;
+}
+
+.speed-svg .kf.sel {
+  fill: var(--accent);
+  stroke: #fff;
+}
+
+.speed-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+}
+
+.speed-controls select {
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 2px 5px;
+  font-size: 12px;
+}
+
 /* LED assignment dropdown */
 .led-track {
   margin-left: auto;

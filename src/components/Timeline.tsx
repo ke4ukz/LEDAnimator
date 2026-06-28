@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { useStore } from '../store'
-import { type Source, type Track, evalSource, pathPoint } from '../project'
+import { type Source, type Track, evalSource, pathPoint, trackPhaseAt } from '../project'
+import { SpeedLane } from './SpeedLane'
 
 const STRIP_W = 600
 const STRIP_H = 36
@@ -62,19 +63,29 @@ function Lane({
     ctx.drawImage(canvas, 0, 0, STRIP_W, 1, 0, 0, STRIP_W, STRIP_H)
   }, [track.path, source])
 
-  // Playhead = where the lead LED (order 0) reads right now.
-  const s0 = frac(track.offset + (frame / raster.numFrames) * track.speed)
+  // Playhead = where the lead LED (order 0) reads right now (integrate speed).
+  const s0 = frac(track.offset + trackPhaseAt(track, frame, raster.numFrames))
 
   return (
-    <div className={`lane${selected ? ' sel' : ''}`} onClick={onSelect}>
-      <div className="lane-label">
-        <span className="dot" />
-        {track.name}
+    <div className={`lane-group${selected ? ' sel' : ''}`}>
+      <div className="lane" onClick={onSelect}>
+        <div className="lane-label">
+          <span className="dot" />
+          {track.name}
+        </div>
+        <div className="lane-strip">
+          <canvas ref={canvasRef} width={STRIP_W} height={STRIP_H} className="lane-canvas" />
+          <div className="playhead" style={{ left: `${s0 * 100}%` }} />
+        </div>
       </div>
-      <div className="lane-strip">
-        <canvas ref={canvasRef} width={STRIP_W} height={STRIP_H} className="lane-canvas" />
-        <div className="playhead" style={{ left: `${s0 * 100}%` }} />
-      </div>
+      {selected && track.automations?.speed && (
+        <div className="lane">
+          <div className="lane-label sub">
+            <span className="muted">speed</span>
+          </div>
+          <SpeedLane track={track} />
+        </div>
+      )}
     </div>
   )
 }

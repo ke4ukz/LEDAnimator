@@ -4,6 +4,8 @@ import { ringArrangement } from './demo'
 import type { Gradient } from './gradient'
 import { defaultGradient } from './gradient'
 import {
+  type Automation,
+  type AutoParam,
   type Project,
   type Source,
   type Track,
@@ -27,6 +29,8 @@ interface AppState {
   addTrack: () => void
   deleteTrack: (id: string) => void
   updateTrack: (id: string, patch: Partial<Track>) => void
+  /** Set (or clear, when auto is null) an automation curve for a track param. */
+  setAutomation: (trackId: string, param: AutoParam, auto: Automation | null) => void
   assignLed: (led: number, trackId: string) => void
 
   selectTrack: (id: string | null) => void
@@ -112,6 +116,18 @@ export const useStore = create<AppState>((set, get) => {
     updateTrack: (id, patch) => {
       const { project } = get()
       const tracks = project.tracks.map((t) => (t.id === id ? { ...t, ...patch } : t))
+      commit({ ...project, tracks })
+    },
+
+    setAutomation: (trackId, param, auto) => {
+      const { project } = get()
+      const tracks = project.tracks.map((t) => {
+        if (t.id !== trackId) return t
+        const automations = { ...t.automations }
+        if (auto) automations[param] = auto
+        else delete automations[param]
+        return { ...t, automations }
+      })
       commit({ ...project, tracks })
     },
 
