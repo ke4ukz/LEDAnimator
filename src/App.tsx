@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 import { Viewport } from './components/Viewport'
 import { Transport } from './components/Transport'
+import { GradientEditor } from './components/GradientEditor'
 import { usePlayer } from './usePlayer'
 import './App.css'
 
@@ -20,8 +21,8 @@ export default function App() {
       </header>
 
       <aside className="sidebar">
-        <Panel title="Assets">
-          <p className="placeholder">Upload color-track images here.</p>
+        <Panel title="Source · Gradient">
+          <GradientEditor />
         </Panel>
         <Panel title="Arrangement">
           <p className="placeholder">Place LEDs in 3D (presets + manual).</p>
