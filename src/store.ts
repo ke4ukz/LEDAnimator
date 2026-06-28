@@ -2,7 +2,7 @@ import { create } from 'zustand'
 import type { LedPosition, Raster } from './types'
 import { ringArrangement } from './demo'
 import type { Gradient } from './gradient'
-import { defaultGradient } from './gradient'
+import { defaultGradient } from './presets'
 import {
   type Automation,
   type AutoParam,

@@ -5,10 +5,10 @@ import {
   type DualCombine,
   type Gradient,
   type GradientStop,
-  PRESETS,
   type RadialMetric,
   makeStop,
 } from '../gradient'
+import { PRESETS, instantiateGradient } from '../presets'
 import { GradientPreview } from './GradientPreview'
 import { PathOverlay } from './PathOverlay'
 import { RampEditor } from './RampEditor'
@@ -73,7 +73,7 @@ export function GradientEditor() {
           defaultValue=""
           onChange={(e) => {
             const preset = PRESETS[Number(e.target.value)]
-            if (preset) setGradient(preset.make())
+            if (preset) setGradient(instantiateGradient(preset.gradient))
             e.target.value = ''
           }}
         >

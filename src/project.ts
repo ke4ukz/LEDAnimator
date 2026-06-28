@@ -1,6 +1,7 @@
 import type { RGB } from './types'
-import { type Gradient, defaultGradient } from './gradient'
+import type { Gradient } from './gradient'
 import { evalGradient } from './gradient'
+import { defaultGradient } from './presets'
 
 // Project model: sources (color textures) → tracks (how a group of LEDs samples
 // a source over time) → per-LED assignment. Each LED belongs to exactly one
