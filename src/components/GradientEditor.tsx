@@ -172,11 +172,13 @@ export function GradientEditor() {
 }
 
 function Row({ label, children }: { label: string; children: ReactNode }) {
+  // div, not label: a label wrapping a button (e.g. Randomize) would fire that
+  // button when the row text is clicked.
   return (
-    <label className="field-row">
+    <div className="field-row">
       <span>{label}</span>
       {children}
-    </label>
+    </div>
   )
 }
 

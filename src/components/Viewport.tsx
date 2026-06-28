@@ -54,7 +54,12 @@ export function Viewport() {
         <Rig />
       </Canvas>
       <button className="home-btn" onClick={goHome} title="Reset to default 45°/45° view">
-        ⌂ Home
+        <svg width="17" height="17" viewBox="0 0 24 24" aria-hidden="true">
+          <path
+            d="M12 3 2 12h3v9h6v-6h2v6h6v-9h3z"
+            fill="currentColor"
+          />
+        </svg>
       </button>
     </>
   )

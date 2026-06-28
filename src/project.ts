@@ -35,6 +35,8 @@ export interface Keyframe {
 
 export interface Automation {
   keys: Keyframe[] // kept sorted by t
+  /** Keep the first and last keyframe at the same value so the loop is seamless. */
+  linkEnds?: boolean
 }
 
 /** Track scalars that can be animated with an automation lane. */

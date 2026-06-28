@@ -1,4 +1,5 @@
-import type { ReactNode } from 'react'
+import { type ReactNode, useRef, useState } from 'react'
+import { buildTime, commit } from 'virtual:build-info'
 import { Viewport } from './components/Viewport'
 import { Transport } from './components/Transport'
 import { GradientEditor } from './components/GradientEditor'
@@ -10,19 +11,36 @@ import { Timeline } from './components/Timeline'
 import { usePlayer } from './usePlayer'
 import './App.css'
 
+const clamp = (x: number, lo: number, hi: number) => (x < lo ? lo : x > hi ? hi : x)
+const BUILD = `${commit} · ${new Date(buildTime).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}`
+
 /**
- * App shell: a DAW-style layout — assets/arrangement on the left, the 3D
- * simulation in the center, an inspector on the right, and the timeline across
- * the bottom. Panels beyond the viewport are placeholders for now.
+ * App shell: a DAW-style layout — tracks/source on the left, the 3D simulation
+ * in the center, inspectors on the right, and the timeline across the bottom.
+ * The side panels and timeline are resizable via splitter handles.
  */
 export default function App() {
   usePlayer()
+  const appRef = useRef<HTMLDivElement>(null)
+  const [sidebarW, setSidebarW] = useState(250)
+  const [inspectorW, setInspectorW] = useState(290)
+  const [timelineH, setTimelineH] = useState(220)
+
+  const rect = () => appRef.current!.getBoundingClientRect()
 
   return (
-    <div className="app">
+    <div
+      ref={appRef}
+      className="app"
+      style={{
+        gridTemplateColumns: `${sidebarW}px 1fr ${inspectorW}px`,
+        gridTemplateRows: `44px 1fr ${timelineH}px`,
+      }}
+    >
       <header className="topbar">
         <span className="brand">LED Animator</span>
         <span className="muted">in-browser editor · fixed-rate raster</span>
+        <span className="build" title="loaded build (commit · build time)">build {BUILD}</span>
       </header>
 
       <aside className="sidebar">
@@ -54,7 +72,39 @@ export default function App() {
         <Transport />
         <Timeline />
       </footer>
+
+      <Splitter className="v" style={{ left: sidebarW - 3, top: 44, bottom: timelineH }}
+        onDrag={(x) => setSidebarW(clamp(x - rect().left, 180, 460))} />
+      <Splitter className="v" style={{ right: inspectorW - 3, top: 44, bottom: timelineH }}
+        onDrag={(x) => setInspectorW(clamp(rect().right - x, 200, 540))} />
+      <Splitter className="h" style={{ left: 0, right: 0, bottom: timelineH - 3 }}
+        onDrag={(_x, y) => setTimelineH(clamp(rect().bottom - y, 130, 480))} />
     </div>
+  )
+}
+
+function Splitter({
+  className, style, onDrag,
+}: {
+  className: string
+  style: React.CSSProperties
+  onDrag: (clientX: number, clientY: number) => void
+}) {
+  const active = useRef(false)
+  return (
+    <div
+      className={`splitter ${className}`}
+      style={style}
+      onPointerDown={(e) => {
+        active.current = true
+        e.currentTarget.setPointerCapture(e.pointerId)
+      }}
+      onPointerMove={(e) => active.current && onDrag(e.clientX, e.clientY)}
+      onPointerUp={(e) => {
+        active.current = false
+        e.currentTarget.releasePointerCapture(e.pointerId)
+      }}
+    />
   )
 }
 

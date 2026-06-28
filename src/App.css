@@ -1,14 +1,42 @@
 .app {
+  position: relative;
   height: 100%;
   display: grid;
-  grid-template-columns: 250px 1fr 280px;
-  grid-template-rows: 44px 1fr 200px;
+  grid-template-columns: 250px 1fr 290px;
+  grid-template-rows: 44px 1fr 220px;
   grid-template-areas:
     'topbar    topbar    topbar'
     'sidebar   viewport  inspector'
     'timeline  timeline  timeline';
   gap: 1px;
   background: var(--border);
+}
+
+.build {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Resizable splitters */
+.splitter {
+  position: absolute;
+  z-index: 6;
+}
+
+.splitter.v {
+  width: 6px;
+  cursor: col-resize;
+}
+
+.splitter.h {
+  height: 6px;
+  cursor: row-resize;
+}
+
+.splitter:hover {
+  background: color-mix(in srgb, var(--accent) 50%, transparent);
 }
 
 .topbar {
@@ -109,6 +137,13 @@
   background: var(--accent);
   border-color: var(--accent);
   color: #0b0d12;
+}
+
+.btn.icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 8px;
 }
 
 .scrub {
@@ -275,22 +310,27 @@ input[type='color'] {
   padding: 4px 8px;
 }
 
-/* Home button overlay */
+/* Home button: icon-only, above the navigation gizmo (Fusion-style) */
 .home-btn {
   position: absolute;
-  right: 16px;
-  bottom: 96px;
-  background: rgba(17, 20, 28, 0.85);
+  right: 116px;
+  bottom: 150px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  background: rgba(17, 20, 28, 0.7);
   border: 1px solid var(--border);
   border-radius: 6px;
-  padding: 5px 10px;
-  font-size: 12px;
   color: var(--text);
   backdrop-filter: blur(4px);
 }
 
 .home-btn:hover {
   border-color: var(--accent);
+  color: var(--accent);
 }
 
 /* LED list */
@@ -552,10 +592,10 @@ input[type='color'] {
   gap: 4px;
 }
 
-.speed-svg {
+.speed-graph {
+  position: relative;
   width: 100%;
-  height: 44px;
-  display: block;
+  height: 130px;
   background: var(--panel-2);
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -563,8 +603,22 @@ input[type='color'] {
   cursor: copy;
 }
 
-.speed-svg .zero-line {
+.speed-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.speed-svg .grid-line {
   stroke: var(--border);
+  stroke-width: 1;
+  opacity: 0.5;
+  vector-effect: non-scaling-stroke;
+}
+
+.speed-svg .zero-line {
+  stroke: var(--muted);
   stroke-width: 1;
   vector-effect: non-scaling-stroke;
 }
@@ -577,22 +631,38 @@ input[type='color'] {
 }
 
 .speed-svg .lane-playhead {
-  stroke: rgba(255, 255, 255, 0.6);
+  stroke: rgba(255, 255, 255, 0.55);
   stroke-width: 1;
   vector-effect: non-scaling-stroke;
 }
 
-.speed-svg .kf {
-  fill: #fff;
-  stroke: var(--accent);
-  stroke-width: 1.5;
-  vector-effect: non-scaling-stroke;
-  cursor: grab;
+.grid-label {
+  position: absolute;
+  left: 4px;
+  transform: translateY(-50%);
+  font-size: 9px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
 }
 
-.speed-svg .kf.sel {
-  fill: var(--accent);
-  stroke: #fff;
+.kf-handle {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  transform: translate(-50%, -50%);
+  padding: 0;
+  border-radius: 50%;
+  background: #fff;
+  border: 2px solid var(--accent);
+  box-shadow: 0 0 0 1px #000;
+  cursor: grab;
+  touch-action: none;
+}
+
+.kf-handle.sel {
+  background: var(--accent);
+  border-color: #fff;
 }
 
 .speed-controls {
@@ -609,6 +679,14 @@ input[type='color'] {
   border-radius: 5px;
   padding: 2px 5px;
   font-size: 12px;
+}
+
+.link-ends {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--muted);
+  cursor: pointer;
 }
 
 /* LED assignment dropdown */

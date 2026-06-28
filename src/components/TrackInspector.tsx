@@ -23,9 +23,11 @@ export function TrackInspector() {
       { id: newId('kf'), t: 0, value: track.speed, ease: 'linear' },
       { id: newId('kf'), t: 1, value: track.speed, ease: 'linear' },
     ]
-    setAutomation(track.id, 'speed', { keys })
+    setAutomation(track.id, 'speed', { keys, linkEnds: true })
   }
   const removeSpeedAuto = () => {
+    const n = track.automations?.speed?.keys.length ?? 0
+    if (!window.confirm(`Remove the speed animation (${n} keyframes)? This can't be undone.`)) return
     set({ speed: track.automations?.speed?.keys[0]?.value ?? track.speed })
     setAutomation(track.id, 'speed', null)
   }
@@ -124,11 +126,13 @@ function pathOfType(type: PathDef['type']): PathDef {
 }
 
 function Row({ label, children }: { label: string; children: ReactNode }) {
+  // A div, not a label: a <label> wrapping a button activates that button when
+  // its text is clicked, which can wipe data (e.g. Remove animation).
   return (
-    <label className="field-row">
+    <div className="field-row">
       <span>{label}</span>
       {children}
-    </label>
+    </div>
   )
 }
 
