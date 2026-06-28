@@ -116,6 +116,11 @@ function fieldT(g: Gradient, u: number, v: number): number {
 
 /** Evaluate a gradient color at normalized coords (u, v). */
 export function evalGradient(g: Gradient, u: number, v: number): RGB {
+  // Clamp to the unit square: sampling outside the gradient (e.g. a sine path
+  // running off the top/bottom) gives the edge color — consistent across all
+  // field types, and avoids bilinear extrapolating out of gamut.
+  u = clamp01(u)
+  v = clamp01(v)
   if (g.type === 'bilinear') {
     const top = mixColors(g.tl, g.tr, u, g.interp)
     const bottom = mixColors(g.bl, g.br, u, g.interp)

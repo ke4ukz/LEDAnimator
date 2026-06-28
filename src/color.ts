@@ -122,9 +122,9 @@ export function mixColors(a: RGB, b: RGB, t: number, space: InterpSpace): RGB {
     return oklchToRgb(L0 + (L1 - L0) * t, C0 + (C1 - C0) * t, lerpHue(h0, h1, t))
   }
   return [
-    Math.round(a[0] + (b[0] - a[0]) * t),
-    Math.round(a[1] + (b[1] - a[1]) * t),
-    Math.round(a[2] + (b[2] - a[2]) * t),
+    Math.round(clamp255(a[0] + (b[0] - a[0]) * t)),
+    Math.round(clamp255(a[1] + (b[1] - a[1]) * t)),
+    Math.round(clamp255(a[2] + (b[2] - a[2]) * t)),
   ]
 }
 
