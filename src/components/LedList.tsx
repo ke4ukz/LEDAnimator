@@ -1,8 +1,8 @@
 import { useStore } from '../store'
 import { sampleRaster } from '../types'
 
-/** LED list: per-row current-color swatch, click to select, dropdown to assign,
- *  and add/delete (multi-select aware). */
+/** LED list: live color swatch, click to select (Shift = range, Cmd/Ctrl =
+ *  toggle), reorder arrows, track assignment, and add/delete. */
 export function LedList() {
   const leds = useStore((s) => s.leds)
   const tracks = useStore((s) => s.project.tracks)
@@ -12,25 +12,31 @@ export function LedList() {
   const assignLed = useStore((s) => s.assignLed)
   const addLeds = useStore((s) => s.addLeds)
   const deleteLeds = useStore((s) => s.deleteLeds)
+  const moveLed = useStore((s) => s.moveLed)
   const raster = useStore((s) => s.raster)
   const frame = useStore((s) => s.frame)
   const f = Math.min(frame, raster.numFrames - 1)
 
   return (
     <div className="led-list">
-      <div className="led-list-head muted">{leds.length} LEDs · Shift-click for multiple</div>
+      <div className="led-list-head muted">{leds.length} LEDs · Shift = range, ⌘/Ctrl = toggle</div>
       <ul>
-        {leds.map((p, i) => {
+        {leds.map((_, i) => {
           const [r, g, b] = sampleRaster(raster, f, i)
           return (
             <li
               key={i}
               className={selection.includes(i) ? 'sel' : ''}
-              onClick={(e) => selectLed(i, e.shiftKey || e.metaKey || e.ctrlKey)}
+              onClick={(e) =>
+                selectLed(i, e.shiftKey ? 'range' : e.metaKey || e.ctrlKey ? 'toggle' : 'replace')
+              }
             >
               <span className="swatch" style={{ background: `rgb(${r},${g},${b})` }} />
               <span className="idx">#{i}</span>
-              <span className="muted">{p.x.toFixed(1)}, {p.y.toFixed(1)}, {p.z.toFixed(1)}</span>
+              <span className="reorder">
+                <button className="x" title="Move up" disabled={i === 0} onClick={(e) => { e.stopPropagation(); moveLed(i, -1) }}>▲</button>
+                <button className="x" title="Move down" disabled={i === leds.length - 1} onClick={(e) => { e.stopPropagation(); moveLed(i, 1) }}>▼</button>
+              </span>
               <select
                 className="led-track"
                 value={assignments[i]}

@@ -516,6 +516,59 @@ input[type='color'] {
   height: 15px;
 }
 
+.add-shape {
+  width: 100%;
+}
+
+/* LED index labels (DOM billboards) */
+.led-label {
+  font-size: 9px;
+  line-height: 1;
+  color: #fff;
+  background: #000;
+  border: 1px solid #fff;
+  border-radius: 2px;
+  padding: 1px 3px;
+  font-variant-numeric: tabular-nums;
+  user-select: none;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+/* LED list reorder arrows */
+.reorder {
+  display: inline-flex;
+  flex-direction: column;
+  line-height: 0;
+}
+
+.reorder .x {
+  font-size: 8px;
+  padding: 0 2px;
+  color: var(--muted);
+  background: none;
+  border: none;
+  line-height: 1.1;
+}
+
+.reorder .x:hover:not(:disabled) {
+  color: var(--accent);
+}
+
+.reorder .x:disabled {
+  opacity: 0.25;
+  cursor: default;
+}
+
+/* Path direction cues */
+.path-arrow {
+  fill: #fff;
+}
+
+.path-handle.start {
+  background: #7bd06a;
+}
+
 /* Timeline lanes */
 .timeline-lanes {
   flex: 1;

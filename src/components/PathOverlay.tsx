@@ -9,6 +9,7 @@ interface Handle {
   id: string
   u: number
   v: number
+  start?: boolean
 }
 
 /**
@@ -49,7 +50,7 @@ export function PathOverlay({ track }: { track: Track }) {
 
   const handles: Handle[] =
     path.type === 'line'
-      ? [{ id: 'a', u: path.x0, v: path.y0 }, { id: 'b', u: path.x1, v: path.y1 }]
+      ? [{ id: 'a', u: path.x0, v: path.y0, start: true }, { id: 'b', u: path.x1, v: path.y1 }]
       : path.type === 'ellipse'
         ? [
             { id: 'c', u: path.cx, v: path.cy },
@@ -58,10 +59,21 @@ export function PathOverlay({ track }: { track: Track }) {
           ]
         : [{ id: 'mid', u: clamp01(path.phase), v: path.midV }, { id: 'amp', u: 0.25, v: clamp01(path.midV - path.amp) }]
 
-  const curve = Array.from({ length: 65 }, (_, i) => {
+  const pts = Array.from({ length: 65 }, (_, i) => {
     const [u, v] = pathPoint(path, i / 64)
-    return `${u * 100},${v * 100}`
-  }).join(' ')
+    return [u * 100, v * 100] as [number, number]
+  })
+  const curve = pts.map((p) => `${p[0]},${p[1]}`).join(' ')
+
+  // Arrowhead at the end of the path, pointing along its direction.
+  const a1 = pts[pts.length - 2]
+  const a2 = pts[pts.length - 1]
+  const dlen = Math.hypot(a2[0] - a1[0], a2[1] - a1[1]) || 1
+  const ux = (a2[0] - a1[0]) / dlen
+  const uy = (a2[1] - a1[1]) / dlen
+  const bx = a2[0] - ux * 5
+  const by = a2[1] - uy * 5
+  const arrow = `${a2[0]},${a2[1]} ${bx - uy * 3},${by + ux * 3} ${bx + uy * 3},${by - ux * 3}`
 
   return (
     <div
@@ -73,11 +85,13 @@ export function PathOverlay({ track }: { track: Track }) {
     >
       <svg className="path-svg" viewBox="0 0 100 100" preserveAspectRatio="none">
         <polyline points={curve} className="path-curve" />
+        <polygon points={arrow} className="path-arrow" />
       </svg>
       {handles.map((h) => (
         <button
           key={h.id}
-          className="path-handle"
+          className={`path-handle${h.start ? ' start' : ''}`}
+          title={h.start ? 'Start' : undefined}
           style={{ left: `${h.u * 100}%`, top: `${h.v * 100}%` }}
           onPointerDown={(e) => {
             e.stopPropagation()

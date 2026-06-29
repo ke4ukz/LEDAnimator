@@ -1,21 +1,36 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useStore } from '../store'
 import { ARRANGEMENTS, defaultParams } from '../arrangements'
 
-/** Generate LED positions from a parametric shape preset. */
+/** Generate LED positions from a shape preset, with a ghost-preview confirm step. */
 export function ArrangementPanel() {
   const addLeds = useStore((s) => s.addLeds)
-  const ledCount = useStore((s) => s.leds.length)
+  const setGhost = useStore((s) => s.setGhost)
   const [idx, setIdx] = useState(0)
   const preset = ARRANGEMENTS[idx]
   const [params, setParams] = useState<Record<string, number>>(() => defaultParams(preset))
+  const [pending, setPending] = useState(false)
+
+  const built = preset.build(params)
+
+  // While previewing, keep the ghost in sync with the params.
+  useEffect(() => {
+    setGhost(pending ? ARRANGEMENTS[idx].build(params) : null)
+  }, [pending, idx, params, setGhost])
+  // Clear the ghost if the panel unmounts.
+  useEffect(() => () => setGhost(null), [setGhost])
 
   const choose = (i: number) => {
     setIdx(i)
     setParams(defaultParams(ARRANGEMENTS[i]))
   }
 
-  const built = preset.build(params)
+  const confirm = () => {
+    addLeds(preset.build(params))
+    setPending(false)
+  }
+
+  const summary = `${built.length} LEDs in a ${preset.name.toLowerCase()}`
 
   return (
     <div className="arrange">
@@ -43,11 +58,20 @@ export function ArrangementPanel() {
         </label>
       ))}
 
-      <div className="arrange-actions">
-        <span className="muted">+{built.length} LEDs</span>
-        <button className="btn btn-primary" onClick={() => addLeds(built)}>Add shape</button>
-      </div>
-      <p className="placeholder">Adds this shape to the arrangement. Now: {ledCount} LEDs.</p>
+      {pending ? (
+        <>
+          <div className="arrange-actions">
+            <button className="btn" onClick={() => setPending(false)}>Cancel</button>
+            <button className="btn btn-primary" onClick={confirm}>Confirm</button>
+          </div>
+          <p className="placeholder">Preview shown — confirm to add {summary}.</p>
+        </>
+      ) : (
+        <>
+          <button className="btn btn-primary add-shape" onClick={() => setPending(true)}>Add shape</button>
+          <p className="placeholder">Adds {summary}.</p>
+        </>
+      )}
     </div>
   )
 }

@@ -1,12 +1,16 @@
 import { useLayoutEffect, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
-import { Billboard, Text } from '@react-three/drei'
+import { Html } from '@react-three/drei'
 import { Color, type InstancedMesh, Object3D, SRGBColorSpace } from 'three'
 import { useStore } from '../store'
 import { sampleRaster } from '../types'
 
 const tmpObject = new Object3D()
 const tmpColor = new Color()
+
+function Geometry({ shape }: { shape: 'sphere' | 'cube' }) {
+  return shape === 'cube' ? <boxGeometry args={[0.5, 0.5, 0.5]} /> : <sphereGeometry args={[0.35, 16, 16]} />
+}
 
 /**
  * Renders every LED as an emissive (unlit) instance — sphere or cube — colored
@@ -19,8 +23,9 @@ export function Leds() {
   const ledShape = useStore((s) => s.ledShape)
   const selectLed = useStore((s) => s.selectLed)
 
-  // Place + scale instances when the arrangement or size changes, then refresh
-  // the bounding sphere so instance picking stays accurate.
+  // Place + scale instances. ledShape is a dep because the instanced mesh
+  // remounts on shape change (new geometry) and the new instances start at the
+  // identity matrix until we re-place them.
   useLayoutEffect(() => {
     const mesh = ref.current
     leds.forEach((p, i) => {
@@ -31,7 +36,7 @@ export function Leds() {
     })
     mesh.instanceMatrix.needsUpdate = true
     mesh.computeBoundingSphere()
-  }, [leds, ledScale])
+  }, [leds, ledScale, ledShape])
 
   // Repaint colors from the current frame every render tick.
   useFrame(() => {
@@ -53,11 +58,39 @@ export function Leds() {
       args={[undefined, undefined, leds.length]}
       onClick={(e) => {
         e.stopPropagation()
-        if (e.instanceId != null) selectLed(e.instanceId, e.shiftKey)
+        if (e.instanceId != null) selectLed(e.instanceId, e.shiftKey ? 'toggle' : 'replace')
       }}
     >
-      {ledShape === 'cube' ? <boxGeometry args={[0.5, 0.5, 0.5]} /> : <sphereGeometry args={[0.35, 16, 16]} />}
+      <Geometry shape={ledShape} />
       <meshBasicMaterial toneMapped={false} />
+    </instancedMesh>
+  )
+}
+
+/** Translucent preview instances for a pending "add shape". */
+export function GhostLeds() {
+  const ghost = useStore((s) => s.ghost)
+  const ledShape = useStore((s) => s.ledShape)
+  const ledScale = useStore((s) => s.ledScale)
+  const ref = useRef<InstancedMesh>(null!)
+
+  useLayoutEffect(() => {
+    if (!ghost || ghost.length === 0) return
+    const mesh = ref.current
+    ghost.forEach((p, i) => {
+      tmpObject.position.set(p.x, p.y, p.z)
+      tmpObject.scale.setScalar(ledScale)
+      tmpObject.updateMatrix()
+      mesh.setMatrixAt(i, tmpObject.matrix)
+    })
+    mesh.instanceMatrix.needsUpdate = true
+  }, [ghost, ledScale, ledShape])
+
+  if (!ghost || ghost.length === 0) return null
+  return (
+    <instancedMesh key={`${ghost.length}-${ledShape}`} ref={ref} args={[undefined, undefined, ghost.length]} raycast={() => null}>
+      <Geometry shape={ledShape} />
+      <meshBasicMaterial color="#5b8ff0" transparent opacity={0.35} toneMapped={false} />
     </instancedMesh>
   )
 }
@@ -83,20 +116,17 @@ export function SelectionMarker() {
   )
 }
 
-/** Optional billboard index labels above each LED. */
+/** Optional index labels: small DOM billboards centered on each LED, drawn on top. */
 export function LedLabels() {
   const leds = useStore((s) => s.leds)
   const show = useStore((s) => s.showLabels)
-  const ledScale = useStore((s) => s.ledScale)
   if (!show) return null
   return (
     <>
       {leds.map((p, i) => (
-        <Billboard key={i} position={[p.x, p.y + 0.35 * ledScale + 0.28, p.z]}>
-          <Text fontSize={0.36} color="#fff" outlineWidth={0.03} outlineColor="#000" anchorX="center" anchorY="middle">
-            {i}
-          </Text>
-        </Billboard>
+        <Html key={i} position={[p.x, p.y, p.z]} center zIndexRange={[20, 0]} style={{ pointerEvents: 'none' }}>
+          <div className="led-label">{i}</div>
+        </Html>
       ))}
     </>
   )

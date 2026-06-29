@@ -23,7 +23,11 @@ interface AppState {
   playing: boolean
   /** Selected LED indices (multi-select). */
   selection: number[]
+  /** Anchor index for range (Shift) selection. */
+  selectionAnchor: number | null
   selectedTrack: string | null
+  /** Preview LEDs for a pending "add shape" (rendered as ghosts). */
+  ghost: LedPosition[] | null
   // Display settings.
   ledScale: number
   ledShape: 'sphere' | 'cube'
@@ -45,13 +49,17 @@ interface AppState {
   addLeds: (leds: LedPosition[]) => void
   /** Remove LEDs by index (compacts assignments, remaps selection; re-bakes). */
   deleteLeds: (indices: number[]) => void
+  /** Swap LED i with its neighbor (dir ±1): reorders index, assignment; re-bakes. */
+  moveLed: (i: number, dir: number) => void
+  setGhost: (leds: LedPosition[] | null) => void
 
   setLedScale: (v: number) => void
   setLedShape: (s: 'sphere' | 'cube') => void
   setShowLabels: (b: boolean) => void
 
   selectTrack: (id: string | null) => void
-  selectLed: (i: number, additive?: boolean) => void
+  /** replace = set to [i]; toggle = add/remove i; range = i…anchor inclusive. */
+  selectLed: (i: number, mode?: 'replace' | 'toggle' | 'range') => void
   setSelection: (indices: number[]) => void
   clearSelection: () => void
 
@@ -81,9 +89,11 @@ export const useStore = create<AppState>((set, get) => {
     frame: 0,
     playing: true,
     selection: [0],
+    selectionAnchor: 0,
     selectedTrack: initialProject.tracks[0]?.id ?? null,
+    ghost: null,
     ledScale: 1,
-    ledShape: 'sphere',
+    ledShape: 'cube',
     showLabels: false,
 
     updateGradient: (g) => {
@@ -199,15 +209,49 @@ export const useStore = create<AppState>((set, get) => {
       })
     },
 
+    moveLed: (i, dir) => {
+      const j = i + dir
+      const { leds, project, raster, selection } = get()
+      if (j < 0 || j >= leds.length) return
+      const newLeds = leds.slice()
+      ;[newLeds[i], newLeds[j]] = [newLeds[j], newLeds[i]]
+      const assignments = project.assignments.slice()
+      ;[assignments[i], assignments[j]] = [assignments[j], assignments[i]]
+      const newSelection = selection.map((s) => (s === i ? j : s === j ? i : s))
+      const next = { ...project, assignments }
+      set({
+        leds: newLeds,
+        project: next,
+        selection: newSelection,
+        raster: bakeProject(next, newLeds.length, raster.numFrames, raster.fps),
+      })
+    },
+
+    setGhost: (leds) => set({ ghost: leds }),
+
     setLedScale: (v) => set({ ledScale: v }),
     setLedShape: (s) => set({ ledShape: s }),
     setShowLabels: (b) => set({ showLabels: b }),
 
     selectTrack: (id) => set({ selectedTrack: id }),
-    selectLed: (i, additive = false) =>
+    selectLed: (i, mode = 'replace') =>
       set((s) => {
-        if (!additive) return { selection: [i] }
-        return { selection: s.selection.includes(i) ? s.selection.filter((x) => x !== i) : [...s.selection, i] }
+        if (mode === 'range') {
+          const anchor = s.selectionAnchor ?? i
+          const lo = Math.min(anchor, i)
+          const hi = Math.max(anchor, i)
+          const range: number[] = []
+          for (let k = lo; k <= hi; k++) range.push(k)
+          return { selection: range }
+        }
+        if (mode === 'toggle') {
+          const has = s.selection.includes(i)
+          return {
+            selection: has ? s.selection.filter((x) => x !== i) : [...s.selection, i],
+            selectionAnchor: i,
+          }
+        }
+        return { selection: [i], selectionAnchor: i }
       }),
     setSelection: (indices) => set({ selection: indices }),
     clearSelection: () => set({ selection: [] }),

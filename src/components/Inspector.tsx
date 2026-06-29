@@ -14,7 +14,7 @@ export function Inspector() {
 
   const sel = selection.filter((i) => leds[i])
   if (sel.length === 0) {
-    return <p className="placeholder">Select LED(s) — click in the 3D view or list (Shift to add).</p>
+    return <p className="placeholder">Select one or more LEDs.</p>
   }
 
   // Common value for an axis, or null if the selection differs.
