@@ -1,0 +1,94 @@
+import { useState } from 'react'
+import { useStore } from '../store'
+import { DEVICES, checkLimits } from '../export/devices'
+import { encodeRaster, estimateBytes } from '../export/format'
+import { rp2040MainPy, rp2040Readme } from '../export/rp2040'
+import { downloadBytes, zipProject } from '../export/download'
+
+const fmtBytes = (n: number) => (n < 1024 * 1024 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1024 / 1024).toFixed(2)} MB`)
+
+/** Export modal: pick a target device, see size/limits, download program + data. */
+export function ExportDialog({ onClose }: { onClose: () => void }) {
+  const raster = useStore((s) => s.raster)
+  const [deviceId, setDeviceId] = useState('rp2040')
+  const [pin, setPin] = useState(0)
+
+  const device = DEVICES.find((d) => d.id === deviceId)!
+  const bytes = estimateBytes(raster)
+  const warnings = checkLimits(device, raster, bytes)
+  const duration = raster.numFrames / raster.fps
+  const hasRp2040 = device.targets.includes('rp2040-micropython')
+
+  const exportProject = () => {
+    const data = encodeRaster(raster)
+    const zip = zipProject({
+      'main.py': rp2040MainPy(pin),
+      'pattern.bin': data,
+      'README.txt': rp2040Readme(pin),
+    })
+    downloadBytes('led-animation-rp2040.zip', zip, 'application/zip')
+  }
+  const exportData = () => downloadBytes('pattern.bin', encodeRaster(raster), 'application/octet-stream')
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head">
+          <h2>Export</h2>
+          <button className="x" onClick={onClose} title="Close">×</button>
+        </div>
+
+        <label className="field-row">
+          <span>Target device</span>
+          <select value={deviceId} onChange={(e) => setDeviceId(e.target.value)}>
+            {DEVICES.map((d) => (
+              <option key={d.id} value={d.id}>{d.name}</option>
+            ))}
+          </select>
+        </label>
+        <p className="muted device-notes">{device.notes}</p>
+
+        <div className="export-stats">
+          <Stat label="LEDs" value={String(raster.numLeds)} />
+          <Stat label="Frames" value={String(raster.numFrames)} />
+          <Stat label="Rate" value={`${raster.fps} fps`} />
+          <Stat label="Loop" value={`${duration.toFixed(2)} s`} />
+          <Stat label="Data size" value={fmtBytes(bytes)} />
+        </div>
+
+        {warnings.length > 0 && (
+          <div className="warn-box">
+            <strong>This project may be too large for {device.name}:</strong>
+            <ul>{warnings.map((w, i) => <li key={i}>{w}</li>)}</ul>
+            <span className="muted">These are estimates — you can export anyway.</span>
+          </div>
+        )}
+
+        {hasRp2040 ? (
+          <>
+            <label className="field-row">
+              <span>Data pin (GP)</span>
+              <input type="number" min={0} max={29} value={pin} onChange={(e) => setPin(Number(e.target.value))} />
+            </label>
+            <div className="export-actions">
+              <button className="btn btn-primary" onClick={exportProject}>MicroPython project (.zip)</button>
+              <button className="btn" onClick={exportData}>Pattern data only (.bin)</button>
+            </div>
+            <p className="muted">UF2 firmware export is planned.</p>
+          </>
+        ) : (
+          <p className="placeholder">Export for {device.name} is planned — the size and limits above already apply.</p>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function Stat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="stat">
+      <span className="muted">{label}</span>
+      <strong>{value}</strong>
+    </div>
+  )
+}

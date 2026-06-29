@@ -10,6 +10,7 @@ import { DisplayPanel } from './components/DisplayPanel'
 import { LedList } from './components/LedList'
 import { Inspector } from './components/Inspector'
 import { Timeline } from './components/Timeline'
+import { ExportDialog } from './components/ExportDialog'
 import { usePlayer } from './usePlayer'
 import './App.css'
 
@@ -27,6 +28,7 @@ export default function App() {
   const [sidebarW, setSidebarW] = useState(250)
   const [inspectorW, setInspectorW] = useState(290)
   const [timelineH, setTimelineH] = useState(220)
+  const [exportOpen, setExportOpen] = useState(false)
 
   const rect = () => appRef.current!.getBoundingClientRect()
 
@@ -42,8 +44,11 @@ export default function App() {
       <header className="topbar">
         <span className="brand">LED Animator</span>
         <span className="muted">in-browser editor · fixed-rate raster</span>
+        <button className="btn export-btn" onClick={() => setExportOpen(true)}>Export</button>
         <span className="build" title="loaded build (commit · build time)">build {BUILD}</span>
       </header>
+
+      {exportOpen && <ExportDialog onClose={() => setExportOpen(false)} />}
 
       <aside className="sidebar">
         <Panel title="Tracks">
