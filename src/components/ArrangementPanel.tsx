@@ -4,7 +4,7 @@ import { ARRANGEMENTS, defaultParams } from '../arrangements'
 
 /** Generate LED positions from a parametric shape preset. */
 export function ArrangementPanel() {
-  const applyArrangement = useStore((s) => s.applyArrangement)
+  const addLeds = useStore((s) => s.addLeds)
   const ledCount = useStore((s) => s.leds.length)
   const [idx, setIdx] = useState(0)
   const preset = ARRANGEMENTS[idx]
@@ -44,10 +44,10 @@ export function ArrangementPanel() {
       ))}
 
       <div className="arrange-actions">
-        <span className="muted">→ {built.length} LEDs</span>
-        <button className="btn btn-primary" onClick={() => applyArrangement(built)}>Apply</button>
+        <span className="muted">+{built.length} LEDs</span>
+        <button className="btn btn-primary" onClick={() => addLeds(built)}>Add shape</button>
       </div>
-      <p className="placeholder">Apply replaces all positions (manual edits lost). Now: {ledCount} LEDs.</p>
+      <p className="placeholder">Adds this shape to the arrangement. Now: {ledCount} LEDs.</p>
     </div>
   )
 }

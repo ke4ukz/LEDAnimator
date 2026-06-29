@@ -1,8 +1,8 @@
 import { useEffect, useRef } from 'react'
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { GizmoHelper, GizmoViewport, OrbitControls } from '@react-three/drei'
-import { MOUSE, Vector3 } from 'three'
-import { Leds, SelectionMarker } from './Leds'
+import { Vector3 } from 'three'
+import { LedLabels, Leds, SelectionMarker } from './Leds'
 import { HOME_DISTANCE, goHome, viewportRefs } from '../viewportControls'
 import { useStore } from '../store'
 
@@ -25,7 +25,7 @@ interface HomeAnim {
 function Rig() {
   const camera = useThree((s) => s.camera)
   const controls = useThree((s) => s.controls) as
-    | ({ mouseButtons: { LEFT: MOUSE }; target: Vector3; update: () => void } & object)
+    | ({ target: Vector3; update: () => void } & object)
     | null
   const anim = useRef<HomeAnim | null>(null)
 
@@ -49,20 +49,6 @@ function Rig() {
       viewportRefs.startHome = null
     }
   }, [camera, controls])
-
-  useEffect(() => {
-    if (!controls) return
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'Shift') return
-      controls.mouseButtons.LEFT = e.type === 'keydown' ? MOUSE.PAN : MOUSE.ROTATE
-    }
-    window.addEventListener('keydown', onKey)
-    window.addEventListener('keyup', onKey)
-    return () => {
-      window.removeEventListener('keydown', onKey)
-      window.removeEventListener('keyup', onKey)
-    }
-  }, [controls])
 
   useFrame((_, delta) => {
     const a = anim.current
@@ -95,6 +81,7 @@ export function Viewport() {
         <gridHelper args={[20, 20, '#252b3b', '#161a24']} />
         <Leds />
         <SelectionMarker />
+        <LedLabels />
         <OrbitControls makeDefault enableDamping />
         <GizmoHelper alignment="bottom-right" margin={[64, 64]}>
           <GizmoViewport axisColors={['#e0586b', '#7bd06a', '#5b8ff0']} labelColor="#cfd6e4" />

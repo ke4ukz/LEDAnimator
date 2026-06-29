@@ -24,6 +24,10 @@ interface AppState {
   /** Selected LED indices (multi-select). */
   selection: number[]
   selectedTrack: string | null
+  // Display settings.
+  ledScale: number
+  ledShape: 'sphere' | 'cube'
+  showLabels: boolean
 
   // Track / source editing (all re-bake the raster).
   updateGradient: (g: Gradient) => void
@@ -37,8 +41,14 @@ interface AppState {
   /** Patch position fields on the given LED indices (does not re-bake — position
    *  doesn't affect baked colors). */
   updateLeds: (indices: number[], patch: Partial<LedPosition>) => void
-  /** Replace the whole arrangement (resizes assignments + re-bakes). */
-  applyArrangement: (leds: LedPosition[]) => void
+  /** Append LEDs to the arrangement (assigned to the first track; re-bakes). */
+  addLeds: (leds: LedPosition[]) => void
+  /** Remove LEDs by index (compacts assignments, remaps selection; re-bakes). */
+  deleteLeds: (indices: number[]) => void
+
+  setLedScale: (v: number) => void
+  setLedShape: (s: 'sphere' | 'cube') => void
+  setShowLabels: (b: boolean) => void
 
   selectTrack: (id: string | null) => void
   selectLed: (i: number, additive?: boolean) => void
@@ -72,6 +82,9 @@ export const useStore = create<AppState>((set, get) => {
     playing: true,
     selection: [0],
     selectedTrack: initialProject.tracks[0]?.id ?? null,
+    ledScale: 1,
+    ledShape: 'sphere',
+    showLabels: false,
 
     updateGradient: (g) => {
       const { project, selectedTrack } = get()
@@ -159,18 +172,36 @@ export const useStore = create<AppState>((set, get) => {
       set((s) => ({ leds: s.leds.map((p, i) => (set2.has(i) ? { ...p, ...patch } : p)) }))
     },
 
-    applyArrangement: (leds) => {
-      const { project, raster } = get()
+    addLeds: (newLeds) => {
+      const { leds, project, raster } = get()
       const fallback = project.tracks[0]?.id ?? ''
-      const assignments = leds.map((_, i) => project.assignments[i] ?? fallback)
+      const allLeds = [...leds, ...newLeds]
+      const assignments = [...project.assignments, ...newLeds.map(() => fallback)]
       const next = { ...project, assignments }
-      set((s) => ({
-        leds,
-        project: next,
-        selection: s.selection.filter((i) => i < leds.length),
-        raster: bakeProject(next, leds.length, raster.numFrames, raster.fps),
-      }))
+      set({ leds: allLeds, project: next, raster: bakeProject(next, allLeds.length, raster.numFrames, raster.fps) })
     },
+
+    deleteLeds: (indices) => {
+      const del = new Set(indices)
+      if (del.size === 0) return
+      const { leds, project, raster, selection } = get()
+      const keep = leds.map((_, i) => i).filter((i) => !del.has(i))
+      const newLeds = keep.map((i) => leds[i])
+      const assignments = keep.map((i) => project.assignments[i])
+      const remap = new Map(keep.map((oldI, newI) => [oldI, newI]))
+      const newSelection = selection.filter((i) => remap.has(i)).map((i) => remap.get(i)!)
+      const next = { ...project, assignments }
+      set({
+        leds: newLeds,
+        project: next,
+        selection: newSelection,
+        raster: bakeProject(next, newLeds.length, raster.numFrames, raster.fps),
+      })
+    },
+
+    setLedScale: (v) => set({ ledScale: v }),
+    setLedShape: (s) => set({ ledShape: s }),
+    setShowLabels: (b) => set({ showLabels: b }),
 
     selectTrack: (id) => set({ selectedTrack: id }),
     selectLed: (i, additive = false) =>

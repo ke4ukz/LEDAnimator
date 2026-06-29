@@ -488,6 +488,34 @@ input[type='color'] {
   margin-top: 2px;
 }
 
+.led-list-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.led-list-actions .btn {
+  flex: 1;
+}
+
+.display-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.display-panel .num {
+  min-width: 34px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.field-row input[type='checkbox'] {
+  accent-color: var(--accent);
+  width: 15px;
+  height: 15px;
+}
+
 /* Timeline lanes */
 .timeline-lanes {
   flex: 1;
