@@ -40,6 +40,10 @@ const RAINBOW: StopSpec[] = [
   { pos: 1, color: [255, 0, 0] },
 ]
 
+// The startup gradient, defined independently of PRESETS so editing/removing
+// presets can never change (or break) the app's default.
+const DEFAULT_SPEC: GradientSpec = { type: 'linear', angle: 0, interp: 'hsl', stops: RAINBOW }
+
 export const PRESETS: Preset[] = [
   {
     name: 'Black & white',
@@ -64,7 +68,7 @@ export const PRESETS: Preset[] = [
   },
   {
     name: 'Linear rainbow',
-    gradient: { type: 'linear', angle: 0, interp: 'hsl', stops: RAINBOW },
+    gradient: DEFAULT_SPEC,
   },
   {
     name: 'Conic rainbow',
@@ -128,8 +132,8 @@ export const PRESETS: Preset[] = [
   },
 ]
 
-/** The starter gradient — the rainbow, regardless of preset ordering. */
+/** The starter gradient. Independent of PRESETS, so editing the preset list
+ *  (renaming/removing/reordering) can never change or break startup. */
 export function defaultGradient(): Gradient {
-  const p = PRESETS.find((x) => x.name === 'Linear rainbow') ?? PRESETS[0]
-  return instantiateGradient(p.gradient)
+  return instantiateGradient(DEFAULT_SPEC)
 }
