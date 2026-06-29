@@ -385,12 +385,33 @@ input[type='color'] {
   margin-bottom: 6px;
 }
 
+.led-list {
+  user-select: none;
+}
+
 .led-list ul {
   list-style: none;
   margin: 0;
   padding: 0;
   max-height: 240px;
   overflow-y: auto;
+}
+
+.led-list .hash {
+  font-size: 11px;
+  margin-right: -4px;
+}
+
+.order {
+  width: 44px;
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 4px;
+  font: inherit;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
 }
 
 .led-list li {
@@ -612,24 +633,28 @@ input[type='color'] {
   height: 40px;
   border-radius: 6px;
   border: 1px solid var(--border);
-  overflow: hidden;
+  overflow: visible;
 }
 
 .lane-canvas {
   display: block;
   width: 100%;
   height: 100%;
+  border-radius: 5px;
 }
 
+/* Sample window: overhangs the strip and has both light + dark edges so it's
+   visible over any color (including white sections). */
 .playhead {
   position: absolute;
-  top: 0;
-  bottom: 0;
+  top: -5px;
+  bottom: -5px;
   width: 7px;
   transform: translateX(-50%);
-  background: rgba(255, 255, 255, 0.22);
-  border-left: 1px solid rgba(255, 255, 255, 0.95);
-  border-right: 1px solid rgba(255, 255, 255, 0.95);
+  background: rgba(128, 128, 128, 0.25);
+  border-left: 1px solid #fff;
+  border-right: 1px solid #fff;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.8);
   pointer-events: none;
 }
 

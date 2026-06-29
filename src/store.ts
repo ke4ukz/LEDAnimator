@@ -49,8 +49,8 @@ interface AppState {
   addLeds: (leds: LedPosition[]) => void
   /** Remove LEDs by index (compacts assignments, remaps selection; re-bakes). */
   deleteLeds: (indices: number[]) => void
-  /** Swap LED i with its neighbor (dir ±1): reorders index, assignment; re-bakes. */
-  moveLed: (i: number, dir: number) => void
+  /** Move LED from one index to another (reorders index + assignment; re-bakes). */
+  moveLedTo: (from: number, to: number) => void
   setGhost: (leds: LedPosition[] | null) => void
 
   setLedScale: (v: number) => void
@@ -209,20 +209,27 @@ export const useStore = create<AppState>((set, get) => {
       })
     },
 
-    moveLed: (i, dir) => {
-      const j = i + dir
+    moveLedTo: (from, to) => {
       const { leds, project, raster, selection } = get()
-      if (j < 0 || j >= leds.length) return
+      to = Math.max(0, Math.min(leds.length - 1, to))
+      if (to === from || from < 0 || from >= leds.length) return
       const newLeds = leds.slice()
-      ;[newLeds[i], newLeds[j]] = [newLeds[j], newLeds[i]]
+      const [m] = newLeds.splice(from, 1)
+      newLeds.splice(to, 0, m)
       const assignments = project.assignments.slice()
-      ;[assignments[i], assignments[j]] = [assignments[j], assignments[i]]
-      const newSelection = selection.map((s) => (s === i ? j : s === j ? i : s))
+      const [am] = assignments.splice(from, 1)
+      assignments.splice(to, 0, am)
+      // Remap old indices → new after the move.
+      const remap = (old: number) => {
+        if (old === from) return to
+        if (from < to) return old > from && old <= to ? old - 1 : old
+        return old >= to && old < from ? old + 1 : old
+      }
       const next = { ...project, assignments }
       set({
         leds: newLeds,
         project: next,
-        selection: newSelection,
+        selection: selection.map(remap),
         raster: bakeProject(next, newLeds.length, raster.numFrames, raster.fps),
       })
     },

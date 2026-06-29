@@ -97,6 +97,7 @@ export function GradientEditor() {
           <option value="rgb">RGB</option>
           <option value="hsl">HSL (hue)</option>
           <option value="oklch">OKLCH</option>
+          <option value="step">Step (hard)</option>
         </select>
       </Row>
 

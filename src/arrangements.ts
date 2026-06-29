@@ -44,7 +44,7 @@ export const ARRANGEMENTS: ArrangementPreset[] = [
       const out: LedPosition[] = []
       for (let r = 0; r < rows; r++) {
         for (let c = 0; c < cols; c++) {
-          out.push({ x: (c - (cols - 1) / 2) * p.spacing, y: 0, z: (r - (rows - 1) / 2) * p.spacing })
+          out.push({ x: (c - (cols - 1) / 2) * p.spacing, y: (r - (rows - 1) / 2) * p.spacing, z: 0 })
         }
       }
       return out
@@ -57,7 +57,7 @@ export const ARRANGEMENTS: ArrangementPreset[] = [
       const n = Math.round(p.count)
       return range(n).map((i) => {
         const a = (i / n) * TAU
-        return { x: Math.cos(a) * p.radius, y: 0, z: Math.sin(a) * p.radius }
+        return { x: Math.cos(a) * p.radius, y: Math.sin(a) * p.radius, z: 0 }
       })
     },
   },
@@ -69,7 +69,7 @@ export const ARRANGEMENTS: ArrangementPreset[] = [
       const sweep = (p.sweep * Math.PI) / 180
       return range(n).map((i) => {
         const a = (n > 1 ? i / (n - 1) - 0.5 : 0) * sweep
-        return { x: Math.sin(a) * p.radius, y: 0, z: Math.cos(a) * p.radius - p.radius }
+        return { x: Math.sin(a) * p.radius, y: Math.cos(a) * p.radius - p.radius, z: 0 }
       })
     },
   },
@@ -86,7 +86,7 @@ export const ARRANGEMENTS: ArrangementPreset[] = [
       return range(n).map((i) => {
         const t = n > 1 ? i / (n - 1) : 0
         const a = t * p.turns * TAU
-        return { x: Math.cos(a) * p.radius, y: (t - 0.5) * p.height, z: Math.sin(a) * p.radius }
+        return { x: Math.cos(a) * p.radius, y: Math.sin(a) * p.radius, z: (t - 0.5) * p.height }
       })
     },
   },

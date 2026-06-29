@@ -71,14 +71,15 @@ export function Viewport() {
   return (
     <>
       <Canvas
-        camera={{ position: [HOME_DISTANCE, HOME_DISTANCE, HOME_DISTANCE], fov: 50 }}
+        camera={{ position: [HOME_DISTANCE, HOME_DISTANCE, HOME_DISTANCE], fov: 50, up: [0, 0, 1] }}
         dpr={[1, 2]}
         onPointerMissed={(e) => {
           if (!(e as PointerEvent).shiftKey) clearSelection()
         }}
       >
         <color attach="background" args={['#0b0d12']} />
-        <gridHelper args={[20, 20, '#252b3b', '#161a24']} />
+        {/* Z-up: rotate the grid into the XY (ground) plane. */}
+        <gridHelper args={[20, 20, '#252b3b', '#161a24']} rotation={[Math.PI / 2, 0, 0]} />
         <Leds />
         <GhostLeds />
         <SelectionMarker />

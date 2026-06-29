@@ -1,8 +1,35 @@
+import { useEffect, useState } from 'react'
 import { useStore } from '../store'
 import { sampleRaster } from '../types'
 
+/** Editable order number: type a new index to move this LED there. */
+function OrderInput({ index, max, onCommit }: { index: number; max: number; onCommit: (n: number) => void }) {
+  const [val, setVal] = useState(String(index))
+  useEffect(() => setVal(String(index)), [index])
+  const commit = () => {
+    const n = parseInt(val, 10)
+    if (!Number.isNaN(n) && n !== index) onCommit(n)
+    else setVal(String(index))
+  }
+  return (
+    <input
+      className="order"
+      type="number"
+      min={0}
+      max={max}
+      value={val}
+      onClick={(e) => e.stopPropagation()}
+      onChange={(e) => setVal(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
+      }}
+    />
+  )
+}
+
 /** LED list: live color swatch, click to select (Shift = range, Cmd/Ctrl =
- *  toggle), reorder arrows, track assignment, and add/delete. */
+ *  toggle), editable order number, track assignment, and add/delete. */
 export function LedList() {
   const leds = useStore((s) => s.leds)
   const tracks = useStore((s) => s.project.tracks)
@@ -12,7 +39,7 @@ export function LedList() {
   const assignLed = useStore((s) => s.assignLed)
   const addLeds = useStore((s) => s.addLeds)
   const deleteLeds = useStore((s) => s.deleteLeds)
-  const moveLed = useStore((s) => s.moveLed)
+  const moveLedTo = useStore((s) => s.moveLedTo)
   const raster = useStore((s) => s.raster)
   const frame = useStore((s) => s.frame)
   const f = Math.min(frame, raster.numFrames - 1)
@@ -32,11 +59,8 @@ export function LedList() {
               }
             >
               <span className="swatch" style={{ background: `rgb(${r},${g},${b})` }} />
-              <span className="idx">#{i}</span>
-              <span className="reorder">
-                <button className="x" title="Move up" disabled={i === 0} onClick={(e) => { e.stopPropagation(); moveLed(i, -1) }}>▲</button>
-                <button className="x" title="Move down" disabled={i === leds.length - 1} onClick={(e) => { e.stopPropagation(); moveLed(i, 1) }}>▼</button>
-              </span>
+              <span className="hash muted">#</span>
+              <OrderInput index={i} max={leds.length - 1} onCommit={(n) => moveLedTo(i, n)} />
               <select
                 className="led-track"
                 value={assignments[i]}

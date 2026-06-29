@@ -42,6 +42,27 @@ const RAINBOW: StopSpec[] = [
 
 export const PRESETS: Preset[] = [
   {
+    name: 'Black & white',
+    gradient: {
+      type: 'linear', angle: 0, interp: 'rgb',
+      stops: [
+        { pos: 0, color: [0, 0, 0] },
+        { pos: 1, color: [255, 255, 255] },
+      ],
+    },
+  },
+  {
+    name: 'Stripes (hard)',
+    gradient: {
+      type: 'linear', angle: 0, interp: 'step',
+      stops: [
+        { pos: 0, color: [220, 30, 30] },
+        { pos: 1 / 3, color: [255, 255, 255] },
+        { pos: 2 / 3, color: [40, 160, 60] },
+      ],
+    },
+  },
+  {
     name: 'Linear rainbow',
     gradient: { type: 'linear', angle: 0, interp: 'hsl', stops: RAINBOW },
   },

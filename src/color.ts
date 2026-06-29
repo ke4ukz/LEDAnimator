@@ -3,7 +3,7 @@ import type { RGB } from './types'
 // Color-space conversions and ramp interpolation. Channels are 0-255 at every
 // public boundary; intermediate spaces use their natural ranges.
 
-export type InterpSpace = 'rgb' | 'hsl' | 'oklch'
+export type InterpSpace = 'rgb' | 'hsl' | 'oklch' | 'step'
 
 const clamp01 = (x: number) => (x < 0 ? 0 : x > 1 ? 1 : x)
 const clamp255 = (x: number) => (x < 0 ? 0 : x > 255 ? 255 : x)
@@ -111,6 +111,7 @@ function oklchToRgb(L: number, C: number, h: number): RGB {
 // ---- Two-color interpolation in a chosen space --------------------------
 
 export function mixColors(a: RGB, b: RGB, t: number, space: InterpSpace): RGB {
+  if (space === 'step') return t < 0.5 ? a : b
   if (space === 'hsl') {
     const [h0, s0, l0] = rgbToHsl(a)
     const [h1, s1, l1] = rgbToHsl(b)
@@ -146,6 +147,8 @@ export function sampleRamp(stops: Stop[], t: number, space: InterpSpace): RGB {
     const a = s[i]
     const b = s[i + 1]
     if (t >= a.pos && t <= b.pos) {
+      // Step: hold the lower stop's color across the whole segment (hard cut).
+      if (space === 'step') return a.color
       const span = b.pos - a.pos
       const local = span === 0 ? 0 : (t - a.pos) / span
       return mixColors(a.color, b.color, local, space)
