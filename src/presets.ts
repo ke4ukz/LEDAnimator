@@ -128,7 +128,8 @@ export const PRESETS: Preset[] = [
   },
 ]
 
-/** The starter gradient (first preset). */
+/** The starter gradient — the rainbow, regardless of preset ordering. */
 export function defaultGradient(): Gradient {
-  return instantiateGradient(PRESETS[0].gradient)
+  const p = PRESETS.find((x) => x.name === 'Linear rainbow') ?? PRESETS[0]
+  return instantiateGradient(p.gradient)
 }
