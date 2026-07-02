@@ -27,7 +27,8 @@
 .modal-overlay {
   position: absolute;
   inset: 0;
-  z-index: 20;
+  /* Above drei <Html> LED labels (their z-index maxes out at ~20). */
+  z-index: 1000;
   background: rgba(0, 0, 0, 0.55);
   display: flex;
   align-items: center;
