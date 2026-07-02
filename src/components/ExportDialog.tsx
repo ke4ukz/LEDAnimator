@@ -12,6 +12,7 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
   const raster = useStore((s) => s.raster)
   const [deviceId, setDeviceId] = useState('rp2040')
   const [pin, setPin] = useState(0)
+  const [brightness, setBrightness] = useState(1)
 
   const device = DEVICES.find((d) => d.id === deviceId)!
   const bytes = estimateBytes(raster)
@@ -22,7 +23,7 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
   const exportProject = () => {
     const data = encodeRaster(raster)
     const zip = zipProject({
-      'main.py': rp2040MainPy(pin),
+      'main.py': rp2040MainPy(pin, Number(brightness.toFixed(2))),
       'pattern.bin': data,
       'README.txt': rp2040Readme(pin),
     })
@@ -69,6 +70,11 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
             <label className="field-row">
               <span>Data pin (GP)</span>
               <input type="number" min={0} max={29} value={pin} onChange={(e) => setPin(Number(e.target.value))} />
+            </label>
+            <label className="field-row">
+              <span>Brightness</span>
+              <input type="range" min={0} max={1} step={0.05} value={brightness} onChange={(e) => setBrightness(Number(e.target.value))} />
+              <span className="muted">{Math.round(brightness * 100)}%</span>
             </label>
             <div className="export-actions">
               <button className="btn btn-primary" onClick={exportProject}>MicroPython project (.zip)</button>

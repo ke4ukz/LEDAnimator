@@ -2,7 +2,7 @@
 // that reads pattern.bin (LEDA v1). Written to be readable and modifiable — a
 // programmer can extend main() to hold several patterns and pick between them.
 
-export function rp2040MainPy(pin: number): string {
+export function rp2040MainPy(pin: number, brightness: number): string {
   return `# main.py - LED Animator player for RP2040 (MicroPython)
 # Plays pattern.bin (LEDA v1) on a WS2812 / NeoPixel strip using PIO.
 #
@@ -18,7 +18,7 @@ import rp2
 
 DATA_PIN = ${pin}
 PATTERN_FILE = "pattern.bin"
-BRIGHTNESS = 1.0  # 0.0-1.0
+BRIGHTNESS = ${brightness}  # 0.0-1.0; scales every channel at runtime
 
 @rp2.asm_pio(sideset_init=rp2.PIO.OUT_LOW, out_shiftdir=rp2.PIO.SHIFT_LEFT,
              autopull=True, pull_thresh=24)
