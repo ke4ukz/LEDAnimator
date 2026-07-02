@@ -14,7 +14,14 @@ export interface FsFile {
 let wasmPromise: Promise<ArrayBuffer> | null = null
 const wasm = () => (wasmPromise ??= fetch(wasmUrl).then((r) => r.arrayBuffer()))
 
-export async function buildLittleFsImage(files: FsFile[], blockCount: number, blockSize: number): Promise<Uint8Array> {
+export async function buildLittleFsImage(
+  files: FsFile[],
+  blockCount: number,
+  blockSize: number,
+  progSize = 256, // RP2040 flash programs in 256-byte pages; MicroPython's rp2
+  // _boot.py mounts with progsize=256, and prog_size changes the on-disk metadata
+  // alignment — so a mismatch makes MicroPython reject (and reformat) the image.
+): Promise<Uint8Array> {
   const wasmBinary = new Uint8Array(await wasm())
   const flash = new Uint8Array(blockCount * blockSize).fill(0xff)
 
@@ -40,6 +47,20 @@ export async function buildLittleFsImage(files: FsFile[], blockCount: number, bl
   const sp = m.addFunction(() => 0, 'ii')
 
   const cfg = m._new_lfs_config(rp, pp, ep, sp, blockCount, blockSize)
+  // Wokwi's wrapper hardcodes prog_size=32 and doesn't expose it — patch it in
+  // the config struct. Locate by the block_size/block_count pair (prog_size is
+  // the field just before block_size in struct lfs_config).
+  const base = cfg >> 2
+  let patched = false
+  for (let i = base; i < base + 24; i++) {
+    if (m.HEAP32[i] === blockSize && m.HEAP32[i + 1] === blockCount) {
+      m.HEAP32[i - 1] = progSize
+      patched = true
+      break
+    }
+  }
+  if (!patched) throw new Error('could not locate prog_size in the littlefs config')
+
   const lfs = m._new_lfs()
   if (m._lfs_format(lfs, cfg)) throw new Error('LittleFS format failed')
   if (m._lfs_mount(lfs, cfg)) throw new Error('LittleFS mount failed')
