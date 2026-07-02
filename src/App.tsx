@@ -1,4 +1,4 @@
-import { type ReactNode, useRef, useState } from 'react'
+import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react'
 import { buildTime, commit } from 'virtual:build-info'
 import { Viewport } from './components/Viewport'
 import { Transport } from './components/Transport'
@@ -31,20 +31,54 @@ export default function App() {
   const [inspectorW, setInspectorW] = useState(290)
   const [timelineH, setTimelineH] = useState(220)
   const [exportOpen, setExportOpen] = useState(false)
+  const [dragging, setDragging] = useState(false)
   const loadProject = useStore((s) => s.loadProject)
   const fileRef = useRef<HTMLInputElement>(null)
 
-  const onImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const importFile = useCallback(
+    async (file?: File | null) => {
+      if (!file) return
+      if (!window.confirm('Import will replace the current project. Continue?')) return
+      try {
+        loadProject(await readProjectFromFile(file))
+      } catch (err) {
+        window.alert(`Could not import project: ${(err as Error).message}`)
+      }
+    },
+    [loadProject],
+  )
+
+  const onImport = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     e.target.value = ''
-    if (!file) return
-    if (!window.confirm('Import will replace the current project. Continue?')) return
-    try {
-      loadProject(await readProjectFromFile(file))
-    } catch (err) {
-      window.alert(`Could not import project: ${(err as Error).message}`)
-    }
+    importFile(file)
   }
+
+  // Drag-and-drop a .json / .zip anywhere onto the window to import.
+  useEffect(() => {
+    let depth = 0
+    const hasFiles = (e: DragEvent) => Array.from(e.dataTransfer?.types ?? []).includes('Files')
+    const onOver = (e: DragEvent) => { if (hasFiles(e)) e.preventDefault() }
+    const onEnter = (e: DragEvent) => { if (hasFiles(e)) { depth++; setDragging(true) } }
+    const onLeave = () => { depth = Math.max(0, depth - 1); if (depth === 0) setDragging(false) }
+    const onDrop = (e: DragEvent) => {
+      if (!hasFiles(e)) return
+      e.preventDefault()
+      depth = 0
+      setDragging(false)
+      importFile(e.dataTransfer?.files?.[0])
+    }
+    window.addEventListener('dragover', onOver)
+    window.addEventListener('dragenter', onEnter)
+    window.addEventListener('dragleave', onLeave)
+    window.addEventListener('drop', onDrop)
+    return () => {
+      window.removeEventListener('dragover', onOver)
+      window.removeEventListener('dragenter', onEnter)
+      window.removeEventListener('dragleave', onLeave)
+      window.removeEventListener('drop', onDrop)
+    }
+  }, [importFile])
 
   const rect = () => appRef.current!.getBoundingClientRect()
 
@@ -73,6 +107,7 @@ export default function App() {
       </header>
 
       {exportOpen && <ExportDialog onClose={() => setExportOpen(false)} />}
+      {dragging && <div className="drop-overlay">Drop a project (.json or .zip) to import</div>}
 
       <aside className="sidebar">
         <Panel title="Tracks">
