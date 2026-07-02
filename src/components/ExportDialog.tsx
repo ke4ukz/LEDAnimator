@@ -3,6 +3,7 @@ import { useStore } from '../store'
 import { DEVICES, checkLimits } from '../export/devices'
 import { encodeRaster, estimateBytes } from '../export/format'
 import { rp2040MainPy, rp2040Readme } from '../export/rp2040'
+import { serializeProjectFile } from '../export/projectFile'
 import { downloadBytes, zipProject } from '../export/download'
 
 const fmtBytes = (n: number) => (n < 1024 * 1024 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1024 / 1024).toFixed(2)} MB`)
@@ -10,6 +11,7 @@ const fmtBytes = (n: number) => (n < 1024 * 1024 ? `${(n / 1024).toFixed(1)} KB`
 /** Export modal: pick a target device, see size/limits, download program + data. */
 export function ExportDialog({ onClose }: { onClose: () => void }) {
   const raster = useStore((s) => s.raster)
+  const getProjectFile = useStore((s) => s.getProjectFile)
   const [deviceId, setDeviceId] = useState('rp2040')
   const [pin, setPin] = useState(0)
   const [brightness, setBrightness] = useState(1)
@@ -25,6 +27,7 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
     const zip = zipProject({
       'main.py': rp2040MainPy(pin, Number(brightness.toFixed(2))),
       'pattern.bin': data,
+      'project.json': serializeProjectFile(getProjectFile()),
       'README.txt': rp2040Readme(pin),
     })
     downloadBytes('led-animation-rp2040.zip', zip, 'application/zip')

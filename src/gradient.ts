@@ -135,3 +135,11 @@ let stopSeq = 0
 export function makeStop(pos: number, color: RGB): GradientStop {
   return { id: `s${stopSeq++}`, pos, color }
 }
+
+/** Advance the stop-id counter past any ids in `ids` (used when loading a project). */
+export function reserveStopIds(ids: string[]) {
+  for (const id of ids) {
+    const m = /(\d+)$/.exec(id)
+    if (m) stopSeq = Math.max(stopSeq, parseInt(m[1], 10) + 1)
+  }
+}

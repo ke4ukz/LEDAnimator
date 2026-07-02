@@ -11,6 +11,8 @@ import { LedList } from './components/LedList'
 import { Inspector } from './components/Inspector'
 import { Timeline } from './components/Timeline'
 import { ExportDialog } from './components/ExportDialog'
+import { readProjectFromFile } from './export/projectFile'
+import { useStore } from './store'
 import { usePlayer } from './usePlayer'
 import './App.css'
 
@@ -29,6 +31,20 @@ export default function App() {
   const [inspectorW, setInspectorW] = useState(290)
   const [timelineH, setTimelineH] = useState(220)
   const [exportOpen, setExportOpen] = useState(false)
+  const loadProject = useStore((s) => s.loadProject)
+  const fileRef = useRef<HTMLInputElement>(null)
+
+  const onImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file) return
+    if (!window.confirm('Import will replace the current project. Continue?')) return
+    try {
+      loadProject(await readProjectFromFile(file))
+    } catch (err) {
+      window.alert(`Could not import project: ${(err as Error).message}`)
+    }
+  }
 
   const rect = () => appRef.current!.getBoundingClientRect()
 
@@ -44,7 +60,15 @@ export default function App() {
       <header className="topbar">
         <span className="brand">LED Animator</span>
         <span className="muted">in-browser editor · fixed-rate raster</span>
-        <button className="btn export-btn" onClick={() => setExportOpen(true)}>Export</button>
+        <button className="btn export-btn" onClick={() => fileRef.current?.click()}>Import</button>
+        <button className="btn" onClick={() => setExportOpen(true)}>Export</button>
+        <input
+          ref={fileRef}
+          type="file"
+          accept=".json,.zip,application/json,application/zip"
+          style={{ display: 'none' }}
+          onChange={onImport}
+        />
         <span className="build" title="loaded build (commit · build time)">build {BUILD}</span>
       </header>
 

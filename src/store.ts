@@ -12,8 +12,11 @@ import {
   defaultLinePath,
   defaultProject,
   newId,
+  reserveIds,
 } from './project'
+import { reserveStopIds } from './gradient'
 import { bakeProject } from './bake'
+import type { ProjectFile } from './export/projectFile'
 
 interface AppState {
   leds: LedPosition[]
@@ -62,6 +65,11 @@ interface AppState {
   selectLed: (i: number, mode?: 'replace' | 'toggle' | 'range') => void
   setSelection: (indices: number[]) => void
   clearSelection: () => void
+
+  /** Serialize the editable project state for saving. */
+  getProjectFile: () => ProjectFile
+  /** Replace the whole editable state from a loaded project (re-bakes). */
+  loadProject: (file: ProjectFile) => void
 
   /** Change the frame rate, keeping the loop length (re-bakes at new resolution). */
   setFps: (fps: number) => void
@@ -267,6 +275,57 @@ export const useStore = create<AppState>((set, get) => {
       }),
     setSelection: (indices) => set({ selection: indices }),
     clearSelection: () => set({ selection: [] }),
+
+    getProjectFile: () => {
+      const s = get()
+      return {
+        format: 'led-animator-project',
+        version: 1,
+        fps: s.raster.fps,
+        numFrames: s.raster.numFrames,
+        leds: s.leds,
+        sources: s.project.sources,
+        tracks: s.project.tracks,
+        assignments: s.project.assignments,
+        display: { ledScale: s.ledScale, ledShape: s.ledShape, showLabels: s.showLabels },
+      }
+    },
+
+    loadProject: (f) => {
+      const project: Project = { sources: f.sources, tracks: f.tracks, assignments: f.assignments }
+      // Advance id counters past loaded ids so new items can't collide.
+      const projIds: string[] = []
+      for (const src of f.sources) projIds.push(src.id)
+      for (const t of f.tracks) {
+        projIds.push(t.id)
+        if (t.automations) {
+          for (const auto of Object.values(t.automations)) {
+            if (auto) for (const k of auto.keys) projIds.push(k.id)
+          }
+        }
+      }
+      reserveIds(projIds)
+      const stopIds: string[] = []
+      for (const src of f.sources) {
+        const g = src.gradient
+        if ('stops' in g) for (const st of g.stops) stopIds.push(st.id)
+      }
+      reserveStopIds(stopIds)
+
+      set({
+        leds: f.leds,
+        project,
+        ledScale: f.display?.ledScale ?? 1,
+        ledShape: f.display?.ledShape ?? 'cube',
+        showLabels: f.display?.showLabels ?? false,
+        selection: [],
+        selectionAnchor: null,
+        selectedTrack: f.tracks[0]?.id ?? null,
+        ghost: null,
+        frame: 0,
+        raster: bakeProject(project, f.leds.length, f.numFrames, f.fps),
+      })
+    },
 
     setFps: (fps) => {
       const { project, leds, raster, frame } = get()

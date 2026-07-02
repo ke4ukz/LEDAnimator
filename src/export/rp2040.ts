@@ -75,8 +75,10 @@ export function rp2040Readme(pin: number): string {
   return `LED Animator - RP2040 (MicroPython) export
 
 Files:
-  main.py      WS2812 player (PIO). DATA_PIN is set to GP${pin}.
-  pattern.bin  The baked animation (LEDA v1).
+  main.py       WS2812 player (PIO). DATA_PIN is set to GP${pin}.
+  pattern.bin   The baked animation (LEDA v1).
+  project.json  Editable project — re-import into LED Animator to keep editing.
+                (App only; do NOT copy this to the board.)
 
 Install (Thonny or mpremote):
   1. Flash MicroPython for RP2040 onto the Pico / Pico W.

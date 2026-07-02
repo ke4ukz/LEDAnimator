@@ -122,6 +122,15 @@ export function trackPhaseAt(track: Track, frame: number, numFrames: number): nu
 let seq = 0
 export const newId = (prefix: string) => `${prefix}${seq++}`
 
+/** Advance the id counter past any ids in `ids` (used when loading a project so
+ *  newly-created ids can't collide with loaded ones). */
+export function reserveIds(ids: string[]) {
+  for (const id of ids) {
+    const m = /(\d+)$/.exec(id)
+    if (m) seq = Math.max(seq, parseInt(m[1], 10) + 1)
+  }
+}
+
 export function defaultLinePath(): PathDef {
   return { type: 'line', x0: 0, y0: 0.5, x1: 1, y1: 0.5 }
 }
