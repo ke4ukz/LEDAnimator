@@ -15,6 +15,7 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
   const [deviceId, setDeviceId] = useState('rp2040')
   const [pin, setPin] = useState(0)
   const [brightness, setBrightness] = useState(1)
+  const [building, setBuilding] = useState(false)
 
   const device = DEVICES.find((d) => d.id === deviceId)!
   const bytes = estimateBytes(raster)
@@ -33,6 +34,19 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
     downloadBytes('led-animation-rp2040.zip', zip, 'application/zip')
   }
   const exportData = () => downloadBytes('pattern.bin', encodeRaster(raster), 'application/octet-stream')
+  const exportUf2 = async () => {
+    setBuilding(true)
+    try {
+      // Lazy-load: pulls in the littlefs wasm + firmware only when used.
+      const { buildRp2040CombinedUf2 } = await import('../export/combinedUf2')
+      const uf2 = await buildRp2040CombinedUf2(raster, pin, Number(brightness.toFixed(2)))
+      downloadBytes('led-animation-picow.uf2', uf2, 'application/octet-stream')
+    } catch (e) {
+      window.alert(`Could not build the UF2: ${(e as Error).message}`)
+    } finally {
+      setBuilding(false)
+    }
+  }
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -80,10 +94,18 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
               <span className="muted">{Math.round(brightness * 100)}%</span>
             </label>
             <div className="export-actions">
-              <button className="btn btn-primary" onClick={exportProject}>MicroPython project (.zip)</button>
+              <button className="btn btn-primary" disabled={building} onClick={exportUf2}>
+                {building ? 'Building UF2…' : 'One-drag UF2 (blank Pico W)'}
+              </button>
+            </div>
+            <p className="muted">
+              Bundles MicroPython v1.28.0 + your pattern — drag it onto the RPI-RP2 drive of a blank Pico W.
+            </p>
+            <div className="export-actions">
+              <button className="btn" onClick={exportProject}>MicroPython project (.zip)</button>
               <button className="btn" onClick={exportData}>Pattern data only (.bin)</button>
             </div>
-            <p className="muted">UF2 firmware export is planned.</p>
+            <p className="muted">The .zip / .bin need MicroPython already installed (copy via mpremote/Thonny).</p>
           </>
         ) : (
           <p className="placeholder">Export for {device.name} is planned — the size and limits above already apply.</p>

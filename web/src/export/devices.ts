@@ -21,8 +21,8 @@ export const DEVICES: DeviceProfile[] = [
     id: 'rp2040',
     name: 'RP2040 (Pico / Pico W)',
     maxLeds: 2000,
-    maxDataBytes: 1_000_000,
-    notes: '264 KB RAM, ~1 MB free flash filesystem for MicroPython. WS2812 driven via PIO.',
+    maxDataBytes: 800_000,
+    notes: '264 KB RAM; ~848 KB MicroPython filesystem (Pico W v1.28.0). WS2812 driven via PIO.',
     targets: ['rp2040-micropython'],
   },
   {
