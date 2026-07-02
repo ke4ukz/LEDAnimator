@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react'
 import { useStore } from '../store'
 
 /** Single-frame step icon: a bar with one triangle (|◀ / ▶|). */
@@ -19,7 +20,48 @@ function StepIcon({ dir }: { dir: 'back' | 'fwd' }) {
   )
 }
 
-/** Global playback transport: play/pause, frame scrub, and a time/rate readout. */
+/** Number field that commits on Enter/blur (immune to the transport's per-frame
+ *  re-render clobbering a controlled value). */
+function NumField({
+  value, onCommit, min, max, step,
+}: {
+  value: number
+  onCommit: (n: number) => void
+  min: number
+  max: number
+  step: number
+}) {
+  const ref = useRef<HTMLInputElement>(null)
+  useEffect(() => {
+    const el = ref.current
+    if (el && document.activeElement !== el) el.value = String(value)
+  }, [value])
+  const commit = () => {
+    const n = parseFloat(ref.current?.value ?? '')
+    if (!Number.isNaN(n)) onCommit(n)
+    if (ref.current) ref.current.value = String(value)
+  }
+  return (
+    <input
+      ref={ref}
+      className="tnum"
+      type="number"
+      defaultValue={value}
+      min={min}
+      max={max}
+      step={step}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault()
+          ref.current?.blur()
+        }
+      }}
+    />
+  )
+}
+
+/** Global playback transport: play/pause, frame scrub, loop length/rate, readout. */
 export function Transport() {
   const playing = useStore((s) => s.playing)
   const frame = useStore((s) => s.frame)
@@ -27,6 +69,8 @@ export function Transport() {
   const togglePlay = useStore((s) => s.togglePlay)
   const setFrame = useStore((s) => s.setFrame)
   const advance = useStore((s) => s.advance)
+  const setFps = useStore((s) => s.setFps)
+  const setDuration = useStore((s) => s.setDuration)
 
   const durationS = raster.numFrames / raster.fps
   const timeS = frame / raster.fps
@@ -52,10 +96,17 @@ export function Transport() {
         onChange={(e) => setFrame(Number(e.target.value))}
       />
 
+      <label className="tfield" title="Loop length (seconds)">
+        len <NumField value={Number(durationS.toFixed(2))} onCommit={setDuration} min={0.05} max={86400} step={0.1} /> s
+      </label>
+      <label className="tfield" title="Frame rate">
+        <NumField value={raster.fps} onCommit={setFps} min={1} max={240} step={1} /> fps
+      </label>
+
       <div className="readout">
-        <span>{timeS.toFixed(2)}s / {durationS.toFixed(2)}s</span>
+        <span>{timeS.toFixed(2)}s</span>
         <span className="muted">frame {frame} / {raster.numFrames - 1}</span>
-        <span className="muted">{raster.fps} fps · {raster.numLeds} LEDs</span>
+        <span className="muted">{raster.numLeds} LEDs</span>
       </div>
     </div>
   )

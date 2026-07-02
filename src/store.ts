@@ -63,6 +63,11 @@ interface AppState {
   setSelection: (indices: number[]) => void
   clearSelection: () => void
 
+  /** Change the frame rate, keeping the loop length (re-bakes at new resolution). */
+  setFps: (fps: number) => void
+  /** Change the loop length in seconds, keeping the fps (re-bakes). */
+  setDuration: (seconds: number) => void
+
   play: () => void
   pause: () => void
   togglePlay: () => void
@@ -262,6 +267,20 @@ export const useStore = create<AppState>((set, get) => {
       }),
     setSelection: (indices) => set({ selection: indices }),
     clearSelection: () => set({ selection: [] }),
+
+    setFps: (fps) => {
+      const { project, leds, raster, frame } = get()
+      fps = Math.max(1, Math.min(240, Math.round(fps)))
+      const duration = raster.numFrames / raster.fps
+      const numFrames = Math.max(1, Math.round(duration * fps))
+      set({ raster: bakeProject(project, leds.length, numFrames, fps), frame: Math.min(frame, numFrames - 1) })
+    },
+    setDuration: (seconds) => {
+      const { project, leds, raster, frame } = get()
+      seconds = Math.max(0.05, seconds)
+      const numFrames = Math.max(1, Math.round(seconds * raster.fps))
+      set({ raster: bakeProject(project, leds.length, numFrames, raster.fps), frame: Math.min(frame, numFrames - 1) })
+    },
 
     play: () => set({ playing: true }),
     pause: () => set({ playing: false }),
