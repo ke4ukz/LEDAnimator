@@ -1,49 +1,30 @@
 # LED Animator
 
-An in-browser, single-page editor for authoring LED animations and exporting them
-for microcontroller playback.
+Design LED animations in the browser and play them back on microcontrollers.
 
-You supply color-track texture images (gradients, blocks, transitions), place LEDs
-in 3D, assign them to tracks that sample along a path across an image, and tune
-per-track speed and chase offsets. A 3D viewport simulates the result. Everything
-bakes down to a **fixed-rate raster** — one global frame interval, row = LED,
-column = frame — so the runtime firmware is a single fixed-rate loop that reads a
-flat array. The browser emulator plays that same raster by stepping it, so the
-preview is identical to hardware.
+You author patterns in a web editor — place LEDs in 3D, sample gradients/textures
+along per-track paths, tune speed/chase over a timeline — and everything **bakes
+down to a fixed-rate raster** (row = LED, column = frame) that a device plays back
+with a simple fixed-rate loop. The browser preview steps that same raster, so what
+you see matches the hardware.
 
-## Status
+## Repository layout
 
-Early scaffold. Working today:
+This repo is organized so each app type lives in its own top-level folder:
 
-- 3D simulation viewport (react-three-fiber) rendering LEDs from an arrangement.
-- Fixed-rate player loop driving a baked demo raster (rainbow chase on a ring).
-- DAW-style app shell (assets / arrangement / inspector / timeline placeholders).
+| Folder | What it is | Status |
+|---|---|---|
+| [`web/`](web/) | The browser-based editor (Vite + React + three) | Active |
+| _(planned)_ `ios/` | iPhone/iPad companion — BLE + WiFi control, AR placement | Not started |
+| _(planned)_ `macos/` | Mac companion — BLE + WiFi + USB control | Not started |
+| _(planned)_ `watch/` | Standalone watchOS remote — connect/list/select | Not started |
+| _(planned)_ `firmware/` | Device player + control service (starting with RP2040) | Not started |
 
-Planned: image upload + path sampling → per-track speed-automation lane → 3D
-arrangement editor → multi-track compositing → adaptive raster baker + export
-(JSON, raw/RLE binary) → hardware packagers (C header, RP2040 UF2, MicroPython,
-Pi Zero live mode).
+Project-wide files (this README, `LICENSE`, the GitHub Pages workflow in
+`.github/`) live at the root; everything specific to the web app is inside `web/`.
 
-## Develop
-
-```bash
-npm install
-npm run dev      # start the dev server
-npm run build    # type-check + production build
-npm run preview  # preview the production build
-```
-
-Stack: Vite + React + TypeScript + three / react-three-fiber + zustand.
-
-## Deployment
-
-Pushing to `main` builds and publishes to GitHub Pages via
-`.github/workflows/deploy.yml`. Enable Pages for the repo with **Source: GitHub
-Actions**. The Vite `base` is relative, so it works under any repo name. (The
-future on-Pi server mode is the exception and is hosted on the device itself.)
+Start with [`web/README.md`](web/README.md) to run the editor.
 
 ## License
 
-[GNU AGPL-3.0](LICENSE). Because LED Animator is intended to run as a network
-service in the on-Pi hosting mode, the AGPL ensures users interacting with a
-hosted instance can obtain the corresponding source.
+[GNU AGPL-3.0](LICENSE).
