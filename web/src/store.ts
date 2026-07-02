@@ -17,6 +17,7 @@ import {
 import { reserveStopIds } from './gradient'
 import { bakeProject } from './bake'
 import type { ProjectFile } from './export/projectFile'
+import { loadSavedProjectFile, saveProjectFile } from './persistence'
 
 interface AppState {
   leds: LedPosition[]
@@ -70,6 +71,8 @@ interface AppState {
   getProjectFile: () => ProjectFile
   /** Replace the whole editable state from a loaded project (re-bakes). */
   loadProject: (file: ProjectFile) => void
+  /** Reset to a fresh default project. */
+  newProject: () => void
 
   /** Change the frame rate, keeping the loop length (re-bakes at new resolution). */
   setFps: (fps: number) => void
@@ -84,8 +87,68 @@ interface AppState {
 }
 
 const DEMO_LEDS = 24
-const demoLeds = ringArrangement(DEMO_LEDS)
-const initialProject = defaultProject(DEMO_LEDS)
+
+/** Advance id counters past a project's ids (loading, so new ids don't collide). */
+function reserveProjectIds(project: Project) {
+  const ids: string[] = []
+  for (const s of project.sources) ids.push(s.id)
+  for (const t of project.tracks) {
+    ids.push(t.id)
+    if (t.automations) {
+      for (const auto of Object.values(t.automations)) {
+        if (auto) for (const k of auto.keys) ids.push(k.id)
+      }
+    }
+  }
+  reserveIds(ids)
+  const stopIds: string[] = []
+  for (const s of project.sources) {
+    const g = s.gradient
+    if ('stops' in g) for (const st of g.stops) stopIds.push(st.id)
+  }
+  reserveStopIds(stopIds)
+}
+
+interface Init {
+  leds: LedPosition[]
+  project: Project
+  raster: Raster
+  selectedTrack: string | null
+  ledScale: number
+  ledShape: 'sphere' | 'cube'
+  showLabels: boolean
+}
+
+/** Startup state: the autosaved project if present, else a fresh default. */
+function initialState(): Init {
+  const saved = loadSavedProjectFile()
+  if (saved) {
+    const project: Project = { sources: saved.sources, tracks: saved.tracks, assignments: saved.assignments }
+    reserveProjectIds(project)
+    return {
+      leds: saved.leds,
+      project,
+      raster: bakeProject(project, saved.leds.length, saved.numFrames, saved.fps),
+      selectedTrack: saved.tracks[0]?.id ?? null,
+      ledScale: saved.display?.ledScale ?? 1,
+      ledShape: saved.display?.ledShape ?? 'cube',
+      showLabels: saved.display?.showLabels ?? false,
+    }
+  }
+  const leds = ringArrangement(DEMO_LEDS)
+  const project = defaultProject(DEMO_LEDS)
+  return {
+    leds,
+    project,
+    raster: bakeProject(project, DEMO_LEDS),
+    selectedTrack: project.tracks[0]?.id ?? null,
+    ledScale: 1,
+    ledShape: 'cube',
+    showLabels: false,
+  }
+}
+
+const init = initialState()
 
 export const useStore = create<AppState>((set, get) => {
   /** Re-bake the raster from the current project, preserving frames/fps. */
@@ -96,18 +159,18 @@ export const useStore = create<AppState>((set, get) => {
   const commit = (project: Project) => set({ project, raster: rebake(project) })
 
   return {
-    leds: demoLeds,
-    project: initialProject,
-    raster: bakeProject(initialProject, DEMO_LEDS),
+    leds: init.leds,
+    project: init.project,
+    raster: init.raster,
     frame: 0,
     playing: true,
     selection: [0],
     selectionAnchor: 0,
-    selectedTrack: initialProject.tracks[0]?.id ?? null,
+    selectedTrack: init.selectedTrack,
     ghost: null,
-    ledScale: 1,
-    ledShape: 'cube',
-    showLabels: false,
+    ledScale: init.ledScale,
+    ledShape: init.ledShape,
+    showLabels: init.showLabels,
 
     updateGradient: (g) => {
       const { project, selectedTrack } = get()
@@ -327,6 +390,24 @@ export const useStore = create<AppState>((set, get) => {
       })
     },
 
+    newProject: () => {
+      const leds = ringArrangement(DEMO_LEDS)
+      const project = defaultProject(DEMO_LEDS)
+      set({
+        leds,
+        project,
+        raster: bakeProject(project, DEMO_LEDS),
+        frame: 0,
+        selection: [0],
+        selectionAnchor: 0,
+        selectedTrack: project.tracks[0]?.id ?? null,
+        ghost: null,
+        ledScale: 1,
+        ledShape: 'cube',
+        showLabels: false,
+      })
+    },
+
     setFps: (fps) => {
       const { project, leds, raster, frame } = get()
       fps = Math.max(1, Math.min(240, Math.round(fps)))
@@ -354,5 +435,22 @@ export const useStore = create<AppState>((set, get) => {
           : Math.max(0, Math.min(raster.numFrames - 1, next)),
       })
     },
+  }
+})
+
+// Autosave the project (debounced) whenever the editable state changes. Frame
+// ticks and selection don't touch these slices, so playback doesn't trigger it.
+let saveTimer: ReturnType<typeof setTimeout> | undefined
+useStore.subscribe((state, prev) => {
+  if (
+    state.leds !== prev.leds ||
+    state.project !== prev.project ||
+    state.raster !== prev.raster ||
+    state.ledScale !== prev.ledScale ||
+    state.ledShape !== prev.ledShape ||
+    state.showLabels !== prev.showLabels
+  ) {
+    clearTimeout(saveTimer)
+    saveTimer = setTimeout(() => saveProjectFile(useStore.getState().getProjectFile()), 800)
   }
 })

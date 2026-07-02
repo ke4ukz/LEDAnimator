@@ -33,7 +33,12 @@ export default function App() {
   const [exportOpen, setExportOpen] = useState(false)
   const [dragging, setDragging] = useState(false)
   const loadProject = useStore((s) => s.loadProject)
+  const newProject = useStore((s) => s.newProject)
   const fileRef = useRef<HTMLInputElement>(null)
+
+  const onNew = () => {
+    if (window.confirm('Start a new project? Your current work will be discarded.')) newProject()
+  }
 
   const importFile = useCallback(
     async (file?: File | null) => {
@@ -94,7 +99,8 @@ export default function App() {
       <header className="topbar">
         <span className="brand">LED Animator</span>
         <span className="muted">in-browser editor · fixed-rate raster</span>
-        <button className="btn export-btn" onClick={() => fileRef.current?.click()}>Import</button>
+        <button className="btn export-btn" onClick={onNew}>New</button>
+        <button className="btn" onClick={() => fileRef.current?.click()}>Import</button>
         <button className="btn" onClick={() => setExportOpen(true)}>Export</button>
         <input
           ref={fileRef}
