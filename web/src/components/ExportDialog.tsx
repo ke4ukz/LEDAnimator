@@ -99,7 +99,8 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
               </button>
             </div>
             <p className="muted">
-              Bundles MicroPython v1.28.0 + your pattern — drag it onto the RPI-RP2 drive of a blank Pico W.
+              Bundles MicroPython v1.28.0 + your pattern. Hold BOOTSEL, plug in the Pico W, and drop this
+              onto the RPI-RP2 drive. (If it doesn't take, flash it with <code>picotool load</code>.)
             </p>
             <div className="export-actions">
               <button className="btn" onClick={exportProject}>MicroPython project (.zip)</button>

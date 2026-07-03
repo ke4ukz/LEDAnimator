@@ -42,11 +42,19 @@ function writeBlock(out: Uint8Array, index: number, addr: number, blockNo: numbe
   dv.setUint32(508, MAGIC_END, true)
 }
 
+const XIP_BASE = 0x10000000
+
 /**
  * Splice a filesystem image into a firmware UF2 at `fsBase`, producing one
- * combined UF2 (firmware blocks + FS blocks, renumbered). Throws if the
- * firmware extends past the FS base — the safety net that stops a stale
- * firmware/param mismatch from writing the FS into the firmware region.
+ * **contiguous** combined UF2 covering XIP_BASE..(fsBase+fsImage). The gap
+ * between the firmware and the filesystem is filled with 0xFF (erased flash).
+ *
+ * Contiguity matters: a UF2 with an address gap gets its tail silently dropped
+ * by macOS drag-and-drop onto RPI-RP2 (the filesystem half never reaches flash).
+ * A gapless full-flash image is the normal shape and copies reliably.
+ *
+ * Throws if the firmware extends past the FS base — the safety net that stops a
+ * stale firmware/param mismatch from writing the FS into the firmware region.
  */
 export function assembleCombinedUf2(firmwareUf2: Uint8Array, fsImage: Uint8Array, fsBase: number): Uint8Array {
   const fw = parseUf2(firmwareUf2)
@@ -57,19 +65,16 @@ export function assembleCombinedUf2(firmwareUf2: Uint8Array, fsImage: Uint8Array
         'the pinned firmware and filesystem parameters are out of sync.',
     )
   }
-  const fsBlocks = Math.ceil(fsImage.length / PAYLOAD)
-  const total = fw.length + fsBlocks
+  // Compose one flat flash image (erased), overlay firmware, then the FS.
+  const size = fsBase + fsImage.length - XIP_BASE
+  const image = new Uint8Array(size).fill(0xff)
+  for (const b of fw) image.set(b.data, b.addr - XIP_BASE)
+  image.set(fsImage, fsBase - XIP_BASE)
+
+  const total = Math.ceil(size / PAYLOAD)
   const out = new Uint8Array(total * 512)
-  let n = 0
-  for (const b of fw) {
-    writeBlock(out, n, b.addr, n, total, b.data)
-    n++
-  }
-  for (let off = 0; off < fsImage.length; off += PAYLOAD) {
-    const chunk = fsImage.subarray(off, off + PAYLOAD)
-    const payload = chunk.length === PAYLOAD ? chunk : (() => { const p = new Uint8Array(PAYLOAD); p.set(chunk); return p })()
-    writeBlock(out, n, fsBase + off, n, total, payload)
-    n++
+  for (let i = 0; i < total; i++) {
+    writeBlock(out, i, XIP_BASE + i * PAYLOAD, i, total, image.subarray(i * PAYLOAD, i * PAYLOAD + PAYLOAD))
   }
   return out
 }
