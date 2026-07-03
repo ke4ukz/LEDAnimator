@@ -144,6 +144,81 @@
   flex-wrap: wrap;
 }
 
+/* Inline "ⓘ" details popover used in the export dialog */
+.info {
+  position: relative;
+  display: inline-flex;
+  vertical-align: middle;
+}
+
+.info-dot {
+  width: 15px;
+  height: 15px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--panel-2);
+  color: var(--muted);
+  font-size: 10px;
+  font-style: italic;
+  font-family: Georgia, 'Times New Roman', serif;
+  line-height: 1;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.info-dot:hover,
+.info-dot[aria-expanded='true'] {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.info-pop {
+  position: absolute;
+  z-index: 10;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  width: 270px;
+  max-width: 78vw;
+  padding: 9px 11px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.45;
+  text-align: left;
+  white-space: normal;
+  cursor: auto;
+}
+
+.info-pop ul {
+  margin: 5px 0 0;
+  padding-left: 16px;
+}
+
+.info-pop code {
+  font-size: 11px;
+}
+
+.info-pop a {
+  color: var(--accent);
+}
+
+.hint-link {
+  font-size: 12px;
+  margin: 4px 0 0;
+}
+
+.hint-link a {
+  color: var(--accent);
+}
+
 /* Resizable splitters */
 .splitter {
   position: absolute;

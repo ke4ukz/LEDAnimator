@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { type ReactNode, useEffect, useRef, useState } from 'react'
 import { useStore } from '../store'
 import { DEVICES, checkLimits } from '../export/devices'
 import { encodeRaster, estimateBytes } from '../export/format'
@@ -98,21 +98,91 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
                 {building ? 'Building UF2…' : 'One-drag UF2 (blank Pico W)'}
               </button>
             </div>
-            <p className="muted">
-              Bundles MicroPython v1.28.0 + your pattern. Hold BOOTSEL, plug in the Pico W, and drop this
-              onto the RPI-RP2 drive. (If it doesn't take, flash it with <code>picotool load</code>.)
+            <div className="muted">
+              Drop it onto the RPI-RP2 drive of a blank Pico W — nothing to install first.
+              <InfoDot label="One-drag UF2 details">
+                A single gapless firmware image (~4&nbsp;MB) containing:
+                <ul>
+                  <li>MicroPython <strong>v1.28.0</strong> (pinned) for the Pico W</li>
+                  <li>a LittleFS filesystem with <code>main.py</code> (the player) + <code>pattern.bin</code> (your animation)</li>
+                </ul>
+                The firmware→filesystem gap is filled so macOS drag-and-drop copies the whole
+                thing. If the strip stays dark after flashing, flash the same file with{' '}
+                <code>picotool load led-animation-picow.uf2</code> instead.
+              </InfoDot>
+            </div>
+            <p className="hint-link">
+              Need to enter bootloader mode?{' '}
+              <a
+                href="https://www.raspberrypi.com/documentation/microcontrollers/micropython.html#drag-and-drop-micropython"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                Raspberry Pi's guide
+              </a>{' '}
+              — hold <strong>BOOTSEL</strong> while plugging in. (Don't download their UF2; use the button above.)
             </p>
             <div className="export-actions">
               <button className="btn" onClick={exportProject}>MicroPython project (.zip)</button>
               <button className="btn" onClick={exportData}>Pattern data only (.bin)</button>
             </div>
-            <p className="muted">The .zip / .bin need MicroPython already installed (copy via mpremote/Thonny).</p>
+            <div className="muted">
+              For a Pico that already runs MicroPython — copy the files over yourself.
+              <InfoDot label="Project / data file details">
+                <ul>
+                  <li><strong>.zip</strong> — <code>main.py</code>, <code>pattern.bin</code>, <code>project.json</code>, and a README.</li>
+                  <li><strong>.bin</strong> — just the raw pattern data, to drop next to an existing <code>main.py</code>.</li>
+                </ul>
+                Copy them to the board with <code>mpremote</code> or Thonny. These don't touch the
+                firmware, so MicroPython must already be installed.
+              </InfoDot>
+            </div>
           </>
         ) : (
           <p className="placeholder">Export for {device.name} is planned — the size and limits above already apply.</p>
         )}
       </div>
     </div>
+  )
+}
+
+/** Inline "ⓘ" that reveals a details popover on click; closes on outside-click or Escape. */
+function InfoDot({ label, children }: { label: string; children: ReactNode }) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLSpanElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const onDown = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false)
+    window.addEventListener('mousedown', onDown)
+    window.addEventListener('keydown', onKey)
+    return () => {
+      window.removeEventListener('mousedown', onDown)
+      window.removeEventListener('keydown', onKey)
+    }
+  }, [open])
+
+  return (
+    <span className="info" ref={ref}>
+      {' '}
+      <button
+        type="button"
+        className="info-dot"
+        aria-label={label}
+        aria-expanded={open}
+        onClick={() => setOpen((o) => !o)}
+      >
+        i
+      </button>
+      {open && (
+        <div className="info-pop" role="tooltip">
+          {children}
+        </div>
+      )}
+    </span>
   )
 }
 
