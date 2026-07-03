@@ -17,7 +17,7 @@ export function PrivacyDialog({ onClose }: { onClose: () => void }) {
             </li>
             <li>No cookies, no analytics, no tracking.</li>
             <li>
-              Exports (<code>.uf2</code> / <code>.zip</code> / <code>.bin</code>) are generated locally in
+              Exports (<code>.uf2</code> / <code>.zip</code> / <code>.leda</code>) are generated locally in
               your browser.
             </li>
             <li>

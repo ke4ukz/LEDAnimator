@@ -1,5 +1,5 @@
 // MicroPython project for the RP2040 / Pico W: a PIO WS2812 driver + a
-// fixed-rate player that reads pattern.bin (LEDA v1), plus an optional Bluetooth
+// fixed-rate player that reads pattern.leda (LEDA v1), plus an optional Bluetooth
 // LE control channel (a custom LED Animator service with UART-style characteristics)
 // for live brightness / speed / solid color / pattern selection. The BLE half is
 // skipped automatically on a plain
@@ -7,7 +7,7 @@
 
 export function rp2040MainPy(pin: number, brightness: number, name = 'LED Animator'): string {
   return `# main.py - LED Animator player for RP2040 / Pico W (MicroPython)
-# Plays pattern.bin (LEDA v1) on a WS2812 / NeoPixel strip using PIO, and on a
+# Plays *.leda pattern files (LEDA v1) on a WS2812 / NeoPixel strip via PIO, and on a
 # Pico W exposes a Bluetooth LE control channel for live control.
 #
 # Wiring: strip data line -> GP${pin}, GND common with the strip's supply.
@@ -30,7 +30,8 @@ from machine import Pin
 import rp2
 
 DATA_PIN = ${pin}
-PATTERN_FILE = "pattern.bin"
+PATTERN_FILE = "pattern.leda"
+PATTERN_EXT = ".leda"
 DEVICE_NAME = ${JSON.stringify(name)}   # default BLE name; NAME command overrides
 FW_VERSION = "1.0.0"
 
@@ -67,6 +68,8 @@ class S:
     bright_at = 0            # time.ticks_ms() of the last brightness change
     tx = None                # TX characteristic handle (player-loop notifies)
     conns = None             # live set of connected centrals
+    list_queue = None        # files left to stream for a LIST (None = idle)
+    list_at = 0              # time.ticks_ms() of the last streamed FILE
 
 
 _buf = None
@@ -101,7 +104,7 @@ def _show_solid(rgb, n):
 def list_patterns():
     out = []
     for name in os.listdir():
-        if name.endswith(".bin"):
+        if name.endswith(PATTERN_EXT):
             out.append(name)
     return out
 
@@ -116,7 +119,7 @@ def _free_bytes():
 
 def _load_name():
     try:
-        with open("device.name") as fh:
+        with open("devicename.txt") as fh:
             nm = fh.read().strip()
             if nm:
                 return nm
@@ -164,6 +167,21 @@ def _notify(msg):
             pass
 
 
+def _stream_list():
+    # Emit one queued filename per call, paced (~30ms) so we don't outrun the
+    # BLE link and drop notifications; finish with ENDLIST.
+    if S.list_queue is None:
+        return
+    if time.ticks_diff(time.ticks_ms(), S.list_at) < 30:
+        return
+    S.list_at = time.ticks_ms()
+    if S.list_queue:
+        _notify("FILE " + S.list_queue.pop(0))
+    else:
+        S.list_queue = None
+        _notify("ENDLIST")
+
+
 def _persist_bright():
     # Debounced: write once the brightness has been steady for ~1s, so a slider
     # drag doesn't hammer the flash. Called from the player loop (not the IRQ).
@@ -207,7 +225,7 @@ def dispatch(line):
                 return "ERR args"
             S.name = new
             try:
-                with open("device.name", "w") as fh:
+                with open("devicename.txt", "w") as fh:
                     fh.write(new)
             except Exception:
                 pass
@@ -217,7 +235,11 @@ def dispatch(line):
                 pass
             return "OK NAME " + new
         if c == "LIST":
-            return "LIST " + ",".join(list_patterns())
+            # Streamed by the player loop: one "FILE <name>" per notification,
+            # then "ENDLIST". Avoids the single-notification size limit and any
+            # delimiter issues with filenames.
+            S.list_queue = list_patterns()
+            return None
         if c == "FREE":
             return "FREE %d" % _free_bytes()
         if c == "SELECT":
@@ -351,6 +373,7 @@ def main():
     while True:
         if S.mode == "solid":
             _persist_bright()
+            _stream_list()
             _show_solid(S.solid, S.n)
             time.sleep_ms(40)
             continue
@@ -385,6 +408,7 @@ def main():
             if S.reload or S.mode != "play":
                 break
             _persist_bright()
+            _stream_list()
             _show_grb(f.read(fb), S.n)
             time.sleep(base_delay / S.speed if S.speed > 0 else base_delay)
 
@@ -398,13 +422,13 @@ export function rp2040Readme(pin: number): string {
 
 Files:
   main.py       WS2812 player (PIO) + BLE control. DATA_PIN is set to GP${pin}.
-  pattern.bin   The baked animation (LEDA v1).
+  pattern.leda  The baked animation (LEDA v1).
   project.json  Editable project - re-import into LED Animator to keep editing.
                 (App only; do NOT copy this to the board.)
 
 Install (Thonny or mpremote):
   1. Flash MicroPython for RP2040 onto the Pico / Pico W.
-  2. Copy main.py and pattern.bin to the board.
+  2. Copy main.py and pattern.leda to the board.
   3. Reset - main.py runs on boot and loops the animation.
 
 Wiring:
@@ -425,7 +449,7 @@ Bluetooth control (Pico W only):
     INFO                 -> file, LED count, mode, brightness%, speed%
     VERSION              -> firmware version
     PLATFORM             -> board/runtime (os.uname().machine)
-    LIST                 -> comma-separated .bin pattern files on the board
+    LIST                 -> streams one "FILE <name>.leda" per notify, then ENDLIST
     FREE                 -> free filesystem bytes
     SELECT <name>        -> play a different pattern file (remembered on reboot)
     BRIGHT <0-100>       -> master brightness percent (remembered on reboot)
@@ -435,7 +459,7 @@ Bluetooth control (Pico W only):
     PLAY                 -> resume the selected pattern
     DELETE <name>        -> remove a pattern file (not the active one)
     NAME                 -> report the current advertised name
-    NAME <new name>      -> rename the device (saved to device.name, survives reboot)
+    NAME <new name>      -> rename the device (saved to devicename.txt, survives reboot)
   The advertised name defaults to what you set at export time; renaming over BLE
   overrides it. On a plain Pico (no radio) the BLE half is skipped and playback
   still runs.

@@ -25,7 +25,7 @@ export function usableFsBytes(): number {
 
 /**
  * Build a one-drag combined UF2 = pinned MicroPython firmware + a LittleFS image
- * holding main.py + pattern.bin. Drag onto RPI-RP2 → blank board plays the
+ * holding main.py + pattern.leda. Drag onto RPI-RP2 → blank board plays the
  * animation on boot.
  */
 export async function buildRp2040CombinedUf2(
@@ -48,7 +48,7 @@ export async function buildRp2040CombinedUf2(
   }
 
   const fsImage = await buildLittleFsImage(
-    [{ name: 'main.py', data: mainPy }, { name: 'pattern.bin', data: patternBin }],
+    [{ name: 'main.py', data: mainPy }, { name: 'pattern.leda', data: patternBin }],
     PICO_W_FIRMWARE.blockCount,
     PICO_W_FIRMWARE.blockSize,
   )

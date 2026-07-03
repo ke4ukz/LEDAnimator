@@ -35,13 +35,13 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
     const data = encodeRaster(raster)
     const zip = zipProject({
       'main.py': rp2040MainPy(pin, Number(brightness.toFixed(2)), bleName),
-      'pattern.bin': data,
+      'pattern.leda': data,
       'project.json': serializeProjectFile(getProjectFile()),
       'README.txt': rp2040Readme(pin),
     })
     downloadBytes('led-animation-rp2040.zip', zip, 'application/zip')
   }
-  const exportData = () => downloadBytes('pattern.bin', encodeRaster(raster), 'application/octet-stream')
+  const exportData = () => downloadBytes('pattern.leda', encodeRaster(raster), 'application/octet-stream')
   const exportUf2 = async () => {
     setBuilding(true)
     try {
@@ -122,7 +122,7 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
                 A single gapless firmware image (~4&nbsp;MB) containing:
                 <ul>
                   <li>MicroPython <strong>v1.28.0</strong> (pinned) for the Pico W</li>
-                  <li>a LittleFS filesystem with <code>main.py</code> (the player) + <code>pattern.bin</code> (your animation)</li>
+                  <li>a LittleFS filesystem with <code>main.py</code> (the player) + <code>pattern.leda</code> (your animation)</li>
                 </ul>
                 The firmware→filesystem gap is filled so macOS drag-and-drop copies the whole
                 thing. If the strip stays dark after flashing, flash the same file with{' '}
@@ -144,12 +144,12 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
               <button className="btn" onClick={exportProject}>MicroPython project (.zip)</button>
               <InfoDot label="MicroPython project (.zip) details">
                 For a Pico that already runs MicroPython. Contains <code>main.py</code>,{' '}
-                <code>pattern.bin</code>, <code>project.json</code>, and a README. Copy it to the
+                <code>pattern.leda</code>, <code>project.json</code>, and a README. Copy it to the
                 board with <code>mpremote</code> or Thonny — it doesn't touch the firmware.
               </InfoDot>
-              <button className="btn" onClick={exportData}>Pattern data only (.bin)</button>
-              <InfoDot label="Pattern data (.bin) details">
-                Just the raw <code>pattern.bin</code>, to drop next to an existing <code>main.py</code>{' '}
+              <button className="btn" onClick={exportData}>Pattern data only (.leda)</button>
+              <InfoDot label="Pattern data (.leda) details">
+                Just the raw <code>pattern.leda</code>, to drop next to an existing <code>main.py</code>{' '}
                 on a Pico that already runs MicroPython. Copy it over with <code>mpremote</code> or Thonny.
               </InfoDot>
             </div>
