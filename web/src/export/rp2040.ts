@@ -1,24 +1,33 @@
-// MicroPython project for the RP2040: a PIO WS2812 driver + a fixed-rate player
-// that reads pattern.bin (LEDA v1). Written to be readable and modifiable — a
-// programmer can extend main() to hold several patterns and pick between them.
+// MicroPython project for the RP2040 / Pico W: a PIO WS2812 driver + a
+// fixed-rate player that reads pattern.bin (LEDA v1), plus an optional Bluetooth
+// LE control channel (Nordic UART Service) for live brightness / speed / solid
+// color / pattern selection. The BLE half is skipped automatically on a plain
+// Pico (no radio), so the same script runs on both.
 
 export function rp2040MainPy(pin: number, brightness: number): string {
-  return `# main.py - LED Animator player for RP2040 (MicroPython)
-# Plays pattern.bin (LEDA v1) on a WS2812 / NeoPixel strip using PIO.
+  return `# main.py - LED Animator player for RP2040 / Pico W (MicroPython)
+# Plays pattern.bin (LEDA v1) on a WS2812 / NeoPixel strip using PIO, and on a
+# Pico W exposes a Bluetooth LE control channel for live control.
 #
 # Wiring: strip data line -> GP${pin}, GND common with the strip's supply.
 # Power: a Pico's USB can only source limited current; larger strips need an
-# external 5V supply (lower BRIGHTNESS below to reduce current draw).
+# external 5V supply (lower BRIGHTNESS / use the BLE BRIGHT command).
 #
-# Multiple patterns: keep several .bin files and choose which to open in main().
+# BLE control - Nordic UART Service (works with nRF Connect / LightBlue too):
+#   Service 6E400001-B5A3-F393-E0A9-E50E24DCCA9E
+#   RX (write)  6E400002-...   TX (notify) 6E400003-...
+# Send one text command per write to RX; the reply arrives as a TX notify.
+#   PING | INFO | LIST | FREE | SELECT <name> | BRIGHT <0-100> |
+#   SPEED <10-400> | SOLID <r> <g> <b> | OFF | PLAY | DELETE <name>
 
-import array, time
+import array, time, os
 from machine import Pin
 import rp2
 
 DATA_PIN = ${pin}
 PATTERN_FILE = "pattern.bin"
-BRIGHTNESS = ${brightness}  # 0.0-1.0; scales every channel at runtime
+DEVICE_NAME = "LED Animator"
+
 
 @rp2.asm_pio(sideset_init=rp2.PIO.OUT_LOW, out_shiftdir=rp2.PIO.SHIFT_LEFT,
              autopull=True, pull_thresh=24)
@@ -33,16 +42,29 @@ def ws2812():
     nop()                   .side(0)    [T2 - 1]
     wrap()
 
+
 sm = rp2.StateMachine(0, ws2812, freq=8_000_000, sideset_base=Pin(DATA_PIN))
 sm.active(1)
 
+
+class S:
+    bright = ${brightness}   # 0.0 - 1.0, scales every channel
+    speed = 1.0              # playback rate multiplier (1.0 = as authored)
+    mode = "play"            # "play" or "solid"
+    solid = (0, 0, 0)
+    file = PATTERN_FILE
+    reload = True
+    n = 0                    # LED count of the loaded pattern
+
+
 _buf = None
 
-def show(frame, n):
+
+def _show_grb(frame, n):
     global _buf
     if _buf is None or len(_buf) != n:
         _buf = array.array("I", bytes(4 * n))
-    b = BRIGHTNESS
+    b = S.bright
     for i in range(n):
         r = int(frame[i * 3] * b)
         g = int(frame[i * 3 + 1] * b)
@@ -50,34 +72,211 @@ def show(frame, n):
         _buf[i] = (g << 16) | (r << 8) | bl   # WS2812 wants GRB
     sm.put(_buf, 8)
 
+
+def _show_solid(rgb, n):
+    global _buf
+    if n <= 0:
+        return
+    if _buf is None or len(_buf) != n:
+        _buf = array.array("I", bytes(4 * n))
+    b = S.bright
+    v = (int(rgb[1] * b) << 16) | (int(rgb[0] * b) << 8) | int(rgb[2] * b)
+    for i in range(n):
+        _buf[i] = v
+    sm.put(_buf, 8)
+
+
+def list_patterns():
+    out = []
+    for name in os.listdir():
+        if name.endswith(".bin"):
+            out.append(name)
+    return out
+
+
+def _free_bytes():
+    try:
+        st = os.statvfs("/")
+        return st[0] * st[3]
+    except Exception:
+        return 0
+
+
+def dispatch(line):
+    # Transport-agnostic command handler. Returns a short reply string.
+    # Reused as-is by any future transport (Wi-Fi/HTTP, USB serial).
+    line = line.strip()
+    if not line:
+        return None
+    p = line.split()
+    c = p[0].upper()
+    try:
+        if c == "PING":
+            return "OK"
+        if c == "INFO":
+            return "INFO %s %d %s %d %d" % (
+                S.file, S.n, S.mode, int(S.bright * 100), int(S.speed * 100))
+        if c == "LIST":
+            return "LIST " + ",".join(list_patterns())
+        if c == "FREE":
+            return "FREE %d" % _free_bytes()
+        if c == "SELECT":
+            name = p[1]
+            if name in list_patterns():
+                S.file = name
+                S.mode = "play"
+                S.reload = True
+                return "OK SELECT " + name
+            return "ERR no-file"
+        if c == "BRIGHT":
+            S.bright = max(0, min(100, int(p[1]))) / 100.0
+            return "OK BRIGHT %d" % int(S.bright * 100)
+        if c == "SPEED":
+            S.speed = max(10, min(400, int(p[1]))) / 100.0
+            return "OK SPEED %d" % int(S.speed * 100)
+        if c == "SOLID":
+            S.solid = (int(p[1]) & 255, int(p[2]) & 255, int(p[3]) & 255)
+            S.mode = "solid"
+            return "OK SOLID"
+        if c == "OFF":
+            S.solid = (0, 0, 0)
+            S.mode = "solid"
+            return "OK OFF"
+        if c == "PLAY":
+            S.mode = "play"
+            S.reload = True
+            return "OK PLAY"
+        if c == "DELETE":
+            name = p[1]
+            if name == S.file:
+                return "ERR in-use"
+            try:
+                os.remove(name)
+                return "OK DELETE " + name
+            except OSError:
+                return "ERR no-file"
+        return "ERR unknown"
+    except (IndexError, ValueError):
+        return "ERR args"
+
+
+def _start_ble():
+    # Nordic UART Service peripheral. One text command per write to RX; the
+    # reply comes back as a notification on TX. Only present on the Pico W.
+    import bluetooth
+    import struct
+
+    _IRQ_CONNECT = 1
+    _IRQ_DISCONNECT = 2
+    _IRQ_WRITE = 3
+    _WRITE = bluetooth.FLAG_WRITE | bluetooth.FLAG_WRITE_NO_RESPONSE
+    _NOTIFY = bluetooth.FLAG_NOTIFY
+    _SVC = bluetooth.UUID("6E400001-B5A3-F393-E0A9-E50E24DCCA9E")
+    _RX = (bluetooth.UUID("6E400002-B5A3-F393-E0A9-E50E24DCCA9E"), _WRITE)
+    _TX = (bluetooth.UUID("6E400003-B5A3-F393-E0A9-E50E24DCCA9E"), _NOTIFY)
+
+    ble = bluetooth.BLE()
+    ble.active(True)
+    ((tx, rx),) = ble.gatts_register_services(((_SVC, (_TX, _RX)),))
+    ble.gatts_set_buffer(rx, 200)   # room for longer commands (SELECT <name>)
+    conns = set()
+
+    def field(t, v):
+        return struct.pack("BB", len(v) + 1, t) + v
+
+    def advertise():
+        # Name fits in the advertisement; the 128-bit UUID rides the scan resp.
+        adv_data = field(0x01, bytes((6,))) + field(0x09, DEVICE_NAME.encode())
+        rsp = field(0x07, bytes(_SVC))
+        ble.gap_advertise(500000, adv_data=adv_data, resp_data=rsp)
+
+    def irq(event, data):
+        if event == _IRQ_CONNECT:
+            conn, _, _ = data
+            conns.add(conn)
+        elif event == _IRQ_DISCONNECT:
+            conn, _, _ = data
+            conns.discard(conn)
+            advertise()
+        elif event == _IRQ_WRITE:
+            conn, handle = data
+            if handle == rx:
+                try:
+                    reply = dispatch(ble.gatts_read(rx).decode())
+                except Exception as e:
+                    reply = "ERR " + str(e)
+                if reply:
+                    for c in conns:
+                        try:
+                            ble.gatts_notify(c, tx, reply.encode())
+                        except Exception:
+                            pass
+
+    ble.irq(irq)
+    advertise()
+    return ble
+
+
 def main():
-    f = open(PATTERN_FILE, "rb")
-    h = f.read(16)
-    if h[0:4] != b"LEDA":
-        raise ValueError("not a LEDA pattern file")
-    n = h[6] | (h[7] << 8)
-    frames = h[8] | (h[9] << 8) | (h[10] << 16) | (h[11] << 24)
-    fps = h[12] | (h[13] << 8)
-    frame_bytes = n * 3
-    delay = 1.0 / fps if fps else 0.03
-    print("LEDs:", n, "frames:", frames, "fps:", fps)
+    try:
+        _start_ble()
+        print("BLE control active:", DEVICE_NAME)
+    except Exception as e:
+        print("BLE unavailable:", e)
+
+    f = None
+    frames = 0
+    base_delay = 0.03
     while True:
+        if S.mode == "solid":
+            _show_solid(S.solid, S.n)
+            time.sleep_ms(40)
+            continue
+        if S.reload or f is None:
+            if f:
+                f.close()
+                f = None
+            try:
+                f = open(S.file, "rb")
+            except OSError:
+                S.mode = "solid"
+                S.solid = (0, 0, 0)
+                time.sleep_ms(200)
+                continue
+            h = f.read(16)
+            if h[0:4] != b"LEDA":
+                f.close()
+                f = None
+                S.mode = "solid"
+                S.solid = (0, 0, 0)
+                time.sleep_ms(200)
+                continue
+            S.n = h[6] | (h[7] << 8)
+            frames = h[8] | (h[9] << 8) | (h[10] << 16) | (h[11] << 24)
+            fps = h[12] | (h[13] << 8)
+            base_delay = 1.0 / fps if fps else 0.03
+            S.reload = False
+            print("playing", S.file, "leds", S.n, "frames", frames, "fps", fps)
+        fb = S.n * 3
         f.seek(16)
         for _ in range(frames):
-            show(f.read(frame_bytes), n)
-            time.sleep(delay)
+            if S.reload or S.mode != "play":
+                break
+            _show_grb(f.read(fb), S.n)
+            time.sleep(base_delay / S.speed if S.speed > 0 else base_delay)
+
 
 main()
 `
 }
 
 export function rp2040Readme(pin: number): string {
-  return `LED Animator - RP2040 (MicroPython) export
+  return `LED Animator - RP2040 / Pico W (MicroPython) export
 
 Files:
-  main.py       WS2812 player (PIO). DATA_PIN is set to GP${pin}.
+  main.py       WS2812 player (PIO) + BLE control. DATA_PIN is set to GP${pin}.
   pattern.bin   The baked animation (LEDA v1).
-  project.json  Editable project — re-import into LED Animator to keep editing.
+  project.json  Editable project - re-import into LED Animator to keep editing.
                 (App only; do NOT copy this to the board.)
 
 Install (Thonny or mpremote):
@@ -87,6 +286,28 @@ Install (Thonny or mpremote):
 
 Wiring:
   Strip DIN -> GP${pin}; GND common; 5V from an adequate supply.
+
+Bluetooth control (Pico W only):
+  main.py advertises a Nordic UART Service named "LED Animator". Connect with
+  the companion app - or any BLE UART app (nRF Connect, LightBlue) to test.
+  Send one text command per write to the RX characteristic; replies come back
+  as notifications on TX.
+    Service 6E400001-B5A3-F393-E0A9-E50E24DCCA9E
+    RX (write)   6E400002-B5A3-F393-E0A9-E50E24DCCA9E
+    TX (notify)  6E400003-B5A3-F393-E0A9-E50E24DCCA9E
+  Commands:
+    PING                 -> OK
+    INFO                 -> file, LED count, mode, brightness%, speed%
+    LIST                 -> comma-separated .bin pattern files on the board
+    FREE                 -> free filesystem bytes
+    SELECT <name>        -> play a different pattern file
+    BRIGHT <0-100>       -> master brightness percent
+    SPEED <10-400>       -> playback speed percent (100 = as authored)
+    SOLID <r> <g> <b>    -> hold a solid color (0-255 each)
+    OFF                  -> blank the strip
+    PLAY                 -> resume the selected pattern
+    DELETE <name>        -> remove a pattern file (not the active one)
+  On a plain Pico (no radio) the BLE half is skipped and playback still runs.
 
 LEDA v1 binary format (little-endian):
   off size field
@@ -99,8 +320,8 @@ LEDA v1 binary format (little-endian):
   14  2    reserved
   16  ...  frame-major pixels: each frame is numLeds x (R,G,B)
 
-The player steps one frame every 1/fps seconds, looping. To support multiple
-patterns, ship several .bin files and choose which to open in main(), or add a
-button/web interface to select between them.
+The player steps one frame every 1/fps seconds, looping. The command handler
+(dispatch) is transport-agnostic, so the same command set will back Wi-Fi/HTTP
+and USB-serial control as those are added.
 `
 }
