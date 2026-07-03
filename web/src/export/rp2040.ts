@@ -333,10 +333,12 @@ def _start_ble():
 
     def advertise():
         # Service UUID in the advertisement so central scan-filters (iOS) match
-        # reliably; the user-settable name rides the scan response.
+        # reliably; the user-settable name rides the scan response. ~100ms
+        # interval so discovery and connection initiation are quick (only
+        # advertises while disconnected, so it never competes with playback).
         adv_data = field(0x01, bytes((6,))) + field(0x07, bytes(_SVC))
         rsp = field(0x09, S.name.encode()[:26])
-        ble.gap_advertise(500000, adv_data=adv_data, resp_data=rsp)
+        ble.gap_advertise(100000, adv_data=adv_data, resp_data=rsp)
 
     def irq(event, data):
         if event == _IRQ_CONNECT:
