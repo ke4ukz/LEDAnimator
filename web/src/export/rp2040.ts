@@ -126,6 +126,7 @@ class S:
     tcp_srv = None           # listening socket (once Wi-Fi is up); None = no server
     tcp_client = None        # the one connected TCP control client (single client)
     tcp_buf = b""            # inbound byte buffer, split on newline into commands
+    udp_sock = None          # UDP discovery socket (replies to LEDADISCOVER probes)
 
 
 _buf = None
@@ -485,6 +486,7 @@ def _poll_wifi():
             S.wifi_state = "connected"
             S.wifi_ip = S.wlan.ifconfig()[0]
             _start_tcp()   # the control port is only reachable once we have an IP
+            _start_udp()   # ...and start answering discovery probes
             _notify(_wifi_status_str())
         elif st < 0:   # negative status codes are the error states
             reasons = {network.STAT_WRONG_PASSWORD: "wrong-password",
@@ -666,6 +668,51 @@ def _tcp_step():
             _tcp_send(reply + "\\n")
 
 
+# ---- UDP discovery ---------------------------------------------------------
+# mDNS isn't reliable on stock Pico W MicroPython, so devices announce
+# themselves via a tiny UDP scheme instead: an app broadcasts "LEDADISCOVER" to
+# the subnet on CONTROL_PORT and each device replies "LEDA <hostname> <name>"
+# (name last, may contain spaces) to the sender, who pairs it with the source IP.
+
+def _start_udp():
+    if S.udp_sock is not None:
+        return
+    try:
+        import socket
+        u = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        u.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        u.bind(("0.0.0.0", CONTROL_PORT))   # receives broadcasts too
+        u.setblocking(False)
+        S.udp_sock = u
+        print("UDP discovery on port", CONTROL_PORT)
+    except Exception as e:
+        print("UDP discovery unavailable:", e)
+        S.udp_sock = None
+
+
+def _stop_udp():
+    if S.udp_sock is not None:
+        try:
+            S.udp_sock.close()
+        except Exception:
+            pass
+    S.udp_sock = None
+
+
+def _udp_step():
+    if S.udp_sock is None:
+        return
+    try:
+        data, addr = S.udp_sock.recvfrom(64)
+    except OSError:
+        return   # EAGAIN - nothing waiting
+    if data and data.strip().startswith(b"LEDADISCOVER"):
+        try:
+            S.udp_sock.sendto(("LEDA %s %s" % (_wifi_hostname(), S.name)).encode(), addr)
+        except Exception:
+            pass
+
+
 def _tick():
     # Per-loop housekeeping shared by every branch of the player loop.
     _persist_bright()
@@ -675,6 +722,7 @@ def _tick():
     _stream_scan()
     _stream_out()
     _tcp_step()
+    _udp_step()
     _wifi_step()
 
 
@@ -841,6 +889,7 @@ def dispatch(line, origin=None):
             except OSError:
                 pass
             _stop_tcp()
+            _stop_udp()
             try:
                 if S.wlan:
                     S.wlan.disconnect()
@@ -1064,6 +1113,8 @@ Wi-Fi control (Pico W, once provisioned):
     nc <device-ip> 4550     then type:  PING   ->  OK
   Streamed replies (LIST / WIFISCAN / MOREINFO) arrive as lines ending in
   ENDLIST / WIFISCANEND / ENDINFO, same as over BLE.
+  Discovery (mDNS is unreliable on stock Pico W): broadcast "LEDADISCOVER" as a
+  UDP datagram to port 4550 and each device answers "LEDA <hostname> <name>".
 
 LEDA v1 binary format (little-endian):
   off size field
