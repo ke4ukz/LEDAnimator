@@ -160,3 +160,8 @@ export function defaultProject(numLeds: number): Project {
     assignments: new Array(numLeds).fill(track.id),
   }
 }
+
+/** A truly empty project — no LEDs, sources, or tracks. Used by New/blank slate. */
+export function emptyProject(): Project {
+  return { sources: [], tracks: [], assignments: [] }
+}

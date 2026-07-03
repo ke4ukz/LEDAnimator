@@ -11,6 +11,7 @@ import {
   type Track,
   defaultLinePath,
   defaultProject,
+  emptyProject,
   newId,
   reserveIds,
 } from './project'
@@ -18,7 +19,7 @@ import { reserveStopIds } from './gradient'
 import { bakeProject } from './bake'
 import type { ProjectFile } from './export/projectFile'
 import { loadSavedProjectFile, saveProjectFile, clearSavedProject } from './persistence'
-import { saveProjectToLibrary } from './export/library'
+import { saveProjectToLibrary, listLibrary } from './export/library'
 
 interface AppState {
   leds: LedPosition[]
@@ -128,7 +129,11 @@ interface Init {
   showLabels: boolean
 }
 
-/** Startup state: the autosaved project if present, else a fresh default. */
+// True when startup found no last-open project — the bootstrap then seeds the
+// ring demo only if the library is also empty (a truly first-ever run).
+let wasEmptyStart = false
+
+/** Startup state: the autosaved project if present, else an empty project. */
 function initialState(): Init {
   const saved = loadSavedProjectFile()
   if (saved) {
@@ -146,15 +151,15 @@ function initialState(): Init {
       showLabels: saved.display?.showLabels ?? false,
     }
   }
-  const leds = ringArrangement(DEMO_LEDS)
-  const project = defaultProject(DEMO_LEDS)
+  wasEmptyStart = true
+  const project = emptyProject()
   return {
-    leds,
+    leds: [],
     project,
     projectId: crypto.randomUUID(),
     projectName: 'Untitled',
-    raster: bakeProject(project, DEMO_LEDS),
-    selectedTrack: project.tracks[0]?.id ?? null,
+    raster: bakeProject(project, 0),
+    selectedTrack: null,
     ledScale: 1,
     ledShape: 'cube',
     showLabels: false,
@@ -183,8 +188,8 @@ export const useStore = create<AppState>((set, get) => {
     raster: init.raster,
     frame: 0,
     playing: true,
-    selection: [0],
-    selectionAnchor: 0,
+    selection: init.leds.length ? [0] : [],
+    selectionAnchor: init.leds.length ? 0 : null,
     selectedTrack: init.selectedTrack,
     ghost: null,
     ledScale: init.ledScale,
@@ -418,18 +423,17 @@ export const useStore = create<AppState>((set, get) => {
     newProject: () => {
       // Flush the outgoing project to the library before replacing it.
       saveProjectToLibrary(get().getProjectFile())
-      const leds = ringArrangement(DEMO_LEDS)
-      const project = defaultProject(DEMO_LEDS)
+      const project = emptyProject()
       set({
-        leds,
+        leds: [],
         project,
         projectId: crypto.randomUUID(),
         projectName: 'Untitled',
-        raster: bakeProject(project, DEMO_LEDS),
+        raster: bakeProject(project, 0),
         frame: 0,
-        selection: [0],
-        selectionAnchor: 0,
-        selectedTrack: project.tracks[0]?.id ?? null,
+        selection: [],
+        selectionAnchor: null,
+        selectedTrack: null,
         ghost: null,
         ledScale: 1,
         ledShape: 'cube',
@@ -442,18 +446,17 @@ export const useStore = create<AppState>((set, get) => {
       // blank state leaves nothing saved until the user actually edits it.
       suppressAutosave = true
       clearSavedProject()
-      const leds = ringArrangement(DEMO_LEDS)
-      const project = defaultProject(DEMO_LEDS)
+      const project = emptyProject()
       set({
-        leds,
+        leds: [],
         project,
         projectId: crypto.randomUUID(),
         projectName: 'Untitled',
-        raster: bakeProject(project, DEMO_LEDS),
+        raster: bakeProject(project, 0),
         frame: 0,
-        selection: [0],
-        selectionAnchor: 0,
-        selectedTrack: project.tracks[0]?.id ?? null,
+        selection: [],
+        selectionAnchor: null,
+        selectedTrack: null,
         ghost: null,
         ledScale: 1,
         ledShape: 'cube',
@@ -519,3 +522,25 @@ useStore.subscribe((state, prev) => {
     }, 800)
   }
 })
+
+// Truly first-ever run (no last-open AND no library) → seed the ring demo so
+// there's something to look at. If a library exists, the empty start stands
+// (the user can Open… their projects). Guarded so it can't clobber quick edits.
+if (wasEmptyStart) {
+  listLibrary().then((entries) => {
+    if (entries.length > 0) return
+    const s = useStore.getState()
+    if (s.leds.length === 0 && s.project.tracks.length === 0 && s.project.sources.length === 0) {
+      const leds = ringArrangement(DEMO_LEDS)
+      const project = defaultProject(DEMO_LEDS)
+      useStore.setState({
+        leds,
+        project,
+        raster: bakeProject(project, DEMO_LEDS),
+        selection: [0],
+        selectionAnchor: 0,
+        selectedTrack: project.tracks[0]?.id ?? null,
+      })
+    }
+  })
+}
