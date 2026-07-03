@@ -10,6 +10,7 @@ import SwiftUI
 struct DeviceListView: View {
     let ble: BLEController
     let wifi: TCPController
+    let discovery: WiFiDiscovery
     @State private var showWifiConnect = false
     @State private var wifiIP = ""
 
@@ -34,6 +35,14 @@ struct DeviceListView: View {
             .sheet(isPresented: $showWifiConnect) { wifiConnectSheet }
             .onAppear { ble.startScan() }
             .onDisappear { ble.stopScan() }
+            .task {
+                // Re-broadcast the discovery probe periodically while visible, so
+                // a device that joins the network a moment later still appears.
+                while !Task.isCancelled {
+                    discovery.scan()
+                    try? await Task.sleep(for: .seconds(4))
+                }
+            }
     }
 
     private var wifiConnectSheet: some View {
@@ -45,7 +54,7 @@ struct DeviceListView: View {
                         .autocorrectionDisabled()
                         .textInputAutocapitalization(.never)
                 } footer: {
-                    Text("Temporary: connect to a provisioned device by its IP. Automatic Wi-Fi discovery comes next.")
+                    Text("For a device that doesn't appear in the list (e.g. on a network that blocks discovery).")
                 }
             }
             .navigationTitle("Connect over Wi-Fi")
@@ -66,23 +75,34 @@ struct DeviceListView: View {
         .presentationDetents([.medium])
     }
 
-    @ViewBuilder
     private var content: some View {
-        if !ble.bluetoothOn {
-            ContentUnavailableView(
-                "Bluetooth Off",
-                systemImage: "antenna.radiowaves.left.and.right.slash",
-                description: Text("Turn on Bluetooth to find your LED devices.")
-            )
-        } else if ble.devices.isEmpty {
-            ContentUnavailableView {
-                Label("Searching for devices…", systemImage: "antenna.radiowaves.left.and.right")
-            } description: {
-                Text("Make sure your device is powered on and nearby.")
+        List {
+            Section("On Your Network") {
+                if discovery.devices.isEmpty {
+                    HStack(spacing: 12) {
+                        ProgressView()
+                        Text("Searching over Wi-Fi…").foregroundStyle(.secondary)
+                    }
+                } else {
+                    ForEach(discovery.devices) { device in
+                        Button {
+                            wifi.connect(host: device.host, name: device.displayName)
+                        } label: {
+                            WiFiDeviceRow(device: device)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
             }
-        } else {
-            List {
-                Section("Devices") {
+            Section("Nearby (Bluetooth)") {
+                if !ble.bluetoothOn {
+                    Text("Bluetooth is off.").foregroundStyle(.secondary)
+                } else if ble.devices.isEmpty {
+                    HStack(spacing: 12) {
+                        ProgressView()
+                        Text("Searching…").foregroundStyle(.secondary)
+                    }
+                } else {
                     ForEach(ble.devices) { device in
                         Button {
                             ble.connect(device)
@@ -93,8 +113,8 @@ struct DeviceListView: View {
                     }
                 }
             }
-            .refreshable { ble.startScan() }
         }
+        .refreshable { ble.startScan(); discovery.scan() }
     }
 
     private func connecting(_ device: DiscoveredDevice) -> Bool {
@@ -125,6 +145,30 @@ struct DeviceListView: View {
         if case let .failed(message) = ble.connectionState { message }
         else if case let .failed(message) = wifi.connectionState { message }
         else { "" }
+    }
+}
+
+private struct WiFiDeviceRow: View {
+    let device: DiscoveredWiFiDevice
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "lightbulb.fill")
+                .foregroundStyle(.tint)
+            Image(systemName: "wifi")
+                .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(device.displayName)
+                Text(device.host)
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+            Spacer()
+            Image(systemName: "chevron.right")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+        }
+        .contentShape(Rectangle())
     }
 }
 
