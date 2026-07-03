@@ -1,4 +1,5 @@
 import { type ReactNode, useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useStore } from '../store'
 import { DEVICES, checkLimits } from '../export/devices'
 import { encodeRaster, estimateBytes } from '../export/format'
@@ -7,6 +8,10 @@ import { serializeProjectFile } from '../export/projectFile'
 import { downloadBytes, zipProject } from '../export/download'
 
 const fmtBytes = (n: number) => (n < 1024 * 1024 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1024 / 1024).toFixed(2)} MB`)
+
+// Pico W (MicroPython v1.28.0) LittleFS: 212 blocks × 4096 B — shown as the
+// filesystem capacity next to the data size on the UF2 target.
+const PICO_W_FS_BYTES = 212 * 4096
 
 /** Export modal: pick a target device, see size/limits, download program + data. */
 export function ExportDialog({ onClose }: { onClose: () => void }) {
@@ -64,14 +69,16 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
             ))}
           </select>
         </label>
-        <p className="muted device-notes">{device.notes}</p>
 
         <div className="export-stats">
           <Stat label="LEDs" value={String(raster.numLeds)} />
           <Stat label="Frames" value={String(raster.numFrames)} />
           <Stat label="Rate" value={`${raster.fps} fps`} />
           <Stat label="Loop" value={`${duration.toFixed(2)} s`} />
-          <Stat label="Data size" value={fmtBytes(bytes)} />
+          <Stat
+            label="Data size"
+            value={hasRp2040 ? `${fmtBytes(bytes)} / ${fmtBytes(PICO_W_FS_BYTES)}` : fmtBytes(bytes)}
+          />
         </div>
 
         {warnings.length > 0 && (
@@ -97,10 +104,8 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
               <button className="btn btn-primary" disabled={building} onClick={exportUf2}>
                 {building ? 'Building UF2…' : 'One-drag UF2 (blank Pico W)'}
               </button>
-            </div>
-            <div className="muted">
-              Drop it onto the RPI-RP2 drive of a blank Pico W — nothing to install first.
               <InfoDot label="One-drag UF2 details">
+                Drop it onto the RPI-RP2 drive of a blank Pico W — nothing to install first.
                 A single gapless firmware image (~4&nbsp;MB) containing:
                 <ul>
                   <li>MicroPython <strong>v1.28.0</strong> (pinned) for the Pico W</li>
@@ -109,32 +114,30 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
                 The firmware→filesystem gap is filled so macOS drag-and-drop copies the whole
                 thing. If the strip stays dark after flashing, flash the same file with{' '}
                 <code>picotool load led-animation-picow.uf2</code> instead.
+                <p className="hint-link">
+                  To enter bootloader mode, hold <strong>BOOTSEL</strong> while plugging in —{' '}
+                  <a
+                    href="https://www.raspberrypi.com/documentation/microcontrollers/micropython.html#drag-and-drop-micropython"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    Raspberry Pi's guide
+                  </a>
+                  . (Don't download their UF2; use the button above.)
+                </p>
               </InfoDot>
             </div>
-            <p className="hint-link">
-              Need to enter bootloader mode?{' '}
-              <a
-                href="https://www.raspberrypi.com/documentation/microcontrollers/micropython.html#drag-and-drop-micropython"
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                Raspberry Pi's guide
-              </a>{' '}
-              — hold <strong>BOOTSEL</strong> while plugging in. (Don't download their UF2; use the button above.)
-            </p>
             <div className="export-actions">
               <button className="btn" onClick={exportProject}>MicroPython project (.zip)</button>
+              <InfoDot label="MicroPython project (.zip) details">
+                For a Pico that already runs MicroPython. Contains <code>main.py</code>,{' '}
+                <code>pattern.bin</code>, <code>project.json</code>, and a README. Copy it to the
+                board with <code>mpremote</code> or Thonny — it doesn't touch the firmware.
+              </InfoDot>
               <button className="btn" onClick={exportData}>Pattern data only (.bin)</button>
-            </div>
-            <div className="muted">
-              For a Pico that already runs MicroPython — copy the files over yourself.
-              <InfoDot label="Project / data file details">
-                <ul>
-                  <li><strong>.zip</strong> — <code>main.py</code>, <code>pattern.bin</code>, <code>project.json</code>, and a README.</li>
-                  <li><strong>.bin</strong> — just the raw pattern data, to drop next to an existing <code>main.py</code>.</li>
-                </ul>
-                Copy them to the board with <code>mpremote</code> or Thonny. These don't touch the
-                firmware, so MicroPython must already be installed.
+              <InfoDot label="Pattern data (.bin) details">
+                Just the raw <code>pattern.bin</code>, to drop next to an existing <code>main.py</code>{' '}
+                on a Pico that already runs MicroPython. Copy it over with <code>mpremote</code> or Thonny.
               </InfoDot>
             </div>
           </>
@@ -146,42 +149,58 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
   )
 }
 
-/** Inline "ⓘ" that reveals a details popover on click; closes on outside-click or Escape. */
+/**
+ * Inline "ⓘ" that reveals a details popover on click. The popover is portaled
+ * to <body> with fixed positioning so it isn't clipped by the modal's overflow.
+ * Closes on outside-click, Escape, or scroll/resize.
+ */
 function InfoDot({ label, children }: { label: string; children: ReactNode }) {
-  const [open, setOpen] = useState(false)
-  const ref = useRef<HTMLSpanElement>(null)
+  const [pos, setPos] = useState<{ left: number; top: number } | null>(null)
+  const btnRef = useRef<HTMLButtonElement>(null)
+  const popRef = useRef<HTMLDivElement>(null)
+  const open = pos !== null
 
   useEffect(() => {
     if (!open) return
+    const close = () => setPos(null)
     const onDown = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+      const t = e.target as Node
+      if (btnRef.current?.contains(t) || popRef.current?.contains(t)) return
+      close()
     }
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false)
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && close()
     window.addEventListener('mousedown', onDown)
     window.addEventListener('keydown', onKey)
+    window.addEventListener('scroll', close, true)
+    window.addEventListener('resize', close)
     return () => {
       window.removeEventListener('mousedown', onDown)
       window.removeEventListener('keydown', onKey)
+      window.removeEventListener('scroll', close, true)
+      window.removeEventListener('resize', close)
     }
   }, [open])
 
+  const toggle = () => {
+    if (open) return setPos(null)
+    const r = btnRef.current!.getBoundingClientRect()
+    const half = 137 // half the popover width (270) + a hair
+    const left = Math.min(Math.max(r.left + r.width / 2, half + 8), window.innerWidth - half - 8)
+    setPos({ left, top: r.top - 8 })
+  }
+
   return (
-    <span className="info" ref={ref}>
-      {' '}
-      <button
-        type="button"
-        className="info-dot"
-        aria-label={label}
-        aria-expanded={open}
-        onClick={() => setOpen((o) => !o)}
-      >
+    <span className="info">
+      <button type="button" className="info-dot" aria-label={label} aria-expanded={open} onClick={toggle}>
         i
       </button>
-      {open && (
-        <div className="info-pop" role="tooltip">
-          {children}
-        </div>
-      )}
+      {open &&
+        createPortal(
+          <div ref={popRef} className="info-pop" role="tooltip" style={{ left: pos.left, top: pos.top }}>
+            {children}
+          </div>,
+          document.body,
+        )}
     </span>
   )
 }
