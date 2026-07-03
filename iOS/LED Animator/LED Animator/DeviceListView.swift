@@ -84,13 +84,10 @@ private struct DeviceRow: View {
         HStack(spacing: 12) {
             Image(systemName: "lightbulb.fill")
                 .foregroundStyle(.tint)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(device.name)
-                Text("\(device.rssi) dBm")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
+            Text(device.name)
             Spacer()
+            Image(systemName: "cellularbars", variableValue: signalFraction(device.rssi))
+                .foregroundStyle(.secondary)
             if connecting {
                 ProgressView()
             } else {
@@ -100,5 +97,12 @@ private struct DeviceRow: View {
             }
         }
         .contentShape(Rectangle())
+    }
+
+    /// Maps RSSI to 0–1 for the variable-value bars (~-50 dBm strong → full,
+    /// ~-90 dBm weak → roughly one bar).
+    private func signalFraction(_ rssi: Int) -> Double {
+        let clamped = Double(min(-50, max(-90, rssi)))
+        return max(0.2, (clamped + 90) / 40)
     }
 }
