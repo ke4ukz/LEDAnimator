@@ -1,7 +1,8 @@
 // MicroPython project for the RP2040 / Pico W: a PIO WS2812 driver + a
 // fixed-rate player that reads pattern.bin (LEDA v1), plus an optional Bluetooth
-// LE control channel (Nordic UART Service) for live brightness / speed / solid
-// color / pattern selection. The BLE half is skipped automatically on a plain
+// LE control channel (a custom LED Animator service with UART-style characteristics)
+// for live brightness / speed / solid color / pattern selection. The BLE half is
+// skipped automatically on a plain
 // Pico (no radio), so the same script runs on both.
 
 export function rp2040MainPy(pin: number, brightness: number, name = 'LED Animator'): string {
@@ -13,9 +14,12 @@ export function rp2040MainPy(pin: number, brightness: number, name = 'LED Animat
 # Power: a Pico's USB can only source limited current; larger strips need an
 # external 5V supply (lower BRIGHTNESS / use the BLE BRIGHT command).
 #
-# BLE control - Nordic UART Service (works with nRF Connect / LightBlue too):
-#   Service 6E400001-B5A3-F393-E0A9-E50E24DCCA9E
-#   RX (write)  6E400002-...   TX (notify) 6E400003-...
+# BLE control - a custom LED Animator service (so an app can filter scans to
+# OUR devices; the name is user-set and UART UUIDs are shared, so neither is
+# unique) with UART-style characteristics (so nRF Connect / LightBlue still work):
+#   Service     4C454441-0001-4000-8000-4C4544415254   (advertised; scan filter)
+#   RX (write)  6E400002-B5A3-F393-E0A9-E50E24DCCA9E
+#   TX (notify) 6E400003-B5A3-F393-E0A9-E50E24DCCA9E
 # Send one text command per write to RX; the reply arrives as a TX notify.
 #   PING | INFO | LIST | FREE | SELECT <name> | BRIGHT <0-100> |
 #   SPEED <10-400> | SOLID <r> <g> <b> | OFF | PLAY | DELETE <name> |
@@ -202,7 +206,10 @@ def _start_ble():
     _IRQ_WRITE = 3
     _WRITE = bluetooth.FLAG_WRITE | bluetooth.FLAG_WRITE_NO_RESPONSE
     _NOTIFY = bluetooth.FLAG_NOTIFY
-    _SVC = bluetooth.UUID("6E400001-B5A3-F393-E0A9-E50E24DCCA9E")
+    # Custom service UUID = how the app identifies our devices in a scan. The
+    # RX/TX characteristics reuse the Nordic UART UUIDs so generic BLE-UART
+    # tools still present a console.
+    _SVC = bluetooth.UUID("4C454441-0001-4000-8000-4C4544415254")
     _RX = (bluetooth.UUID("6E400002-B5A3-F393-E0A9-E50E24DCCA9E"), _WRITE)
     _TX = (bluetooth.UUID("6E400003-B5A3-F393-E0A9-E50E24DCCA9E"), _NOTIFY)
 
@@ -325,11 +332,13 @@ Wiring:
   Strip DIN -> GP${pin}; GND common; 5V from an adequate supply.
 
 Bluetooth control (Pico W only):
-  main.py advertises a Nordic UART Service named "LED Animator". Connect with
-  the companion app - or any BLE UART app (nRF Connect, LightBlue) to test.
+  main.py advertises a custom LED Animator service (with UART-style
+  characteristics). An app finds our devices by filtering scans on the service
+  UUID below - the device name is user-settable, so it can't be the identifier.
+  Any BLE UART app (nRF Connect, LightBlue) can still connect and drive it.
   Send one text command per write to the RX characteristic; replies come back
   as notifications on TX.
-    Service 6E400001-B5A3-F393-E0A9-E50E24DCCA9E
+    Service      4C454441-0001-4000-8000-4C4544415254  (unique to LED Animator)
     RX (write)   6E400002-B5A3-F393-E0A9-E50E24DCCA9E
     TX (notify)  6E400003-B5A3-F393-E0A9-E50E24DCCA9E
   Commands:
