@@ -36,6 +36,7 @@ final class WiFiDiscovery {
     @ObservationIgnored private let queue = DispatchQueue(label: "wifi-discovery")
     @ObservationIgnored private let port: UInt16 = 4550
     @ObservationIgnored private let probe = [UInt8]("LEDADISCOVER".utf8)
+    @ObservationIgnored private var lastSeen: [String: Date] = [:]   // hostname -> when last heard
 
     /// One-shot: broadcast a probe and collect replies for ~2s. Existing entries
     /// are kept and refreshed (a device only answers when probed).
@@ -78,6 +79,16 @@ final class WiFiDiscovery {
             }
             // n <= 0 → timeout (EAGAIN); loop to re-probe / keep listening.
         }
+        DispatchQueue.main.async { [weak self] in self?.prune() }
+    }
+
+    /// Drop devices that haven't answered in a while (e.g. after "Forget
+    /// network" or losing power), so a dead Wi-Fi entry doesn't linger with a
+    /// stale IP. The window tolerates a couple of missed scans.
+    private func prune(ttl: TimeInterval = 9) {
+        let cutoff = Date().addingTimeInterval(-ttl)
+        devices.removeAll { (lastSeen[$0.hostname] ?? .distantPast) < cutoff }
+        lastSeen = lastSeen.filter { key, _ in devices.contains { $0.hostname == key } }
     }
 
     private func sendProbe(_ fd: Int32, to broadcast: in_addr_t) {
@@ -136,6 +147,7 @@ final class WiFiDiscovery {
     }
 
     private func add(_ device: DiscoveredWiFiDevice) {
+        lastSeen[device.hostname] = Date()
         if let i = devices.firstIndex(where: { $0.hostname == device.hostname }) {
             devices[i] = device
         } else {
