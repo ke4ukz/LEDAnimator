@@ -32,6 +32,7 @@ import rp2
 DATA_PIN = ${pin}
 PATTERN_FILE = "pattern.bin"
 DEVICE_NAME = ${JSON.stringify(name)}   # default BLE name; NAME command overrides
+FW_VERSION = "1.0.0"
 
 
 @rp2.asm_pio(sideset_init=rp2.PIO.OUT_LOW, out_shiftdir=rp2.PIO.SHIFT_LEFT,
@@ -62,6 +63,8 @@ class S:
     n = 0                    # LED count of the loaded pattern
     name = DEVICE_NAME       # advertised BLE name (overridable at runtime)
     ble = None               # set once BLE is up, so NAME can update gap_name
+    bright_dirty = False     # brightness changed, pending a debounced save
+    bright_at = 0            # time.ticks_ms() of the last brightness change
 
 
 _buf = None
@@ -132,6 +135,30 @@ def _load_current():
     return PATTERN_FILE
 
 
+def _load_bright():
+    # Restore the last brightness (percent), else the exported default.
+    try:
+        with open("bright.txt") as fh:
+            v = int(fh.read().strip())
+        if 0 <= v <= 100:
+            return v / 100.0
+    except (OSError, ValueError):
+        pass
+    return S.bright
+
+
+def _persist_bright():
+    # Debounced: write once the brightness has been steady for ~1s, so a slider
+    # drag doesn't hammer the flash. Called from the player loop (not the IRQ).
+    if S.bright_dirty and time.ticks_diff(time.ticks_ms(), S.bright_at) > 1000:
+        S.bright_dirty = False
+        try:
+            with open("bright.txt", "w") as fh:
+                fh.write(str(int(S.bright * 100)))
+        except Exception:
+            pass
+
+
 def dispatch(line):
     # Transport-agnostic command handler. Returns a short reply string.
     # Reused as-is by any future transport (Wi-Fi/HTTP, USB serial).
@@ -146,6 +173,13 @@ def dispatch(line):
         if c == "INFO":
             return "INFO %s %d %s %d %d" % (
                 S.file, S.n, S.mode, int(S.bright * 100), int(S.speed * 100))
+        if c == "VERSION":
+            return "VERSION " + FW_VERSION
+        if c == "PLATFORM":
+            try:
+                return "PLATFORM " + os.uname().machine
+            except Exception:
+                return "PLATFORM unknown"
         if c == "NAME":
             if len(p) < 2:
                 return "NAME " + S.name
@@ -182,6 +216,8 @@ def dispatch(line):
             return "ERR no-file"
         if c == "BRIGHT":
             S.bright = max(0, min(100, int(p[1]))) / 100.0
+            S.bright_dirty = True
+            S.bright_at = time.ticks_ms()
             return "OK BRIGHT %d" % int(S.bright * 100)
         if c == "SPEED":
             S.speed = max(10, min(400, int(p[1]))) / 100.0
@@ -281,6 +317,7 @@ def _start_ble():
 def main():
     S.name = _load_name()
     S.file = _load_current()
+    S.bright = _load_bright()
     try:
         _start_ble()
         print("BLE control active:", S.name)
@@ -292,6 +329,7 @@ def main():
     base_delay = 0.03
     while True:
         if S.mode == "solid":
+            _persist_bright()
             _show_solid(S.solid, S.n)
             time.sleep_ms(40)
             continue
@@ -325,6 +363,7 @@ def main():
         for _ in range(frames):
             if S.reload or S.mode != "play":
                 break
+            _persist_bright()
             _show_grb(f.read(fb), S.n)
             time.sleep(base_delay / S.speed if S.speed > 0 else base_delay)
 
@@ -363,10 +402,12 @@ Bluetooth control (Pico W only):
   Commands:
     PING                 -> OK
     INFO                 -> file, LED count, mode, brightness%, speed%
+    VERSION              -> firmware version
+    PLATFORM             -> board/runtime (os.uname().machine)
     LIST                 -> comma-separated .bin pattern files on the board
     FREE                 -> free filesystem bytes
     SELECT <name>        -> play a different pattern file (remembered on reboot)
-    BRIGHT <0-100>       -> master brightness percent
+    BRIGHT <0-100>       -> master brightness percent (remembered on reboot)
     SPEED <10-400>       -> playback speed percent (100 = as authored)
     SOLID <r> <g> <b>    -> hold a solid color (0-255 each)
     OFF                  -> blank the strip
