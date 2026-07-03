@@ -5,7 +5,7 @@
 // skipped automatically on a plain
 // Pico (no radio), so the same script runs on both.
 
-export function rp2040MainPy(pin: number, brightness: number, name = 'LED Animator'): string {
+export function rp2040MainPy(pin: number, brightness: number, name = 'LED Animator', build = 'dev'): string {
   return `# main.py - LED Animator player for RP2040 / Pico W (MicroPython)
 # Plays *.leda pattern files (LEDA v1) on a WS2812 / NeoPixel strip via PIO, and on a
 # Pico W exposes a Bluetooth LE control channel for live control.
@@ -33,7 +33,7 @@ DATA_PIN = ${pin}
 PATTERN_FILE = "pattern.leda"
 PATTERN_EXT = ".leda"
 DEVICE_NAME = ${JSON.stringify(name)}   # default BLE name; NAME command overrides
-FW_VERSION = "1.0.0"
+FW_VERSION = ${JSON.stringify(build)}   # build identifier (no real release yet)
 
 
 @rp2.asm_pio(sideset_init=rp2.PIO.OUT_LOW, out_shiftdir=rp2.PIO.SHIFT_LEFT,

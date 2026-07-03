@@ -33,9 +33,10 @@ export async function buildRp2040CombinedUf2(
   pin: number,
   brightness: number,
   name?: string,
+  build?: string,
 ): Promise<Uint8Array> {
   const enc = new TextEncoder()
-  const mainPy = enc.encode(rp2040MainPy(pin, brightness, name))
+  const mainPy = enc.encode(rp2040MainPy(pin, brightness, name, build))
   const patternBin = encodeRaster(raster)
 
   const total = mainPy.length + patternBin.length

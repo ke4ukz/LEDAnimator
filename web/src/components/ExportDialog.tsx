@@ -6,8 +6,13 @@ import { encodeRaster, estimateBytes } from '../export/format'
 import { rp2040MainPy, rp2040Readme } from '../export/rp2040'
 import { serializeProjectFile } from '../export/projectFile'
 import { downloadBytes, zipProject } from '../export/download'
+import { commit } from 'virtual:build-info'
 
 const fmtBytes = (n: number) => (n < 1024 * 1024 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1024 / 1024).toFixed(2)} MB`)
+
+// Firmware build identifier baked into main.py (no real release yet) — the app
+// build's commit, so a device reports which build produced its firmware.
+const FW_BUILD = `dev+${commit}`
 
 // Pico W (MicroPython v1.28.0) LittleFS: 212 blocks × 4096 B — shown as the
 // filesystem capacity next to the data size on the UF2 target.
@@ -34,7 +39,7 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
   const exportProject = () => {
     const data = encodeRaster(raster)
     const zip = zipProject({
-      'main.py': rp2040MainPy(pin, Number(brightness.toFixed(2)), bleName),
+      'main.py': rp2040MainPy(pin, Number(brightness.toFixed(2)), bleName, FW_BUILD),
       'pattern.leda': data,
       'project.json': serializeProjectFile(getProjectFile()),
       'README.txt': rp2040Readme(pin),
@@ -47,7 +52,7 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
     try {
       // Lazy-load: pulls in the littlefs wasm + firmware only when used.
       const { buildRp2040CombinedUf2 } = await import('../export/combinedUf2')
-      const uf2 = await buildRp2040CombinedUf2(raster, pin, Number(brightness.toFixed(2)), bleName)
+      const uf2 = await buildRp2040CombinedUf2(raster, pin, Number(brightness.toFixed(2)), bleName, FW_BUILD)
       downloadBytes('led-animation-picow.uf2', uf2, 'application/octet-stream')
     } catch (e) {
       window.alert(`Could not build the UF2: ${(e as Error).message}`)
