@@ -20,12 +20,17 @@ enum LEDGATT {
     static let tx = CBUUID(string: "6E400003-B5A3-F393-E0A9-E50E24DCCA9E")
 }
 
-/// The subset of firmware commands v1 uses. One command == one BLE write.
+/// The firmware commands the app uses. One command == one BLE write.
 enum LEDCommand {
     case info
     case list
     case select(String)
-    case bright(Int)   // 0–100
+    case bright(Int)            // 0–100
+    case speed(Int)            // 10–400 (percent; 100 = as authored)
+    case solid(Int, Int, Int)  // r, g, b — each 0–255
+    case off                   // blank the strip
+    case play                  // resume the selected pattern
+    case setName(String)       // rename the device (persists on the board)
     case version
     case platform
     case free
@@ -36,6 +41,11 @@ enum LEDCommand {
         case .list: return "LIST"
         case .select(let name): return "SELECT \(name)"
         case .bright(let value): return "BRIGHT \(value)"
+        case .speed(let value): return "SPEED \(value)"
+        case .solid(let r, let g, let b): return "SOLID \(r) \(g) \(b)"
+        case .off: return "OFF"
+        case .play: return "PLAY"
+        case .setName(let name): return "NAME \(name)"
         case .version: return "VERSION"
         case .platform: return "PLATFORM"
         case .free: return "FREE"

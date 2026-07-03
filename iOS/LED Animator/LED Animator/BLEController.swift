@@ -17,6 +17,13 @@ struct DiscoveredDevice: Identifiable, Equatable {
     var rssi: Int
 }
 
+/// A solid color as the firmware carries it: 0–255 per channel.
+struct RGB: Equatable {
+    var r = 0
+    var g = 0
+    var b = 0
+}
+
 enum ConnectionState: Equatable {
     case disconnected
     case connecting
@@ -39,6 +46,9 @@ final class BLEController: NSObject {
     var listReceived = 0
     var currentPattern: String?
     var brightness = 100   // 0–100, seeded from INFO
+    var speed = 100        // 10–400 percent, seeded from INFO
+    var mode = "play"      // "play", "solid", or "off" — seeded/echoed by the device
+    var solid = RGB(r: 255, g: 255, b: 255)   // last solid color the device reported (INFO)
     var firmwareVersion: String?
     var platform: String?
     var ledCount: Int?
@@ -51,8 +61,10 @@ final class BLEController: NSObject {
     @ObservationIgnored private var connected: CBPeripheral?
     @ObservationIgnored private var rxChar: CBCharacteristic?
     @ObservationIgnored private var wantScan = false
-    @ObservationIgnored private var lastBrightnessSend = Date.distantPast
-    @ObservationIgnored private var brightnessWork: DispatchWorkItem?
+    /// Per-channel rate limiter state (keyed by channel id), so fast drags on the
+    /// sliders / color spectrum don't flood the BLE link. See `throttle`.
+    @ObservationIgnored private var throttleLast: [String: Date] = [:]
+    @ObservationIgnored private var throttleWork: [String: DispatchWorkItem] = [:]
     @ObservationIgnored private var incomingPatterns: [String] = []      // buffered FILE… until ENDLIST
     @ObservationIgnored private var listTimeoutWork: DispatchWorkItem?   // stall watchdog for LIST streaming
 
@@ -161,23 +173,75 @@ final class BLEController: NSObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + 3.0, execute: work)
     }
 
-    /// Updates the UI immediately and throttles the BLE writes so a fast drag
+    /// Minimum spacing between BLE writes on a dragged control (~11/sec). Big
+    /// enough that the Pico keeps up (no backlog "light show"), small enough to
+    /// feel live.
+    private static let dragInterval: TimeInterval = 0.09
+
+    /// Leading + trailing rate limiter. Runs `action` at once if this channel
+    /// hasn't fired within `dragInterval`; otherwise coalesces to a single
+    /// trailing run at the next slot (replacing any pending one), so a burst of
+    /// updates collapses to the latest value and the final value always lands.
+    private func throttle(_ id: String, interval: TimeInterval = dragInterval, _ action: @escaping () -> Void) {
+        throttleWork[id]?.cancel()
+        throttleWork[id] = nil
+        let now = Date()
+        let last = throttleLast[id] ?? .distantPast
+        let elapsed = now.timeIntervalSince(last)
+        if elapsed >= interval {
+            throttleLast[id] = now
+            action()
+        } else {
+            let work = DispatchWorkItem { [weak self] in
+                self?.throttleLast[id] = Date()
+                self?.throttleWork[id] = nil
+                action()
+            }
+            throttleWork[id] = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + (interval - elapsed), execute: work)
+        }
+    }
+
+    /// Updates the UI immediately and rate-limits the BLE writes so a fast drag
     /// doesn't flood the link — while still guaranteeing the final value lands.
     func setBrightness(_ value: Int) {
         let clamped = max(0, min(100, value))
         brightness = clamped
-        brightnessWork?.cancel()
-        if Date().timeIntervalSince(lastBrightnessSend) > 0.07 {
-            lastBrightnessSend = Date()
-            send(.bright(clamped), type: .withoutResponse)
-        } else {
-            let work = DispatchWorkItem { [weak self] in
-                self?.lastBrightnessSend = Date()
-                self?.send(.bright(clamped), type: .withoutResponse)
-            }
-            brightnessWork = work
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.07, execute: work)
-        }
+        throttle("bright") { [weak self] in self?.send(.bright(clamped), type: .withoutResponse) }
+    }
+
+    /// Like `setBrightness`: updates the UI at once and rate-limits the writes.
+    func setSpeed(_ value: Int) {
+        let clamped = max(10, min(400, value))
+        speed = clamped
+        throttle("speed") { [weak self] in self?.send(.speed(clamped), type: .withoutResponse) }
+    }
+
+    /// Hold a solid color (switches the device out of pattern playback). The send
+    /// is rate-limited so dragging the color spectrum doesn't back up the link.
+    func setSolid(r: Int, g: Int, b: Int) {
+        mode = "solid"
+        let cr = max(0, min(255, r)), cg = max(0, min(255, g)), cb = max(0, min(255, b))
+        throttle("solid") { [weak self] in self?.send(.solid(cr, cg, cb), type: .withoutResponse) }
+    }
+
+    /// Blank the strip (solid black).
+    func turnOff() {
+        mode = "off"
+        send(.off)
+    }
+
+    /// Resume playing the selected pattern.
+    func play() {
+        mode = "play"
+        send(.play)
+    }
+
+    /// Rename the device; the board persists it and re-advertises under the name.
+    func rename(_ name: String) {
+        let trimmed = String(name.prefix(26)).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        send(.setName(trimmed))
     }
 
     // MARK: Reply parsing
@@ -195,11 +259,21 @@ final class BLEController: NSObject {
             isLoadingPatterns = false
             listTimeoutWork?.cancel()
         } else if reply.hasPrefix("INFO ") {
-            // INFO <file> <leds> <mode> <bright%> <speed%>
-            let parts = reply.split(separator: " ")
-            if parts.count >= 2 { currentPattern = String(parts[1]) }
-            if parts.count >= 3, let n = Int(parts[2]) { ledCount = n }
-            if parts.count >= 5, let b = Int(parts[4]) { brightness = b }
+            // INFO <leds> <mode> <bright%> <speed%> <r> <g> <b> <file...>
+            // The filename is last and may contain spaces, so cap the split at 8
+            // and treat the 9th piece as the whole (possibly spaced) name.
+            let t = reply.split(separator: " ", maxSplits: 8, omittingEmptySubsequences: false)
+            if t.count >= 2, let n = Int(t[1]) { ledCount = n }
+            if t.count >= 3 { mode = String(t[2]) }
+            if t.count >= 4, let b = Int(t[3]) { brightness = b }
+            if t.count >= 5, let sp = Int(t[4]) { speed = sp }
+            if t.count >= 8, let r = Int(t[5]), let g = Int(t[6]), let b = Int(t[7]) {
+                solid = RGB(r: r, g: g, b: b)
+            }
+            if t.count >= 9 {
+                let name = String(t[8])
+                currentPattern = name.isEmpty ? nil : name
+            }
         } else if reply.hasPrefix("VERSION ") {
             firmwareVersion = String(reply.dropFirst("VERSION ".count))
         } else if reply.hasPrefix("PLATFORM ") {
@@ -212,6 +286,17 @@ final class BLEController: NSObject {
             if let b = Int(reply.dropFirst("BRIGHT ".count)) { brightness = b }
         } else if reply.hasPrefix("OK SELECT ") {
             currentPattern = String(reply.dropFirst("OK SELECT ".count))
+            mode = "play"
+        } else if reply.hasPrefix("OK SPEED ") {
+            if let sp = Int(reply.dropFirst("OK SPEED ".count)) { speed = sp }
+        } else if reply == "OK PLAY" {
+            mode = "play"
+        } else if reply == "OK OFF" {
+            mode = "off"
+        } else if reply == "OK SOLID" {
+            mode = "solid"
+        } else if reply.hasPrefix("OK NAME ") {
+            connectedName = String(reply.dropFirst("OK NAME ".count))
         } else if reply.hasPrefix("ERR") {
             lastError = reply
         }
