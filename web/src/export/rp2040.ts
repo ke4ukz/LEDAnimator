@@ -228,9 +228,10 @@ def _start_ble():
         return struct.pack("BB", len(v) + 1, t) + v
 
     def advertise():
-        # Name rides the advertisement (truncated to fit 31B); UUID the scan resp.
-        adv_data = field(0x01, bytes((6,))) + field(0x09, S.name.encode()[:26])
-        rsp = field(0x07, bytes(_SVC))
+        # Service UUID in the advertisement so central scan-filters (iOS) match
+        # reliably; the user-settable name rides the scan response.
+        adv_data = field(0x01, bytes((6,))) + field(0x07, bytes(_SVC))
+        rsp = field(0x09, S.name.encode()[:26])
         ble.gap_advertise(500000, adv_data=adv_data, resp_data=rsp)
 
     def irq(event, data):
