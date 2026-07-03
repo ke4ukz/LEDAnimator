@@ -160,6 +160,10 @@ final class BLEController: NSObject {
             platform = String(reply.dropFirst("PLATFORM ".count))
         } else if reply.hasPrefix("FREE ") {
             freeBytes = Int(reply.dropFirst("FREE ".count))
+        } else if reply.hasPrefix("BRIGHT ") {
+            // Unsolicited echo the device sends when it persists brightness
+            // (after the slider settles) — snap the UI to the actual value.
+            if let b = Int(reply.dropFirst("BRIGHT ".count)) { brightness = b }
         } else if reply.hasPrefix("OK SELECT ") {
             currentPattern = String(reply.dropFirst("OK SELECT ".count))
         } else if reply.hasPrefix("ERR") {

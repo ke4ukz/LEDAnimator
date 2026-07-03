@@ -65,6 +65,8 @@ class S:
     ble = None               # set once BLE is up, so NAME can update gap_name
     bright_dirty = False     # brightness changed, pending a debounced save
     bright_at = 0            # time.ticks_ms() of the last brightness change
+    tx = None                # TX characteristic handle (player-loop notifies)
+    conns = None             # live set of connected centrals
 
 
 _buf = None
@@ -147,16 +149,33 @@ def _load_bright():
     return S.bright
 
 
+def _notify(msg):
+    # Push an unsolicited notification from the player loop (not the IRQ).
+    if not S.ble or not S.conns:
+        return
+    try:
+        data = msg.encode()
+    except Exception:
+        return
+    for c in tuple(S.conns):
+        try:
+            S.ble.gatts_notify(c, S.tx, data)
+        except Exception:
+            pass
+
+
 def _persist_bright():
     # Debounced: write once the brightness has been steady for ~1s, so a slider
     # drag doesn't hammer the flash. Called from the player loop (not the IRQ).
     if S.bright_dirty and time.ticks_diff(time.ticks_ms(), S.bright_at) > 1000:
         S.bright_dirty = False
+        pct = int(S.bright * 100)
         try:
             with open("bright.txt", "w") as fh:
-                fh.write(str(int(S.bright * 100)))
+                fh.write(str(pct))
         except Exception:
             pass
+        _notify("BRIGHT %d" % pct)   # echo the saved value so the app can sync
 
 
 def dispatch(line):
@@ -276,6 +295,8 @@ def _start_ble():
     ((tx, rx),) = ble.gatts_register_services(((_SVC, (_TX, _RX)),))
     ble.gatts_set_buffer(rx, 200)   # room for longer commands (SELECT <name>)
     conns = set()
+    S.tx = tx
+    S.conns = conns
 
     def field(t, v):
         return struct.pack("BB", len(v) + 1, t) + v
