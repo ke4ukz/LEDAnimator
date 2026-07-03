@@ -166,6 +166,7 @@ export default function App() {
         <nav className="foot-links">
           <a href="https://github.com/ke4ukz/LEDAnimator" target="_blank" rel="noopener noreferrer">GitHub</a>
           <a href="https://github.com/ke4ukz/LEDAnimator/issues/new" target="_blank" rel="noopener noreferrer">Report an issue</a>
+          <a href="third-party-notices.txt" target="_blank" rel="noopener noreferrer">Licenses</a>
           <button type="button" className="linkbtn" onClick={() => setPrivacyOpen(true)}>Privacy</button>
         </nav>
       </footer>
