@@ -170,6 +170,35 @@ struct DeviceListView: View {
     }
 }
 
+/// The Bluetooth "ᛒ" bind-rune, drawn as a vector (no SF Symbol / asset exists).
+/// A single stroke: two crossing diagonals + the mast + the two right-flag edges.
+private struct BluetoothLogo: Shape {
+    func path(in rect: CGRect) -> Path {
+        func p(_ x: CGFloat, _ y: CGFloat) -> CGPoint {
+            CGPoint(x: rect.minX + x * rect.width, y: rect.minY + y * rect.height)
+        }
+        var path = Path()
+        path.move(to: p(0.28, 0.25))      // upper-left
+        path.addLine(to: p(0.72, 0.75))   // → lower-right (through center)
+        path.addLine(to: p(0.50, 1.0))    // → mast bottom
+        path.addLine(to: p(0.50, 0.0))    // → mast top
+        path.addLine(to: p(0.72, 0.25))   // → upper-right
+        path.addLine(to: p(0.28, 0.75))   // → lower-left (through center)
+        return path
+    }
+}
+
+/// White Bluetooth rune on the brand-blue rounded badge.
+private struct BluetoothBadge: View {
+    var body: some View {
+        BluetoothLogo()
+            .stroke(.white, style: StrokeStyle(lineWidth: 1.3, lineCap: .round, lineJoin: .round))
+            .padding(4)
+            .frame(width: 18, height: 18)
+            .background(Color(red: 0.0, green: 0.42, blue: 0.9), in: RoundedRectangle(cornerRadius: 4))
+    }
+}
+
 /// One physical device, reachable over Wi-Fi and/or Bluetooth.
 struct UnifiedDevice: Identifiable {
     var id: String
@@ -197,11 +226,7 @@ private struct UnifiedDeviceRow: View {
                 }
             }
             if device.isBTOnly {
-                // No official SF Symbol for Bluetooth; the radio-waves glyph is
-                // the app's existing "over the air / nearby" visual.
-                Image(systemName: "antenna.radiowaves.left.and.right")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                BluetoothBadge()
                     .accessibilityLabel("Bluetooth only")
             }
             Spacer()
