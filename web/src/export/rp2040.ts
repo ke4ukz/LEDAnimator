@@ -70,6 +70,8 @@ class S:
     conns = None             # live set of connected centrals
     list_queue = None        # files left to stream for a LIST (None = idle)
     list_at = 0              # time.ticks_ms() of the last streamed FILE
+    list_total = 0           # count announced (LISTLEN) at the start of a stream
+    list_header_sent = False
 
 
 _buf = None
@@ -175,7 +177,10 @@ def _stream_list():
     if time.ticks_diff(time.ticks_ms(), S.list_at) < 30:
         return
     S.list_at = time.ticks_ms()
-    if S.list_queue:
+    if not S.list_header_sent:
+        S.list_header_sent = True
+        _notify("LISTLEN %d" % S.list_total)
+    elif S.list_queue:
         _notify("FILE " + S.list_queue.pop(0))
     else:
         S.list_queue = None
@@ -235,10 +240,13 @@ def dispatch(line):
                 pass
             return "OK NAME " + new
         if c == "LIST":
-            # Streamed by the player loop: one "FILE <name>" per notification,
-            # then "ENDLIST". Avoids the single-notification size limit and any
-            # delimiter issues with filenames.
-            S.list_queue = list_patterns()
+            # Streamed by the player loop: "LISTLEN <n>", then one "FILE <name>"
+            # per notification, then "ENDLIST". Avoids the single-notification
+            # size limit and any delimiter issues with filenames.
+            files = list_patterns()
+            S.list_queue = files
+            S.list_total = len(files)
+            S.list_header_sent = False
             return None
         if c == "FREE":
             return "FREE %d" % _free_bytes()
@@ -449,7 +457,7 @@ Bluetooth control (Pico W only):
     INFO                 -> file, LED count, mode, brightness%, speed%
     VERSION              -> firmware version
     PLATFORM             -> board/runtime (os.uname().machine)
-    LIST                 -> streams one "FILE <name>.leda" per notify, then ENDLIST
+    LIST                 -> streams "LISTLEN <n>", one "FILE <name>" each, then ENDLIST
     FREE                 -> free filesystem bytes
     SELECT <name>        -> play a different pattern file (remembered on reboot)
     BRIGHT <0-100>       -> master brightness percent (remembered on reboot)

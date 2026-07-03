@@ -34,6 +34,9 @@ final class BLEController: NSObject {
     var connectedName = ""
     var patterns: [String] = []
     var isLoadingPatterns = false
+    var listFailed = false
+    var listTotal = 0
+    var listReceived = 0
     var currentPattern: String?
     var brightness = 100   // 0–100, seeded from INFO
     var firmwareVersion: String?
@@ -50,6 +53,7 @@ final class BLEController: NSObject {
     @ObservationIgnored private var wantScan = false
     @ObservationIgnored private var lastBrightnessSend = Date.distantPast
     @ObservationIgnored private var brightnessWork: DispatchWorkItem?
+    @ObservationIgnored private var incomingPatterns: [String] = []      // buffered FILE… until ENDLIST
     @ObservationIgnored private var listTimeoutWork: DispatchWorkItem?   // stall watchdog for LIST streaming
 
     override init() {
@@ -88,7 +92,11 @@ final class BLEController: NSObject {
         connectionState = .connecting
         connectedName = device.name
         patterns = []
+        incomingPatterns = []
         isLoadingPatterns = false
+        listFailed = false
+        listTotal = 0
+        listReceived = 0
         listTimeoutWork?.cancel()
         currentPattern = nil
         firmwareVersion = nil
@@ -124,10 +132,14 @@ final class BLEController: NSObject {
         peripheral.writeValue(data, for: rx, type: type)
     }
 
-    /// Requests the pattern list. Replies stream as FILE…/ENDLIST — clear the
-    /// list, show the loading state, and arm the stall watchdog.
+    /// Requests the pattern list. Replies stream as LISTLEN/FILE…/ENDLIST — the
+    /// list stays hidden (previous contents kept underneath) until ENDLIST, then
+    /// it's sorted and shown. Arms the stall watchdog.
     func refreshPatterns() {
-        patterns = []
+        incomingPatterns = []
+        listReceived = 0
+        listTotal = 0
+        listFailed = false
         isLoadingPatterns = true
         send(.list)
         armListTimeout()
@@ -142,6 +154,7 @@ final class BLEController: NSObject {
         listTimeoutWork?.cancel()
         let work = DispatchWorkItem { [weak self] in
             self?.isLoadingPatterns = false
+            self?.listFailed = true
             self?.listTimeoutWork = nil
         }
         listTimeoutWork = work
@@ -170,10 +183,15 @@ final class BLEController: NSObject {
     // MARK: Reply parsing
 
     private func handleReply(_ reply: String) {
-        if reply.hasPrefix("FILE ") {
-            patterns.append(String(reply.dropFirst("FILE ".count)))
+        if reply.hasPrefix("LISTLEN ") {
+            listTotal = Int(reply.dropFirst("LISTLEN ".count)) ?? 0
+            armListTimeout()
+        } else if reply.hasPrefix("FILE ") {
+            incomingPatterns.append(String(reply.dropFirst("FILE ".count)))
+            listReceived = incomingPatterns.count
             armListTimeout()   // progress — reset the stall watchdog
         } else if reply == "ENDLIST" {
+            patterns = incomingPatterns.sorted { $0.localizedStandardCompare($1) == .orderedAscending }
             isLoadingPatterns = false
             listTimeoutWork?.cancel()
         } else if reply.hasPrefix("INFO ") {

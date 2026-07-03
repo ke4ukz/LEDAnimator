@@ -36,18 +36,37 @@ struct ControlView: View {
                 }
             }
 
-            Section {
-                if ble.patterns.isEmpty {
-                    if ble.isLoadingPatterns {
-                        HStack(spacing: 12) {
-                            ProgressView()
-                            Text("Loading patterns…")
+            Section("Patterns") {
+                if ble.isLoadingPatterns {
+                    VStack(alignment: .leading, spacing: 8) {
+                        if ble.listTotal > 0 {
+                            ProgressView(value: Double(ble.listReceived), total: Double(ble.listTotal))
+                            Text("Loading patterns… \(ble.listReceived) of \(ble.listTotal)")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        } else {
+                            HStack(spacing: 12) {
+                                ProgressView()
+                                Text("Loading patterns…")
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    .padding(.vertical, 4)
+                } else if ble.listFailed {
+                    HStack(spacing: 12) {
+                        Image(systemName: "exclamationmark.triangle")
+                            .foregroundStyle(.orange)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Couldn't load patterns")
+                            Text("Pull down to try again.")
+                                .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
-                    } else {
-                        Text("No patterns on this device.")
-                            .foregroundStyle(.secondary)
                     }
+                } else if ble.patterns.isEmpty {
+                    Text("No patterns on this device.")
+                        .foregroundStyle(.secondary)
                 } else {
                     ForEach(ble.patterns, id: \.self) { name in
                         Button {
@@ -65,15 +84,6 @@ struct ControlView: View {
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
-                    }
-                }
-            } header: {
-                HStack {
-                    Text("Patterns")
-                    Spacer()
-                    if ble.isLoadingPatterns && !ble.patterns.isEmpty {
-                        ProgressView()
-                            .controlSize(.small)
                     }
                 }
             }
