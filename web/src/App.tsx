@@ -12,6 +12,8 @@ import { Timeline } from './components/Timeline'
 import { ExportDialog } from './components/ExportDialog'
 import { AboutDialog } from './components/AboutDialog'
 import { PrivacyDialog } from './components/PrivacyDialog'
+import { ProjectsDialog } from './components/ProjectsDialog'
+import { KebabMenu } from './components/KebabMenu'
 import { readProjectFromFile } from './export/projectFile'
 import { useStore } from './store'
 import { usePlayer } from './usePlayer'
@@ -34,14 +36,16 @@ export default function App() {
   const [exportOpen, setExportOpen] = useState(false)
   const [aboutOpen, setAboutOpen] = useState(false)
   const [privacyOpen, setPrivacyOpen] = useState(false)
+  const [projectsOpen, setProjectsOpen] = useState(false)
   const [dragging, setDragging] = useState(false)
   const loadProject = useStore((s) => s.loadProject)
   const newProject = useStore((s) => s.newProject)
+  const projectName = useStore((s) => s.projectName)
+  const renameProject = useStore((s) => s.renameProject)
   const fileRef = useRef<HTMLInputElement>(null)
 
-  const onNew = () => {
-    if (window.confirm('Start a new project? Your current work will be discarded.')) newProject()
-  }
+  // New is non-destructive now — the current project is saved to the library first.
+  const onNew = () => newProject()
 
   const importFile = useCallback(
     async (file?: File | null) => {
@@ -101,11 +105,23 @@ export default function App() {
     >
       <header className="topbar">
         <span className="brand">LED Animator</span>
-        <span className="muted">in-browser editor · fixed-rate raster</span>
-        <button className="btn export-btn" onClick={onNew}>New</button>
-        <button className="btn" onClick={() => fileRef.current?.click()}>Import</button>
-        <button className="btn" onClick={() => setExportOpen(true)}>Export</button>
-        <button className="btn" onClick={() => setAboutOpen(true)}>About</button>
+        <input
+          className="project-name"
+          value={projectName}
+          placeholder="Untitled"
+          aria-label="Project name"
+          onChange={(e) => renameProject(e.target.value)}
+        />
+        <button className="btn export-btn" onClick={() => setExportOpen(true)}>Export</button>
+        <KebabMenu
+          items={[
+            { label: 'New', onClick: onNew },
+            { label: 'Open…', onClick: () => setProjectsOpen(true) },
+            { label: 'Import…', onClick: () => fileRef.current?.click() },
+            { label: 'Export…', onClick: () => setExportOpen(true) },
+            { label: 'About', onClick: () => setAboutOpen(true) },
+          ]}
+        />
         <input
           ref={fileRef}
           type="file"
@@ -118,6 +134,7 @@ export default function App() {
       {exportOpen && <ExportDialog onClose={() => setExportOpen(false)} />}
       {aboutOpen && <AboutDialog onClose={() => setAboutOpen(false)} />}
       {privacyOpen && <PrivacyDialog onClose={() => setPrivacyOpen(false)} />}
+      {projectsOpen && <ProjectsDialog onClose={() => setProjectsOpen(false)} />}
       {dragging && <div className="drop-overlay">Drop a project (.json or .zip) to import</div>}
 
       <aside className="sidebar">

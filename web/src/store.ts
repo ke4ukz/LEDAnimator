@@ -18,10 +18,13 @@ import { reserveStopIds } from './gradient'
 import { bakeProject } from './bake'
 import type { ProjectFile } from './export/projectFile'
 import { loadSavedProjectFile, saveProjectFile } from './persistence'
+import { saveProjectToLibrary } from './export/library'
 
 interface AppState {
   leds: LedPosition[]
   project: Project
+  projectId: string
+  projectName: string
   raster: Raster
   frame: number
   playing: boolean
@@ -73,6 +76,8 @@ interface AppState {
   loadProject: (file: ProjectFile) => void
   /** Reset to a fresh default project. */
   newProject: () => void
+  /** Rename the current project. */
+  renameProject: (name: string) => void
 
   /** Change the frame rate, keeping the loop length (re-bakes at new resolution). */
   setFps: (fps: number) => void
@@ -112,6 +117,8 @@ function reserveProjectIds(project: Project) {
 interface Init {
   leds: LedPosition[]
   project: Project
+  projectId: string
+  projectName: string
   raster: Raster
   selectedTrack: string | null
   ledScale: number
@@ -128,6 +135,8 @@ function initialState(): Init {
     return {
       leds: saved.leds,
       project,
+      projectId: saved.id,
+      projectName: saved.name,
       raster: bakeProject(project, saved.leds.length, saved.numFrames, saved.fps),
       selectedTrack: saved.tracks[0]?.id ?? null,
       ledScale: saved.display?.ledScale ?? 1,
@@ -140,6 +149,8 @@ function initialState(): Init {
   return {
     leds,
     project,
+    projectId: crypto.randomUUID(),
+    projectName: 'Untitled',
     raster: bakeProject(project, DEMO_LEDS),
     selectedTrack: project.tracks[0]?.id ?? null,
     ledScale: 1,
@@ -161,6 +172,8 @@ export const useStore = create<AppState>((set, get) => {
   return {
     leds: init.leds,
     project: init.project,
+    projectId: init.projectId,
+    projectName: init.projectName,
     raster: init.raster,
     frame: 0,
     playing: true,
@@ -344,6 +357,8 @@ export const useStore = create<AppState>((set, get) => {
       return {
         format: 'led-animator-project',
         version: 1,
+        id: s.projectId,
+        name: s.projectName,
         fps: s.raster.fps,
         numFrames: s.raster.numFrames,
         leds: s.leds,
@@ -355,6 +370,8 @@ export const useStore = create<AppState>((set, get) => {
     },
 
     loadProject: (f) => {
+      // Flush the outgoing project to the library so switching never loses edits.
+      saveProjectToLibrary(get().getProjectFile())
       const project: Project = { sources: f.sources, tracks: f.tracks, assignments: f.assignments }
       // Advance id counters past loaded ids so new items can't collide.
       const projIds: string[] = []
@@ -378,6 +395,8 @@ export const useStore = create<AppState>((set, get) => {
       set({
         leds: f.leds,
         project,
+        projectId: f.id,
+        projectName: f.name,
         ledScale: f.display?.ledScale ?? 1,
         ledShape: f.display?.ledShape ?? 'cube',
         showLabels: f.display?.showLabels ?? false,
@@ -391,11 +410,15 @@ export const useStore = create<AppState>((set, get) => {
     },
 
     newProject: () => {
+      // Flush the outgoing project to the library before replacing it.
+      saveProjectToLibrary(get().getProjectFile())
       const leds = ringArrangement(DEMO_LEDS)
       const project = defaultProject(DEMO_LEDS)
       set({
         leds,
         project,
+        projectId: crypto.randomUUID(),
+        projectName: 'Untitled',
         raster: bakeProject(project, DEMO_LEDS),
         frame: 0,
         selection: [0],
@@ -407,6 +430,8 @@ export const useStore = create<AppState>((set, get) => {
         showLabels: false,
       })
     },
+
+    renameProject: (name) => set({ projectName: name }),
 
     setFps: (fps) => {
       const { project, leds, raster, frame } = get()
@@ -448,9 +473,14 @@ useStore.subscribe((state, prev) => {
     state.raster !== prev.raster ||
     state.ledScale !== prev.ledScale ||
     state.ledShape !== prev.ledShape ||
-    state.showLabels !== prev.showLabels
+    state.showLabels !== prev.showLabels ||
+    state.projectName !== prev.projectName
   ) {
     clearTimeout(saveTimer)
-    saveTimer = setTimeout(() => saveProjectFile(useStore.getState().getProjectFile()), 800)
+    saveTimer = setTimeout(() => {
+      const file = useStore.getState().getProjectFile()
+      saveProjectFile(file) // localStorage: last-open, for instant startup
+      saveProjectToLibrary(file) // IndexedDB: the library
+    }, 800)
   }
 })

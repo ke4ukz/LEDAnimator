@@ -316,6 +316,112 @@
   letter-spacing: 0.2px;
 }
 
+/* Editable project title in the topbar */
+.project-name {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  color: var(--text);
+  font-size: 13px;
+  padding: 3px 6px;
+  min-width: 120px;
+  max-width: 260px;
+}
+
+.project-name:hover {
+  border-color: var(--border);
+}
+
+.project-name:focus {
+  outline: none;
+  border-color: var(--accent);
+  background: var(--panel-2);
+}
+
+/* Kebab menu */
+.menu {
+  position: relative;
+  display: inline-flex;
+}
+
+.menu-pop {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 1100;
+  min-width: 160px;
+  padding: 4px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45);
+  display: flex;
+  flex-direction: column;
+}
+
+.menu-item {
+  background: none;
+  border: none;
+  border-radius: 5px;
+  color: var(--text);
+  text-align: left;
+  font: inherit;
+  padding: 7px 10px;
+  cursor: pointer;
+}
+
+.menu-item:hover {
+  background: var(--panel-2);
+}
+
+.menu-item.danger {
+  color: #e0586b;
+}
+
+/* Projects (Open…) list */
+.project-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.project-list li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 6px;
+}
+
+.project-list li.current {
+  background: var(--panel-2);
+}
+
+.project-open {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background: none;
+  border: none;
+  color: var(--text);
+  text-align: left;
+  font: inherit;
+  padding: 8px 10px;
+  cursor: pointer;
+  border-radius: 6px;
+}
+
+.project-open:hover {
+  background: var(--panel-2);
+}
+
+.project-name-label {
+  font-size: 14px;
+}
+
 .muted {
   color: var(--muted);
   font-size: 13px;

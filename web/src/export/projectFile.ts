@@ -8,6 +8,8 @@ import type { Source, Track } from '../project'
 export interface ProjectFile {
   format: 'led-animator-project'
   version: number
+  id: string
+  name: string
   fps: number
   numFrames: number
   leds: LedPosition[]
@@ -37,7 +39,11 @@ export function parseProjectFile(text: string): ProjectFile {
   if (typeof f.fps !== 'number' || typeof f.numFrames !== 'number') {
     throw new Error('project file is missing timing')
   }
-  return f as ProjectFile
+  const file = f as ProjectFile
+  // Backfill id/name for older files that predate them.
+  if (typeof file.id !== 'string' || !file.id) file.id = crypto.randomUUID()
+  if (typeof file.name !== 'string' || !file.name) file.name = 'Untitled'
+  return file
 }
 
 /** Read a project from a File — accepts a raw .json or an export .zip. */
