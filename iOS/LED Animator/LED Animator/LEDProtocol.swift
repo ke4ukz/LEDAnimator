@@ -23,6 +23,7 @@ enum LEDGATT {
 /// The firmware commands the app uses. One command == one BLE write.
 enum LEDCommand {
     case info
+    case moreInfo              // static/rarely-used details for the Info tab
     case list
     case select(String)
     case bright(Int)            // 0–100
@@ -34,10 +35,18 @@ enum LEDCommand {
     case version
     case platform
     case free
+    // Wi-Fi provisioning (Pico W)
+    case wifiScan              // stream nearby SSIDs
+    case wifiSSID(String)      // stash the network name for the next connect
+    case wifiPass(String)      // stash the password for the next connect
+    case wifiConnect           // join with the stashed credentials + persist
+    case wifiStatus            // query current Wi-Fi state
+    case wifiForget            // clear saved credentials + disconnect
 
     var text: String {
         switch self {
         case .info: return "INFO"
+        case .moreInfo: return "MOREINFO"
         case .list: return "LIST"
         case .select(let name): return "SELECT \(name)"
         case .bright(let value): return "BRIGHT \(value)"
@@ -49,6 +58,19 @@ enum LEDCommand {
         case .version: return "VERSION"
         case .platform: return "PLATFORM"
         case .free: return "FREE"
+        case .wifiScan: return "WIFISCAN"
+        case .wifiSSID(let ssid): return "WIFISSID \(ssid)"
+        case .wifiPass(let pass): return "WIFIPASS \(pass)"
+        case .wifiConnect: return "WIFICONNECT"
+        case .wifiStatus: return "WIFISTATUS"
+        case .wifiForget: return "WIFIFORGET"
         }
     }
+}
+
+/// A network from a WIFISCAN, strongest first.
+struct WiFiNetwork: Identifiable, Equatable {
+    var ssid: String
+    var rssi: Int   // dBm (negative; closer to 0 = stronger)
+    var id: String { ssid }
 }

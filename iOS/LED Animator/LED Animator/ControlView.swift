@@ -18,6 +18,7 @@ private enum PlaybackMode: Hashable {
 struct ControlView: View {
     let ble: BLEController
     @State private var showInfo = false
+    @State private var showWifi = false
     @State private var playback: PlaybackMode = .play
     @State private var solidColor: Color = .white
     @Environment(\.self) private var environment
@@ -164,6 +165,13 @@ struct ControlView: View {
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
+                    showWifi = true
+                } label: {
+                    Image(systemName: "wifi")
+                }
+            }
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
                     showInfo = true
                 } label: {
                     Image(systemName: "info.circle")
@@ -172,6 +180,9 @@ struct ControlView: View {
         }
         .sheet(isPresented: $showInfo) {
             DeviceInfoView(ble: ble)
+        }
+        .sheet(isPresented: $showWifi) {
+            WiFiView(ble: ble)
         }
         // Seed the controls from what the device reports (INFO on connect, and
         // command echoes). These set @State directly, so they don't send anything.

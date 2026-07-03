@@ -53,7 +53,16 @@ final class BLEController: NSObject {
     var platform: String?
     var ledCount: Int?
     var freeBytes: Int?
+    var wifiMac: String?
+    var bluetoothMac: String?
+    var hostname: String?
+    var moreInfoLoaded = false   // true once the MOREINFO batch (ENDINFO) has arrived
     var lastError: String?
+    // Wi-Fi provisioning
+    var wifiState = "off"          // off / connecting / connected / failed
+    var wifiDetail = ""            // IP when connected, short reason when failed
+    var wifiNetworks: [WiFiNetwork] = []
+    var isScanningWifi = false
 
     // MARK: CoreBluetooth internals (not observed)
     @ObservationIgnored private var central: CBCentralManager!
@@ -67,6 +76,9 @@ final class BLEController: NSObject {
     @ObservationIgnored private var throttleWork: [String: DispatchWorkItem] = [:]
     @ObservationIgnored private var incomingPatterns: [String] = []      // buffered FILE… until ENDLIST
     @ObservationIgnored private var listTimeoutWork: DispatchWorkItem?   // stall watchdog for LIST streaming
+    @ObservationIgnored private var incomingNetworks: [WiFiNetwork] = []  // buffered WIFINET… until WIFISCANEND
+    @ObservationIgnored private var wifiScanTimeoutWork: DispatchWorkItem?
+    @ObservationIgnored private var moreInfoTimeoutWork: DispatchWorkItem?   // fallback if ENDINFO is dropped
 
     override init() {
         super.init()
@@ -115,7 +127,18 @@ final class BLEController: NSObject {
         platform = nil
         ledCount = nil
         freeBytes = nil
+        wifiMac = nil
+        bluetoothMac = nil
+        hostname = nil
+        moreInfoLoaded = false
+        moreInfoTimeoutWork?.cancel()
         lastError = nil
+        wifiState = "off"
+        wifiDetail = ""
+        wifiNetworks = []
+        incomingNetworks = []
+        isScanningWifi = false
+        wifiScanTimeoutWork?.cancel()
         connected = peripheral
         peripheral.delegate = self
         central.connect(peripheral)
@@ -158,6 +181,18 @@ final class BLEController: NSObject {
     }
 
     func select(_ name: String) { send(.select(name)) }
+
+    /// Fetch the Info-tab details (version, LEDs, free space, MACs, hostname,
+    /// platform). They stream back as discrete labeled replies ending in ENDINFO.
+    /// Until then fields read "Loading"; after, a missing field reads "N/A".
+    func requestMoreInfo() {
+        moreInfoLoaded = false
+        send(.moreInfo)
+        moreInfoTimeoutWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in self?.moreInfoLoaded = true }
+        moreInfoTimeoutWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5, execute: work)
+    }
 
     /// If the LIST stream goes quiet (a dropped FILE/ENDLIST, or the device
     /// stops), stop showing "loading" after a few seconds and keep whatever
@@ -238,16 +273,63 @@ final class BLEController: NSObject {
     }
 
     /// Rename the device; the board persists it and re-advertises under the name.
+    /// Restricted to printable ASCII (the name rides the protocol + BLE advert).
     func rename(_ name: String) {
-        let trimmed = String(name.prefix(26)).trimmingCharacters(in: .whitespacesAndNewlines)
+        let ascii = String(name.unicodeScalars.filter { (32..<127).contains($0.value) })
+        let trimmed = ascii.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
-        send(.setName(trimmed))
+        send(.setName(String(trimmed.prefix(26))))
+    }
+
+    // MARK: Wi-Fi provisioning
+
+    func requestWifiStatus() { send(.wifiStatus) }
+
+    /// Scan for nearby networks; results stream as WIFINET… and land in
+    /// `wifiNetworks` on WIFISCANEND. Arms a stall watchdog (the device scan
+    /// blocks ~2s before it streams).
+    func scanWifi() {
+        incomingNetworks = []
+        isScanningWifi = true
+        send(.wifiScan)
+        armWifiScanTimeout()
+    }
+
+    /// Send credentials and join. SSID/password go as separate commands (each
+    /// takes the rest of the line) so spaces in either are preserved.
+    func connectWifi(ssid: String, password: String) {
+        let name = ssid.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { return }
+        wifiState = "connecting"
+        wifiDetail = ""
+        send(.wifiSSID(name))
+        send(.wifiPass(password))
+        send(.wifiConnect)
+    }
+
+    func forgetWifi() { send(.wifiForget) }
+
+    private func armWifiScanTimeout() {
+        wifiScanTimeoutWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.wifiNetworks = self.incomingNetworks
+            self.isScanningWifi = false
+            self.wifiScanTimeoutWork = nil
+        }
+        wifiScanTimeoutWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 6.0, execute: work)
     }
 
     // MARK: Reply parsing
 
     private func handleReply(_ reply: String) {
         if reply.hasPrefix("LISTLEN ") {
+            // Start of a list — reset the accumulator so a pushed/repeat list
+            // replaces rather than appends (routing means we only get our own,
+            // but this keeps us correct if the device ever pushes a fresh list).
+            incomingPatterns = []
+            listReceived = 0
             listTotal = Int(reply.dropFirst("LISTLEN ".count)) ?? 0
             armListTimeout()
         } else if reply.hasPrefix("FILE ") {
@@ -259,31 +341,44 @@ final class BLEController: NSObject {
             isLoadingPatterns = false
             listTimeoutWork?.cancel()
         } else if reply.hasPrefix("INFO ") {
-            // INFO <leds> <mode> <bright%> <speed%> <r> <g> <b> <file...>
-            // The filename is last and may contain spaces, so cap the split at 8
-            // and treat the 9th piece as the whole (possibly spaced) name.
-            let t = reply.split(separator: " ", maxSplits: 8, omittingEmptySubsequences: false)
-            if t.count >= 2, let n = Int(t[1]) { ledCount = n }
-            if t.count >= 3 { mode = String(t[2]) }
-            if t.count >= 4, let b = Int(t[3]) { brightness = b }
-            if t.count >= 5, let sp = Int(t[4]) { speed = sp }
-            if t.count >= 8, let r = Int(t[5]), let g = Int(t[6]), let b = Int(t[7]) {
+            // Lean control state: INFO <mode> <bright%> <speed%> <r> <g> <b> <file...>
+            // The filename is last and may contain spaces, so cap the split at 7
+            // and treat the 8th piece as the whole (possibly spaced) name.
+            let t = reply.split(separator: " ", maxSplits: 7, omittingEmptySubsequences: false)
+            if t.count >= 2 { mode = String(t[1]) }
+            if t.count >= 3, let b = Int(t[2]) { brightness = b }
+            if t.count >= 4, let sp = Int(t[3]) { speed = sp }
+            if t.count >= 7, let r = Int(t[4]), let g = Int(t[5]), let b = Int(t[6]) {
                 solid = RGB(r: r, g: g, b: b)
             }
-            if t.count >= 9 {
-                let name = String(t[8])
+            if t.count >= 8 {
+                let name = String(t[7])
                 currentPattern = name.isEmpty ? nil : name
             }
-        } else if reply.hasPrefix("VERSION ") {
+        } else if reply.hasPrefix("VERSION ") {          // MOREINFO fields ↓
             firmwareVersion = String(reply.dropFirst("VERSION ".count))
+        } else if reply.hasPrefix("LEDS ") {
+            ledCount = Int(reply.dropFirst("LEDS ".count))
         } else if reply.hasPrefix("PLATFORM ") {
             platform = String(reply.dropFirst("PLATFORM ".count))
         } else if reply.hasPrefix("FREE ") {
             freeBytes = Int(reply.dropFirst("FREE ".count))
+        } else if reply.hasPrefix("WIFIMAC ") {
+            wifiMac = String(reply.dropFirst("WIFIMAC ".count))
+        } else if reply.hasPrefix("BTMAC ") {
+            bluetoothMac = String(reply.dropFirst("BTMAC ".count))
+        } else if reply.hasPrefix("HOSTNAME ") {
+            hostname = String(reply.dropFirst("HOSTNAME ".count))
+        } else if reply == "ENDINFO" {
+            moreInfoLoaded = true
+            moreInfoTimeoutWork?.cancel()
         } else if reply.hasPrefix("BRIGHT ") {
             // Unsolicited echo the device sends when it persists brightness
             // (after the slider settles) — snap the UI to the actual value.
             if let b = Int(reply.dropFirst("BRIGHT ".count)) { brightness = b }
+        } else if reply.hasPrefix("SPEED ") {
+            // Unsolicited echo when speed settles, so other clients stay in sync.
+            if let sp = Int(reply.dropFirst("SPEED ".count)) { speed = sp }
         } else if reply.hasPrefix("OK SELECT ") {
             currentPattern = String(reply.dropFirst("OK SELECT ".count))
             mode = "play"
@@ -297,6 +392,36 @@ final class BLEController: NSObject {
             mode = "solid"
         } else if reply.hasPrefix("OK NAME ") {
             connectedName = String(reply.dropFirst("OK NAME ".count))
+        } else if reply.hasPrefix("WIFISCANLEN ") {
+            incomingNetworks = []
+            armWifiScanTimeout()
+        } else if reply.hasPrefix("WIFINET ") {
+            // "WIFINET <rssi> <ssid...>" — ssid is last so spaces survive.
+            let rest = reply.dropFirst("WIFINET ".count)
+            if let sp = rest.firstIndex(of: " ") {
+                let ssid = String(rest[rest.index(after: sp)...])
+                if let rssi = Int(rest[..<sp]), !ssid.isEmpty {
+                    incomingNetworks.append(WiFiNetwork(ssid: ssid, rssi: rssi))
+                }
+            }
+            armWifiScanTimeout()
+        } else if reply == "WIFISCANEND" {
+            wifiNetworks = incomingNetworks
+            isScanningWifi = false
+            wifiScanTimeoutWork?.cancel()
+        } else if reply.hasPrefix("WIFI ") {
+            // "WIFI <state> <detail>" — detail is the IP or a short reason.
+            let rest = reply.dropFirst("WIFI ".count)
+            if let sp = rest.firstIndex(of: " ") {
+                wifiState = String(rest[..<sp])
+                wifiDetail = String(rest[rest.index(after: sp)...])
+            } else {
+                wifiState = String(rest)
+                wifiDetail = ""
+            }
+        } else if reply == "OK WIFIFORGET" {
+            wifiState = "off"
+            wifiDetail = ""
         } else if reply.hasPrefix("ERR") {
             lastError = reply
         }
@@ -379,10 +504,10 @@ extension BLEController: CBPeripheralDelegate {
             return
         }
         connectionState = .connected
-        send(.info)   // confirms it's ours + reports the active pattern
-        send(.version)
-        send(.platform)
-        send(.free)
+        // Keep the connect exchange lean: just the live control state + the
+        // pattern list. Everything else is fetched lazily when its tab opens
+        // (MOREINFO for the Info tab, WIFISTATUS for the Wi-Fi tab).
+        send(.info)   // confirms it's ours + reports the active pattern + controls
         refreshPatterns()   // stream the pattern list (FILE…/ENDLIST)
     }
 

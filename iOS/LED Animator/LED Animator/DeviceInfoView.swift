@@ -33,14 +33,16 @@ struct DeviceInfoView: View {
                 }
 
                 Section {
-                    LabeledContent("Platform", value: ble.platform ?? "—")
-                    LabeledContent("Firmware", value: ble.firmwareVersion ?? "—")
-                    if let count = ble.ledCount {
-                        LabeledContent("LEDs", value: "\(count)")
-                    }
-                    if let free = ble.freeBytes {
-                        LabeledContent("Free space", value: formatBytes(free))
-                    }
+                    LabeledContent("Platform", value: display(ble.platform))
+                    LabeledContent("Firmware", value: display(ble.firmwareVersion))
+                    LabeledContent("LEDs", value: display(ble.ledCount.map(String.init)))
+                    LabeledContent("Free space", value: display(ble.freeBytes.map(formatBytes)))
+                }
+
+                Section("Network") {
+                    LabeledContent("Hostname", value: display(ble.hostname))
+                    LabeledContent("Wi-Fi MAC", value: display(ble.wifiMac))
+                    LabeledContent("Bluetooth", value: display(ble.bluetoothMac))
                 }
             }
             .navigationTitle("Device Info")
@@ -58,7 +60,15 @@ struct DeviceInfoView: View {
             } message: {
                 Text("Up to 26 characters. Saved on the device and used as its Bluetooth name.")
             }
+            .onAppear { ble.requestMoreInfo() }
         }
+    }
+
+    /// A value if we have one; otherwise "Loading" until the MOREINFO batch
+    /// completes, then "N/A" for anything the device didn't report.
+    private func display(_ value: String?) -> String {
+        if let value { return value }
+        return ble.moreInfoLoaded ? "N/A" : "Loading…"
     }
 
     private func commitRename() {
