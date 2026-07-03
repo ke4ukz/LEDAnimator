@@ -1,0 +1,111 @@
+//
+//  TCPController.swift
+//  LED Animator
+//
+//  Wi-Fi DeviceTransport: the same newline-framed text protocol as BLE, over a
+//  raw TCP socket (NWConnection) to a device on CONTROL_PORT. Drives a
+//  DeviceSession exactly like BLEController does over Bluetooth.
+//
+
+import Foundation
+import Network
+import Observation
+
+@Observable
+final class TCPController: DeviceTransport {
+    var connectionState: ConnectionState = .disconnected
+    var session: DeviceSession?
+
+    /// The device's control port (matches the firmware's CONTROL_PORT).
+    @ObservationIgnored private let port: NWEndpoint.Port = 4550
+    @ObservationIgnored private var connection: NWConnection?
+    @ObservationIgnored private var buffer = Data()
+
+    /// Open a control connection to a device at `host` (an IP or hostname).
+    func connect(host: String, name: String? = nil) {
+        disconnect()
+        let target = host.trimmingCharacters(in: .whitespaces)
+        guard !target.isEmpty else { return }
+        connectionState = .connecting
+        buffer = Data()
+        let conn = NWConnection(host: NWEndpoint.Host(target), port: port, using: .tcp)
+        connection = conn
+        conn.stateUpdateHandler = { [weak self] state in
+            self?.handleState(state, name: name ?? target)
+        }
+        conn.start(queue: .main)   // handlers run on main, so @Observable updates are safe
+        receive(on: conn)
+    }
+
+    func disconnect() {
+        connection?.cancel()
+        connection = nil
+        session = nil
+        if connectionState != .disconnected { connectionState = .disconnected }
+    }
+
+    func clearFailure() {
+        if case .failed = connectionState { connectionState = .disconnected }
+    }
+
+    // MARK: DeviceTransport
+
+    func send(_ line: String, expectResponse: Bool) {
+        guard let data = (line + "\n").data(using: .utf8) else { return }
+        connection?.send(content: data, completion: .contentProcessed { _ in })
+    }
+
+    // MARK: Connection lifecycle
+
+    private func handleState(_ state: NWConnection.State, name: String) {
+        switch state {
+        case .ready:
+            let session = DeviceSession(name: name)
+            session.transport = self
+            self.session = session
+            connectionState = .connected
+            session.start()
+        case .failed(let error):
+            session = nil
+            connectionState = .failed(error.localizedDescription)
+        case .waiting:
+            // Transient (no route yet) or waiting on the Local Network prompt —
+            // stay "connecting" rather than failing, so a granted permission can
+            // still proceed to .ready.
+            break
+        case .cancelled:
+            session = nil
+            if connectionState == .connected || connectionState == .connecting {
+                connectionState = .disconnected
+            }
+        default:
+            break
+        }
+    }
+
+    private func receive(on conn: NWConnection) {
+        conn.receive(minimumIncompleteLength: 1, maximumLength: 8192) { [weak self] data, _, isComplete, error in
+            guard let self else { return }
+            if let data, !data.isEmpty { self.ingest(data) }
+            if error == nil && !isComplete {
+                self.receive(on: conn)   // keep reading
+            } else {
+                self.session = nil
+                if self.connectionState == .connected { self.connectionState = .disconnected }
+            }
+        }
+    }
+
+    /// TCP is a byte stream, so buffer and split on newline (like the firmware).
+    private func ingest(_ data: Data) {
+        buffer.append(data)
+        while let nl = buffer.firstIndex(of: 0x0A) {   // '\n'
+            let lineData = buffer.subdata(in: buffer.startIndex..<nl)
+            buffer.removeSubrange(buffer.startIndex...nl)
+            if let text = String(data: lineData, encoding: .utf8) {
+                let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty { session?.handleReply(trimmed) }
+            }
+        }
+    }
+}
