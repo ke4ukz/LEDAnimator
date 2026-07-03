@@ -27,7 +27,7 @@ export function KebabMenu({ items }: { items: MenuItem[] }) {
 
   return (
     <div className="menu" ref={ref}>
-      <button className="btn" aria-label="Menu" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+      <button className="menu-trigger" aria-label="Menu" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
         ⋮
       </button>
       {open && (

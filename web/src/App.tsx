@@ -15,6 +15,7 @@ import { PrivacyDialog } from './components/PrivacyDialog'
 import { ProjectsDialog } from './components/ProjectsDialog'
 import { KebabMenu } from './components/KebabMenu'
 import { readProjectFromFile } from './export/projectFile'
+import { deleteProjectFromLibrary } from './export/library'
 import { useStore } from './store'
 import { usePlayer } from './usePlayer'
 import './App.css'
@@ -40,12 +41,19 @@ export default function App() {
   const [dragging, setDragging] = useState(false)
   const loadProject = useStore((s) => s.loadProject)
   const newProject = useStore((s) => s.newProject)
+  const blankSlate = useStore((s) => s.blankSlate)
   const projectName = useStore((s) => s.projectName)
   const renameProject = useStore((s) => s.renameProject)
   const fileRef = useRef<HTMLInputElement>(null)
 
   // New is non-destructive now — the current project is saved to the library first.
   const onNew = () => newProject()
+
+  const onDelete = () => {
+    if (!window.confirm(`Delete “${projectName || 'Untitled'}”? This can't be undone.`)) return
+    const id = useStore.getState().projectId
+    deleteProjectFromLibrary(id).then(() => blankSlate())
+  }
 
   const importFile = useCallback(
     async (file?: File | null) => {
@@ -105,20 +113,27 @@ export default function App() {
     >
       <header className="topbar">
         <span className="brand">LED Animator</span>
-        <input
-          className="project-name"
-          value={projectName}
-          placeholder="Untitled"
-          aria-label="Project name"
-          onChange={(e) => renameProject(e.target.value)}
-        />
-        <button className="btn export-btn" onClick={() => setExportOpen(true)}>Export</button>
+        <label className="name-field" title="Project name (click to edit)">
+          <svg className="name-pencil" width="13" height="13" viewBox="0 0 24 24" fill="none"
+            stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M12 20h9" />
+            <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
+          </svg>
+          <input
+            className="project-name"
+            value={projectName}
+            placeholder="Untitled"
+            aria-label="Project name"
+            onChange={(e) => renameProject(e.target.value)}
+          />
+        </label>
         <KebabMenu
           items={[
             { label: 'New', onClick: onNew },
             { label: 'Open…', onClick: () => setProjectsOpen(true) },
             { label: 'Import…', onClick: () => fileRef.current?.click() },
             { label: 'Export…', onClick: () => setExportOpen(true) },
+            { label: 'Delete', onClick: onDelete, danger: true },
             { label: 'About', onClick: () => setAboutOpen(true) },
           ]}
         />

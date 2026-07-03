@@ -8,7 +8,7 @@ const fmtDate = (t: number) => new Date(t).toLocaleString([], { dateStyle: 'medi
 export function ProjectsDialog({ onClose }: { onClose: () => void }) {
   const [entries, setEntries] = useState<LibraryEntry[] | null>(null)
   const loadProject = useStore((s) => s.loadProject)
-  const newProject = useStore((s) => s.newProject)
+  const blankSlate = useStore((s) => s.blankSlate)
   const currentId = useStore((s) => s.projectId)
 
   const refresh = () => listLibrary().then(setEntries)
@@ -25,12 +25,9 @@ export function ProjectsDialog({ onClose }: { onClose: () => void }) {
 
   const remove = async (entry: LibraryEntry) => {
     if (!window.confirm(`Delete “${entry.name}”? This can't be undone.`)) return
-    if (entry.id === currentId) {
-      // Switch away first (flushes+replaces current), then delete the old entry
-      // so autosave can't resurrect it.
-      newProject()
-    }
     await deleteProjectFromLibrary(entry.id)
+    // Deleting the open project drops you to an unsaved blank slate.
+    if (entry.id === currentId) blankSlate()
     refresh()
   }
 

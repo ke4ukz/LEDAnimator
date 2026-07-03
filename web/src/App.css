@@ -316,32 +316,65 @@
   letter-spacing: 0.2px;
 }
 
-/* Editable project title in the topbar */
-.project-name {
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: 5px;
-  color: var(--text);
-  font-size: 13px;
-  padding: 3px 6px;
-  min-width: 120px;
-  max-width: 260px;
+/* Editable project title in the topbar — a bordered field with a pencil so
+   it's clearly editable. */
+.name-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--muted);
 }
 
-.project-name:hover {
-  border-color: var(--border);
+.name-field:hover {
+  border-color: var(--muted);
+}
+
+.name-field:focus-within {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.name-pencil {
+  flex: none;
+}
+
+.project-name {
+  background: transparent;
+  border: none;
+  color: var(--text);
+  font-size: 13px;
+  padding: 0;
+  min-width: 100px;
+  max-width: 240px;
 }
 
 .project-name:focus {
   outline: none;
-  border-color: var(--accent);
-  background: var(--panel-2);
 }
 
-/* Kebab menu */
+/* Kebab menu — borderless trigger, right-aligned in the topbar */
 .menu {
   position: relative;
   display: inline-flex;
+  margin-left: auto;
+}
+
+.menu-trigger {
+  background: none;
+  border: none;
+  color: var(--muted);
+  font-size: 22px;
+  line-height: 1;
+  padding: 0 8px;
+  cursor: pointer;
+}
+
+.menu-trigger:hover,
+.menu-trigger[aria-expanded='true'] {
+  color: var(--text);
 }
 
 .menu-pop {

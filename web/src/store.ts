@@ -17,7 +17,7 @@ import {
 import { reserveStopIds } from './gradient'
 import { bakeProject } from './bake'
 import type { ProjectFile } from './export/projectFile'
-import { loadSavedProjectFile, saveProjectFile } from './persistence'
+import { loadSavedProjectFile, saveProjectFile, clearSavedProject } from './persistence'
 import { saveProjectToLibrary } from './export/library'
 
 interface AppState {
@@ -74,8 +74,10 @@ interface AppState {
   getProjectFile: () => ProjectFile
   /** Replace the whole editable state from a loaded project (re-bakes). */
   loadProject: (file: ProjectFile) => void
-  /** Reset to a fresh default project. */
+  /** Reset to a fresh default project (current one is saved to the library first). */
   newProject: () => void
+  /** Discard the current project unsaved and reset to a blank default (used after deleting the active project). */
+  blankSlate: () => void
   /** Rename the current project. */
   renameProject: (name: string) => void
 
@@ -160,6 +162,10 @@ function initialState(): Init {
 }
 
 const init = initialState()
+
+// Set true to make the next state change skip autosave (used by blankSlate so a
+// discarded project isn't re-persisted).
+let suppressAutosave = false
 
 export const useStore = create<AppState>((set, get) => {
   /** Re-bake the raster from the current project, preserving frames/fps. */
@@ -431,6 +437,30 @@ export const useStore = create<AppState>((set, get) => {
       })
     },
 
+    blankSlate: () => {
+      // No flush (the project is being deleted), and skip the autosave so this
+      // blank state leaves nothing saved until the user actually edits it.
+      suppressAutosave = true
+      clearSavedProject()
+      const leds = ringArrangement(DEMO_LEDS)
+      const project = defaultProject(DEMO_LEDS)
+      set({
+        leds,
+        project,
+        projectId: crypto.randomUUID(),
+        projectName: 'Untitled',
+        raster: bakeProject(project, DEMO_LEDS),
+        frame: 0,
+        selection: [0],
+        selectionAnchor: 0,
+        selectedTrack: project.tracks[0]?.id ?? null,
+        ghost: null,
+        ledScale: 1,
+        ledShape: 'cube',
+        showLabels: false,
+      })
+    },
+
     renameProject: (name) => set({ projectName: name }),
 
     setFps: (fps) => {
@@ -467,6 +497,11 @@ export const useStore = create<AppState>((set, get) => {
 // ticks and selection don't touch these slices, so playback doesn't trigger it.
 let saveTimer: ReturnType<typeof setTimeout> | undefined
 useStore.subscribe((state, prev) => {
+  if (suppressAutosave) {
+    suppressAutosave = false
+    clearTimeout(saveTimer) // also drop any pending save from prior edits
+    return
+  }
   if (
     state.leds !== prev.leds ||
     state.project !== prev.project ||
