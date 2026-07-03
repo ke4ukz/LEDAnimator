@@ -320,9 +320,20 @@ def _echo_speed():
         _notify("SPEED %d" % int(S.speed * 100))
 
 
+def _state_line():
+    # The lean control state, as INFO. Returned by the INFO command AND broadcast
+    # on change (below) so every client stays in sync. <mode> <bright%> <speed%>
+    # <r> <g> <b> <file...> - filename last so a spaced name survives.
+    return "INFO %s %d %d %d %d %d %s" % (
+        S.mode, int(S.bright * 100), int(S.speed * 100),
+        S.solid[0], S.solid[1], S.solid[2], S.file or "")
+
+
 def _persist_state():
     # Debounced (like brightness): write the mode + solid color once it's been
-    # steady for ~1s, so a color-picker drag doesn't hammer the flash.
+    # steady for ~1s, so a color-picker drag doesn't hammer the flash. Also
+    # broadcasts the new state so OTHER clients sync (SELECT / SOLID / OFF / PLAY,
+    # which otherwise only ack the client that sent them).
     if S.state_dirty and time.ticks_diff(time.ticks_ms(), S.state_at) > 1000:
         S.state_dirty = False
         try:
@@ -330,6 +341,7 @@ def _persist_state():
                 fh.write("%s %d %d %d" % (S.mode, S.solid[0], S.solid[1], S.solid[2]))
         except Exception:
             pass
+        _notify(_state_line())
 
 
 # ---- Wi-Fi (Pico W) --------------------------------------------------------
@@ -680,15 +692,11 @@ def dispatch(line, origin=None):
         if c == "PING":
             return "OK"
         if c == "INFO":
-            # Lean, control-only (fetched on every connect):
-            # <mode> <bright%> <speed%> <r> <g> <b> <file...>. The filename is
-            # LAST because it may contain spaces; the app parses the fixed fields
-            # positionally and takes the remainder as the name. Static/rarely-used
-            # details (version, LED count, free space, MACs, platform) live in
-            # MOREINFO, fetched lazily, so this stays small.
-            return "INFO %s %d %d %d %d %d %s" % (
-                S.mode, int(S.bright * 100), int(S.speed * 100),
-                S.solid[0], S.solid[1], S.solid[2], S.file or "")
+            # Lean, control-only (fetched on every connect). Same line the device
+            # broadcasts on state change (see _state_line / _persist_state).
+            # Static/rarely-used details (version, LEDs, free, MACs, platform)
+            # live in MOREINFO, fetched lazily, so this stays small.
+            return _state_line()
         if c == "MOREINFO":
             # Everything the Info tab shows, as a set of DISCRETE labeled
             # notifications (streamed paced by the player loop, like LIST). Each
