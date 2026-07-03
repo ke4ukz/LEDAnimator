@@ -188,6 +188,15 @@
   font-size: 11px;
 }
 
+/* Full-width stat row (e.g. the export filename, which is longer than a number). */
+.stat-wide {
+  grid-column: 1 / -1;
+}
+
+.stat-wide strong {
+  overflow-wrap: anywhere;
+}
+
 .warn-box {
   background: color-mix(in srgb, #e0a23a 16%, transparent);
   border: 1px solid color-mix(in srgb, #e0a23a 55%, transparent);
@@ -379,6 +388,22 @@
 
 .save-link:hover {
   text-decoration: underline;
+}
+
+/* Borderless icon button in the topbar (e.g. Export shortcut next to the kebab). */
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  color: var(--muted);
+  padding: 0 6px;
+  cursor: pointer;
+}
+
+.icon-btn:hover {
+  color: var(--text);
 }
 
 /* Kebab menu — borderless trigger */
