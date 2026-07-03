@@ -5,14 +5,21 @@
 // skipped automatically on a plain
 // Pico (no radio), so the same script runs on both.
 
-export function rp2040MainPy(pin: number, brightness: number, name = 'LED Animator', build = 'dev'): string {
+/**
+ * The player firmware. Contains NO user settings — the data pin, brightness,
+ * and device name are read from files on the board (datapin.txt / bright.txt /
+ * devicename.txt, see rp2040SettingsFiles). Only the build id is baked in, so
+ * the script is identical for every export.
+ */
+export function rp2040MainPy(build = 'dev'): string {
   return `# main.py - LED Animator player for RP2040 / Pico W (MicroPython)
 # Plays *.leda pattern files (LEDA v1) on a WS2812 / NeoPixel strip via PIO, and on a
 # Pico W exposes a Bluetooth LE control channel for live control.
 #
-# Wiring: strip data line -> GP${pin}, GND common with the strip's supply.
-# Power: a Pico's USB can only source limited current; larger strips need an
-# external 5V supply (lower BRIGHTNESS / use the BLE BRIGHT command).
+# Settings live in files, not this script: datapin.txt (GP pin), bright.txt
+# (0-100), devicename.txt (BLE name). Wiring: strip data -> that GP pin (default
+# GP0), GND common with the strip's supply. Larger strips need an external 5V
+# supply (lower brightness / use the BLE BRIGHT command).
 #
 # BLE control - a custom LED Animator service (so an app can filter scans to
 # OUR devices; the name is user-set and UART UUIDs are shared, so neither is
@@ -29,10 +36,19 @@ import array, time, os
 from machine import Pin
 import rp2
 
-DATA_PIN = ${pin}
+
+def _load_pin():
+    try:
+        with open("datapin.txt") as fh:
+            return int(fh.read().strip())
+    except (OSError, ValueError):
+        return 0
+
+
+DATA_PIN = _load_pin()
 PATTERN_FILE = "pattern.leda"
 PATTERN_EXT = ".leda"
-DEVICE_NAME = ${JSON.stringify(name)}   # default BLE name; NAME command overrides
+DEVICE_NAME = "LED Animator"   # default; devicename.txt / NAME command override
 FW_VERSION = ${JSON.stringify(build)}   # build identifier (no real release yet)
 
 
@@ -55,7 +71,7 @@ sm.active(1)
 
 
 class S:
-    bright = ${brightness}   # 0.0 - 1.0, scales every channel
+    bright = 1.0             # 0.0 - 1.0; default, overridden by bright.txt
     speed = 1.0              # playback rate multiplier (1.0 = as authored)
     mode = "play"            # "play" or "solid"
     solid = (0, 0, 0)
@@ -431,18 +447,21 @@ export function rp2040Readme(pin: number): string {
   return `LED Animator - RP2040 / Pico W (MicroPython) export
 
 Files:
-  main.py       WS2812 player (PIO) + BLE control. DATA_PIN is set to GP${pin}.
-  pattern.leda  The baked animation (LEDA v1).
-  project.json  Editable project - re-import into LED Animator to keep editing.
-                (App only; do NOT copy this to the board.)
+  main.py         WS2812 player (PIO) + BLE control. No settings baked in.
+  pattern.leda    The baked animation (LEDA v1).
+  datapin.txt     The GP pin the strip data line is wired to (GP${pin}).
+  bright.txt      Startup brightness percent (0-100).
+  devicename.txt  BLE device name.
+  project.json    Editable project - re-import into LED Animator to keep editing.
+                  (App only; do NOT copy this to the board.)
 
 Install (Thonny or mpremote):
   1. Flash MicroPython for RP2040 onto the Pico / Pico W.
-  2. Copy main.py and pattern.leda to the board.
+  2. Copy main.py, pattern.leda, datapin.txt, bright.txt, devicename.txt to the board.
   3. Reset - main.py runs on boot and loops the animation.
 
 Wiring:
-  Strip DIN -> GP${pin}; GND common; 5V from an adequate supply.
+  Strip DIN -> GP${pin} (edit datapin.txt to change); GND common; 5V supply.
 
 Bluetooth control (Pico W only):
   main.py advertises a custom LED Animator service (with UART-style
@@ -489,4 +508,16 @@ The player steps one frame every 1/fps seconds, looping. The command handler
 (dispatch) is transport-agnostic, so the same command set will back Wi-Fi/HTTP
 and USB-serial control as those are added.
 `
+}
+
+/**
+ * The on-device settings files that main.py reads at boot. These carry what
+ * used to be baked into the script, so main.py itself is settings-free.
+ */
+export function rp2040SettingsFiles(pin: number, brightness: number, name: string): Record<string, string> {
+  return {
+    'datapin.txt': String(pin),
+    'bright.txt': String(Math.round(brightness * 100)),
+    'devicename.txt': name,
+  }
 }

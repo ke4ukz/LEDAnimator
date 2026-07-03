@@ -1,7 +1,7 @@
 import firmwareUrl from '../assets/RPI_PICO_W-v1.28.0.uf2?url'
 import type { Raster } from '../types'
 import { encodeRaster } from './format'
-import { rp2040MainPy } from './rp2040'
+import { rp2040MainPy, rp2040SettingsFiles } from './rp2040'
 import { buildLittleFsImage } from './littlefs'
 import { assembleCombinedUf2 } from './uf2'
 
@@ -36,10 +36,14 @@ export async function buildRp2040CombinedUf2(
   build?: string,
 ): Promise<Uint8Array> {
   const enc = new TextEncoder()
-  const mainPy = enc.encode(rp2040MainPy(pin, brightness, name, build))
-  const patternBin = encodeRaster(raster)
+  const settings = rp2040SettingsFiles(pin, brightness, name ?? 'LED Animator')
+  const files = [
+    { name: 'main.py', data: enc.encode(rp2040MainPy(build)) },
+    { name: 'pattern.leda', data: encodeRaster(raster) },
+    ...Object.entries(settings).map(([n, v]) => ({ name: n, data: enc.encode(v) })),
+  ]
 
-  const total = mainPy.length + patternBin.length
+  const total = files.reduce((sum, f) => sum + f.data.length, 0)
   const usable = usableFsBytes()
   if (total > usable) {
     throw new Error(
@@ -48,11 +52,7 @@ export async function buildRp2040CombinedUf2(
     )
   }
 
-  const fsImage = await buildLittleFsImage(
-    [{ name: 'main.py', data: mainPy }, { name: 'pattern.leda', data: patternBin }],
-    PICO_W_FIRMWARE.blockCount,
-    PICO_W_FIRMWARE.blockSize,
-  )
+  const fsImage = await buildLittleFsImage(files, PICO_W_FIRMWARE.blockCount, PICO_W_FIRMWARE.blockSize)
   const firmware = new Uint8Array(await (await fetch(firmwareUrl)).arrayBuffer())
   return assembleCombinedUf2(firmware, fsImage, PICO_W_FIRMWARE.fsBase)
 }
