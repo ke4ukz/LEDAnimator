@@ -355,6 +355,13 @@
   outline: none;
 }
 
+.dirty-dot {
+  color: var(--accent);
+  font-size: 11px;
+  line-height: 1;
+  margin-left: -4px;
+}
+
 /* Kebab menu — borderless trigger, right-aligned in the topbar */
 .menu {
   position: relative;

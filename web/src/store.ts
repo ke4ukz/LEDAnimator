@@ -18,7 +18,7 @@ import {
 import { reserveStopIds } from './gradient'
 import { bakeProject } from './bake'
 import type { ProjectFile } from './export/projectFile'
-import { loadSavedProjectFile, saveProjectFile, clearSavedProject } from './persistence'
+import { loadSavedProjectFile, loadSavedDirty, saveProjectFile, clearSavedProject } from './persistence'
 import { saveProjectToLibrary, listLibrary } from './export/library'
 
 interface AppState {
@@ -26,6 +26,8 @@ interface AppState {
   project: Project
   projectId: string
   projectName: string
+  /** Unsaved changes since the last Save / Open / New. */
+  dirty: boolean
   raster: Raster
   frame: number
   playing: boolean
@@ -74,13 +76,17 @@ interface AppState {
   /** Serialize the editable project state for saving. */
   getProjectFile: () => ProjectFile
   /** Replace the whole editable state from a loaded project (re-bakes). */
-  loadProject: (file: ProjectFile) => void
-  /** Reset to a fresh default project (current one is saved to the library first). */
+  loadProject: (file: ProjectFile, opts?: { dirty?: boolean }) => void
+  /** Reset to a fresh empty project. */
   newProject: () => void
   /** Discard the current project unsaved and reset to a blank default (used after deleting the active project). */
   blankSlate: () => void
   /** Rename the current project. */
   renameProject: (name: string) => void
+  /** Write the current project to the library (explicit save). */
+  saveProject: () => void
+  /** Save the current work as a new library project with the given name. */
+  saveProjectAs: (name: string) => void
 
   /** Change the frame rate, keeping the loop length (re-bakes at new resolution). */
   setFps: (fps: number) => void
@@ -122,6 +128,7 @@ interface Init {
   project: Project
   projectId: string
   projectName: string
+  dirty: boolean
   raster: Raster
   selectedTrack: string | null
   ledScale: number
@@ -144,6 +151,7 @@ function initialState(): Init {
       project,
       projectId: saved.id,
       projectName: saved.name,
+      dirty: loadSavedDirty(),
       raster: bakeProject(project, saved.leds.length, saved.numFrames, saved.fps),
       selectedTrack: saved.tracks[0]?.id ?? null,
       ledScale: saved.display?.ledScale ?? 1,
@@ -158,6 +166,7 @@ function initialState(): Init {
     project,
     projectId: crypto.randomUUID(),
     projectName: 'Untitled',
+    dirty: false,
     raster: bakeProject(project, 0),
     selectedTrack: null,
     ledScale: 1,
@@ -168,9 +177,11 @@ function initialState(): Init {
 
 const init = initialState()
 
-// Set true to make the next state change skip autosave (used by blankSlate so a
-// discarded project isn't re-persisted).
+// blankSlate sets this so the discarded project isn't written to the recovery copy.
 let suppressAutosave = false
+// True while an action makes a programmatic (non-user) editable change, so the
+// autosave subscription doesn't mark the project dirty for loads/new/save-as.
+let programmatic = false
 
 export const useStore = create<AppState>((set, get) => {
   /** Re-bake the raster from the current project, preserving frames/fps. */
@@ -179,12 +190,19 @@ export const useStore = create<AppState>((set, get) => {
     return bakeProject(project, leds.length, raster.numFrames, raster.fps)
   }
   const commit = (project: Project) => set({ project, raster: rebake(project) })
+  // A programmatic (non-user) editable change — the subscription won't mark it dirty.
+  const setP = (partial: Partial<AppState>) => {
+    programmatic = true
+    set(partial)
+    programmatic = false
+  }
 
   return {
     leds: init.leds,
     project: init.project,
     projectId: init.projectId,
     projectName: init.projectName,
+    dirty: init.dirty,
     raster: init.raster,
     frame: 0,
     playing: true,
@@ -385,9 +403,7 @@ export const useStore = create<AppState>((set, get) => {
       }
     },
 
-    loadProject: (f) => {
-      // Flush the outgoing project to the library so switching never loses edits.
-      saveProjectToLibrary(get().getProjectFile())
+    loadProject: (f, opts) => {
       const project: Project = { sources: f.sources, tracks: f.tracks, assignments: f.assignments }
       // Advance id counters past loaded ids so new items can't collide.
       const projIds: string[] = []
@@ -408,11 +424,12 @@ export const useStore = create<AppState>((set, get) => {
       }
       reserveStopIds(stopIds)
 
-      set({
+      setP({
         leds: f.leds,
         project,
         projectId: f.id,
         projectName: f.name,
+        dirty: opts?.dirty ?? false,
         ledScale: f.display?.ledScale ?? 1,
         ledShape: f.display?.ledShape ?? 'cube',
         showLabels: f.display?.showLabels ?? false,
@@ -426,14 +443,13 @@ export const useStore = create<AppState>((set, get) => {
     },
 
     newProject: () => {
-      // Flush the outgoing project to the library before replacing it.
-      saveProjectToLibrary(get().getProjectFile())
       const project = emptyProject()
-      set({
+      setP({
         leds: [],
         project,
         projectId: crypto.randomUUID(),
         projectName: 'Untitled',
+        dirty: false,
         raster: bakeProject(project, 0),
         frame: 0,
         selection: [],
@@ -447,16 +463,17 @@ export const useStore = create<AppState>((set, get) => {
     },
 
     blankSlate: () => {
-      // No flush (the project is being deleted), and skip the autosave so this
-      // blank state leaves nothing saved until the user actually edits it.
+      // No save — skip the recovery write and clear it (nothing persisted until
+      // the user edits and saves).
       suppressAutosave = true
       clearSavedProject()
       const project = emptyProject()
-      set({
+      setP({
         leds: [],
         project,
         projectId: crypto.randomUUID(),
         projectName: 'Untitled',
+        dirty: false,
         raster: bakeProject(project, 0),
         frame: 0,
         selection: [],
@@ -470,6 +487,22 @@ export const useStore = create<AppState>((set, get) => {
     },
 
     renameProject: (name) => set({ projectName: name }),
+
+    saveProject: () => {
+      const file = get().getProjectFile()
+      saveProjectToLibrary(file)
+      set({ dirty: false })
+      saveProjectFile(file, false) // keep the recovery copy in sync (now clean)
+    },
+
+    saveProjectAs: (name) => {
+      // Branch the current work off as a new library project, leaving the
+      // original's saved copy untouched.
+      setP({ projectId: crypto.randomUUID(), projectName: name.trim() || 'Untitled', dirty: false })
+      const file = get().getProjectFile()
+      saveProjectToLibrary(file)
+      saveProjectFile(file, false)
+    },
 
     setFps: (fps) => {
       const { project, leds, raster, frame } = get()
@@ -505,12 +538,7 @@ export const useStore = create<AppState>((set, get) => {
 // ticks and selection don't touch these slices, so playback doesn't trigger it.
 let saveTimer: ReturnType<typeof setTimeout> | undefined
 useStore.subscribe((state, prev) => {
-  if (suppressAutosave) {
-    suppressAutosave = false
-    clearTimeout(saveTimer) // also drop any pending save from prior edits
-    return
-  }
-  if (
+  const editable =
     state.leds !== prev.leds ||
     state.project !== prev.project ||
     state.raster !== prev.raster ||
@@ -518,14 +546,23 @@ useStore.subscribe((state, prev) => {
     state.ledShape !== prev.ledShape ||
     state.showLabels !== prev.showLabels ||
     state.projectName !== prev.projectName
-  ) {
+  if (!editable) return
+
+  // A genuine user edit marks the project dirty (programmatic loads/new don't).
+  if (!programmatic && !state.dirty) useStore.setState({ dirty: true })
+
+  // Recovery only — the library changes on explicit Save, never here. blankSlate
+  // cleared the recovery copy and wants nothing written.
+  if (suppressAutosave) {
+    suppressAutosave = false
     clearTimeout(saveTimer)
-    saveTimer = setTimeout(() => {
-      const file = useStore.getState().getProjectFile()
-      saveProjectFile(file) // localStorage: last-open, for instant startup
-      saveProjectToLibrary(file) // IndexedDB: the library
-    }, 800)
+    return
   }
+  clearTimeout(saveTimer)
+  saveTimer = setTimeout(() => {
+    const s = useStore.getState()
+    saveProjectFile(s.getProjectFile(), s.dirty)
+  }, 800)
 })
 
 // Truly first-ever run (no last-open AND no library) → seed the ring demo so
@@ -538,6 +575,7 @@ if (wasEmptyStart) {
     if (s.leds.length === 0 && s.project.tracks.length === 0 && s.project.sources.length === 0) {
       const leds = ringArrangement(DEMO_LEDS)
       const project = defaultProject(DEMO_LEDS)
+      programmatic = true
       useStore.setState({
         leds,
         project,
@@ -546,6 +584,7 @@ if (wasEmptyStart) {
         selectionAnchor: 0,
         selectedTrack: project.tracks[0]?.id ?? null,
       })
+      programmatic = false
     }
   })
 }

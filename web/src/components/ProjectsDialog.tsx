@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useStore } from '../store'
-import { listLibrary, deleteProjectFromLibrary, saveProjectToLibrary, type LibraryEntry } from '../export/library'
+import { listLibrary, deleteProjectFromLibrary, type LibraryEntry } from '../export/library'
 
 const fmtDate = (t: number) => new Date(t).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })
 
@@ -14,12 +14,14 @@ export function ProjectsDialog({ onClose }: { onClose: () => void }) {
   const refresh = () => listLibrary().then(setEntries)
 
   useEffect(() => {
-    // Make sure the current project is in the list and up to date before listing.
-    saveProjectToLibrary(useStore.getState().getProjectFile()).then(refresh)
+    refresh() // list saved projects; the current one only shows if it's been Saved
   }, [])
 
   const open = (entry: LibraryEntry) => {
-    if (entry.id !== currentId) loadProject(entry.file)
+    if (entry.id === currentId) return onClose()
+    const s = useStore.getState()
+    if (s.dirty && !window.confirm(`Discard unsaved changes to “${s.projectName || 'Untitled'}”?`)) return
+    loadProject(entry.file)
     onClose()
   }
 

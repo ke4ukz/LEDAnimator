@@ -44,10 +44,27 @@ export default function App() {
   const blankSlate = useStore((s) => s.blankSlate)
   const projectName = useStore((s) => s.projectName)
   const renameProject = useStore((s) => s.renameProject)
+  const dirty = useStore((s) => s.dirty)
+  const saveProject = useStore((s) => s.saveProject)
+  const saveProjectAs = useStore((s) => s.saveProjectAs)
   const fileRef = useRef<HTMLInputElement>(null)
 
-  // New is non-destructive now — the current project is saved to the library first.
-  const onNew = () => newProject()
+  // Confirm before throwing away unsaved edits (no undo).
+  const confirmDiscard = useCallback(() => {
+    const s = useStore.getState()
+    return !s.dirty || window.confirm(`Discard unsaved changes to “${s.projectName || 'Untitled'}”?`)
+  }, [])
+
+  const onNew = () => {
+    if (confirmDiscard()) newProject()
+  }
+
+  const onSave = () => saveProject()
+
+  const onSaveAs = () => {
+    const name = window.prompt('Save as — project name:', useStore.getState().projectName || 'Untitled')
+    if (name && name.trim()) saveProjectAs(name)
+  }
 
   const onDelete = () => {
     if (!window.confirm(`Delete “${projectName || 'Untitled'}”? This can't be undone.`)) return
@@ -58,14 +75,14 @@ export default function App() {
   const importFile = useCallback(
     async (file?: File | null) => {
       if (!file) return
-      if (!window.confirm('Import will replace the current project. Continue?')) return
+      if (!confirmDiscard()) return
       try {
-        loadProject(await readProjectFromFile(file))
+        loadProject(await readProjectFromFile(file), { dirty: true })
       } catch (err) {
         window.alert(`Could not import project: ${(err as Error).message}`)
       }
     },
-    [loadProject],
+    [loadProject, confirmDiscard],
   )
 
   const onImport = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -73,6 +90,18 @@ export default function App() {
     e.target.value = ''
     importFile(file)
   }
+
+  // ⌘S / Ctrl-S saves the current project to the library.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') {
+        e.preventDefault()
+        saveProject()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [saveProject])
 
   // Drag-and-drop a .json / .zip anywhere onto the window to import.
   useEffect(() => {
@@ -127,10 +156,13 @@ export default function App() {
             onChange={(e) => renameProject(e.target.value)}
           />
         </label>
+        {dirty && <span className="dirty-dot" title="Unsaved changes">●</span>}
         <KebabMenu
           items={[
             { label: 'New', onClick: onNew },
             { label: 'Open…', onClick: () => setProjectsOpen(true) },
+            { label: 'Save', onClick: onSave },
+            { label: 'Save As…', onClick: onSaveAs },
             { label: 'Import…', onClick: () => fileRef.current?.click() },
             { label: 'Export…', onClick: () => setExportOpen(true) },
             { label: 'Delete', onClick: onDelete, danger: true },
