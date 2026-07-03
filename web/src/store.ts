@@ -223,10 +223,15 @@ export const useStore = create<AppState>((set, get) => {
         offset: 0,
         chase: 0,
       }
+      // The first track claims all existing LEDs so they actually light up;
+      // later tracks start empty (assign LEDs to them manually). Without this,
+      // LEDs added before any track stay unassigned ('') and bake to black.
+      const first = project.tracks.length === 0
       const next = {
         ...project,
         sources: [...project.sources, source],
         tracks: [...project.tracks, track],
+        assignments: first ? project.assignments.map(() => track.id) : project.assignments,
       }
       set({ selectedTrack: track.id })
       commit(next)
