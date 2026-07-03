@@ -33,6 +33,7 @@ final class BLEController: NSObject {
     var connectionState: ConnectionState = .disconnected
     var connectedName = ""
     var patterns: [String] = []
+    var isLoadingPatterns = false
     var currentPattern: String?
     var brightness = 100   // 0–100, seeded from INFO
     var firmwareVersion: String?
@@ -49,7 +50,7 @@ final class BLEController: NSObject {
     @ObservationIgnored private var wantScan = false
     @ObservationIgnored private var lastBrightnessSend = Date.distantPast
     @ObservationIgnored private var brightnessWork: DispatchWorkItem?
-    @ObservationIgnored private var incomingPatterns: [String] = []   // accrues FILE… until ENDLIST
+    @ObservationIgnored private var listTimeoutWork: DispatchWorkItem?   // stall watchdog for LIST streaming
 
     override init() {
         super.init()
@@ -87,7 +88,8 @@ final class BLEController: NSObject {
         connectionState = .connecting
         connectedName = device.name
         patterns = []
-        incomingPatterns = []
+        isLoadingPatterns = false
+        listTimeoutWork?.cancel()
         currentPattern = nil
         firmwareVersion = nil
         platform = nil
@@ -105,6 +107,8 @@ final class BLEController: NSObject {
         }
         connected = nil
         rxChar = nil
+        listTimeoutWork?.cancel()
+        isLoadingPatterns = false
         connectionState = .disconnected
     }
 
@@ -120,14 +124,29 @@ final class BLEController: NSObject {
         peripheral.writeValue(data, for: rx, type: type)
     }
 
-    /// Requests the pattern list. Replies stream as FILE…/ENDLIST, so reset the
-    /// accumulator before asking.
+    /// Requests the pattern list. Replies stream as FILE…/ENDLIST — clear the
+    /// list, show the loading state, and arm the stall watchdog.
     func refreshPatterns() {
-        incomingPatterns = []
+        patterns = []
+        isLoadingPatterns = true
         send(.list)
+        armListTimeout()
     }
 
     func select(_ name: String) { send(.select(name)) }
+
+    /// If the LIST stream goes quiet (a dropped FILE/ENDLIST, or the device
+    /// stops), stop showing "loading" after a few seconds and keep whatever
+    /// files already arrived. Reset on every FILE so a long list won't trip it.
+    private func armListTimeout() {
+        listTimeoutWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            self?.isLoadingPatterns = false
+            self?.listTimeoutWork = nil
+        }
+        listTimeoutWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3.0, execute: work)
+    }
 
     /// Updates the UI immediately and throttles the BLE writes so a fast drag
     /// doesn't flood the link — while still guaranteeing the final value lands.
@@ -152,9 +171,11 @@ final class BLEController: NSObject {
 
     private func handleReply(_ reply: String) {
         if reply.hasPrefix("FILE ") {
-            incomingPatterns.append(String(reply.dropFirst("FILE ".count)))
+            patterns.append(String(reply.dropFirst("FILE ".count)))
+            armListTimeout()   // progress — reset the stall watchdog
         } else if reply == "ENDLIST" {
-            patterns = incomingPatterns
+            isLoadingPatterns = false
+            listTimeoutWork?.cancel()
         } else if reply.hasPrefix("INFO ") {
             // INFO <file> <leds> <mode> <bright%> <speed%>
             let parts = reply.split(separator: " ")

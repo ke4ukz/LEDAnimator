@@ -36,16 +36,19 @@ struct ControlView: View {
                 }
             }
 
-            if ble.patterns.isEmpty {
-                Section {
-                    HStack(spacing: 12) {
-                        ProgressView()
-                        Text("Loading patterns…")
+            Section {
+                if ble.patterns.isEmpty {
+                    if ble.isLoadingPatterns {
+                        HStack(spacing: 12) {
+                            ProgressView()
+                            Text("Loading patterns…")
+                                .foregroundStyle(.secondary)
+                        }
+                    } else {
+                        Text("No patterns on this device.")
                             .foregroundStyle(.secondary)
                     }
-                }
-            } else {
-                Section("Patterns") {
+                } else {
                     ForEach(ble.patterns, id: \.self) { name in
                         Button {
                             ble.select(name)
@@ -62,6 +65,15 @@ struct ControlView: View {
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
+                    }
+                }
+            } header: {
+                HStack {
+                    Text("Patterns")
+                    Spacer()
+                    if ble.isLoadingPatterns && !ble.patterns.isEmpty {
+                        ProgressView()
+                            .controlSize(.small)
                     }
                 }
             }
