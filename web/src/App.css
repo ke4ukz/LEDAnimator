@@ -180,7 +180,7 @@
      so it escapes the modal's overflow clip. z-index sits above the modal (1000). */
   position: fixed;
   z-index: 1100;
-  transform: translate(-50%, -100%);
+  /* transform (translate to anchor above/below the button) is set inline */
   width: 270px;
   max-width: 78vw;
   padding: 9px 11px;

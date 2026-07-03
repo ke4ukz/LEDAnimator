@@ -155,7 +155,7 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
  * Closes on outside-click, Escape, or scroll/resize.
  */
 function InfoDot({ label, children }: { label: string; children: ReactNode }) {
-  const [pos, setPos] = useState<{ left: number; top: number } | null>(null)
+  const [pos, setPos] = useState<{ left: number; top: number; above: boolean } | null>(null)
   const btnRef = useRef<HTMLButtonElement>(null)
   const popRef = useRef<HTMLDivElement>(null)
   const open = pos !== null
@@ -163,20 +163,22 @@ function InfoDot({ label, children }: { label: string; children: ReactNode }) {
   useEffect(() => {
     if (!open) return
     const close = () => setPos(null)
-    const onDown = (e: MouseEvent) => {
+    const onDown = (e: PointerEvent) => {
       const t = e.target as Node
       if (btnRef.current?.contains(t) || popRef.current?.contains(t)) return
       close()
     }
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && close()
-    window.addEventListener('mousedown', onDown)
-    window.addEventListener('keydown', onKey)
-    window.addEventListener('scroll', close, true)
-    window.addEventListener('resize', close)
+    // Defer a frame so the click that opened us can't immediately close us.
+    const id = requestAnimationFrame(() => {
+      window.addEventListener('pointerdown', onDown)
+      window.addEventListener('keydown', onKey)
+      window.addEventListener('resize', close)
+    })
     return () => {
-      window.removeEventListener('mousedown', onDown)
+      cancelAnimationFrame(id)
+      window.removeEventListener('pointerdown', onDown)
       window.removeEventListener('keydown', onKey)
-      window.removeEventListener('scroll', close, true)
       window.removeEventListener('resize', close)
     }
   }, [open])
@@ -186,17 +188,25 @@ function InfoDot({ label, children }: { label: string; children: ReactNode }) {
     const r = btnRef.current!.getBoundingClientRect()
     const half = 137 // half the popover width (270) + a hair
     const left = Math.min(Math.max(r.left + r.width / 2, half + 8), window.innerWidth - half - 8)
-    setPos({ left, top: r.top - 8 })
+    // Open above the button, unless it sits in the top half — then drop below,
+    // so a tall popover can't run off the top of the screen.
+    const above = r.top > window.innerHeight * 0.5
+    setPos({ left, top: above ? r.top - 8 : r.bottom + 8, above })
   }
 
   return (
     <span className="info">
-      <button type="button" className="info-dot" aria-label={label} aria-expanded={open} onClick={toggle}>
+      <button ref={btnRef} type="button" className="info-dot" aria-label={label} aria-expanded={open} onClick={toggle}>
         i
       </button>
       {open &&
         createPortal(
-          <div ref={popRef} className="info-pop" role="tooltip" style={{ left: pos.left, top: pos.top }}>
+          <div
+            ref={popRef}
+            className="info-pop"
+            role="tooltip"
+            style={{ left: pos.left, top: pos.top, transform: `translate(-50%, ${pos.above ? '-100%' : '0'})` }}
+          >
             {children}
           </div>,
           document.body,
