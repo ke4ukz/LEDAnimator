@@ -157,7 +157,12 @@ export default function App() {
       </section>
 
       <footer className="appfoot">
-        <span>© 2026 Jonathan Dean</span>
+        <span>
+          © 2026 Jonathan Dean ·{' '}
+          <a href="https://github.com/ke4ukz/LEDAnimator/blob/HEAD/LICENSE" target="_blank" rel="noopener noreferrer">
+            AGPL-3.0
+          </a>
+        </span>
         <nav className="foot-links">
           <a href="https://github.com/ke4ukz/LEDAnimator" target="_blank" rel="noopener noreferrer">GitHub</a>
           <a href="https://github.com/ke4ukz/LEDAnimator/issues/new" target="_blank" rel="noopener noreferrer">Report an issue</a>
