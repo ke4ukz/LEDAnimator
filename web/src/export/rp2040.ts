@@ -156,7 +156,7 @@ def dispatch(line):
         if c == "FREE":
             return "FREE %d" % _free_bytes()
         if c == "SELECT":
-            name = p[1]
+            name = line.split(None, 1)[1].strip()
             if name in list_patterns():
                 S.file = name
                 S.mode = "play"
@@ -182,7 +182,7 @@ def dispatch(line):
             S.reload = True
             return "OK PLAY"
         if c == "DELETE":
-            name = p[1]
+            name = line.split(None, 1)[1].strip()
             if name == S.file:
                 return "ERR in-use"
             try:
