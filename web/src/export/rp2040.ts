@@ -120,6 +120,18 @@ def _load_name():
     return DEVICE_NAME
 
 
+def _load_current():
+    # Restore the last SELECTed pattern, if it still exists.
+    try:
+        with open("selected.txt") as fh:
+            nm = fh.read().strip()
+        if nm and nm in list_patterns():
+            return nm
+    except OSError:
+        pass
+    return PATTERN_FILE
+
+
 def dispatch(line):
     # Transport-agnostic command handler. Returns a short reply string.
     # Reused as-is by any future transport (Wi-Fi/HTTP, USB serial).
@@ -161,6 +173,11 @@ def dispatch(line):
                 S.file = name
                 S.mode = "play"
                 S.reload = True
+                try:
+                    with open("selected.txt", "w") as fh:
+                        fh.write(name)
+                except Exception:
+                    pass
                 return "OK SELECT " + name
             return "ERR no-file"
         if c == "BRIGHT":
@@ -263,6 +280,7 @@ def _start_ble():
 
 def main():
     S.name = _load_name()
+    S.file = _load_current()
     try:
         _start_ble()
         print("BLE control active:", S.name)
@@ -347,7 +365,7 @@ Bluetooth control (Pico W only):
     INFO                 -> file, LED count, mode, brightness%, speed%
     LIST                 -> comma-separated .bin pattern files on the board
     FREE                 -> free filesystem bytes
-    SELECT <name>        -> play a different pattern file
+    SELECT <name>        -> play a different pattern file (remembered on reboot)
     BRIGHT <0-100>       -> master brightness percent
     SPEED <10-400>       -> playback speed percent (100 = as authored)
     SOLID <r> <g> <b>    -> hold a solid color (0-255 each)
