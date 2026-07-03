@@ -157,6 +157,10 @@ export default function App() {
           />
         </label>
         {dirty && <span className="dirty-dot" title="Unsaved changes">●</span>}
+        <div className="topbar-spacer" />
+        {dirty && (
+          <button className="save-link" onClick={onSave}>Save</button>
+        )}
         <KebabMenu
           items={[
             { label: 'New', onClick: onNew },

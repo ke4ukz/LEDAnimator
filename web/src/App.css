@@ -362,11 +362,29 @@
   margin-left: -4px;
 }
 
-/* Kebab menu — borderless trigger, right-aligned in the topbar */
+/* Pushes the Save link + kebab to the right edge of the topbar. */
+.topbar-spacer {
+  flex: 1;
+}
+
+/* "Save" text link in the topbar (only shown when there are unsaved changes). */
+.save-link {
+  background: none;
+  border: none;
+  color: var(--accent);
+  font: inherit;
+  cursor: pointer;
+  padding: 0 4px;
+}
+
+.save-link:hover {
+  text-decoration: underline;
+}
+
+/* Kebab menu — borderless trigger */
 .menu {
   position: relative;
   display: inline-flex;
-  margin-left: auto;
 }
 
 .menu-trigger {
