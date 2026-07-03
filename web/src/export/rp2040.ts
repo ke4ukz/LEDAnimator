@@ -1,5 +1,6 @@
 // MicroPython project for the RP2040 / Pico W: a PIO WS2812 driver + a
-// fixed-rate player that reads pattern.leda (LEDA v1), plus an optional Bluetooth
+// fixed-rate player that plays the selected *.leda pattern (LEDA v1; the file is
+// named in selected.txt), plus an optional Bluetooth
 // LE control channel (a custom LED Animator service with UART-style characteristics)
 // for live brightness / speed / solid color / pattern selection. The BLE half is
 // skipped automatically on a plain
@@ -16,10 +17,15 @@ export function rp2040MainPy(build = 'dev'): string {
 # Plays *.leda pattern files (LEDA v1) on a WS2812 / NeoPixel strip via PIO, and on a
 # Pico W exposes a Bluetooth LE control channel for live control.
 #
+# The pattern to play is named in selected.txt; if that file is missing or names
+# a pattern that isn't on the board, nothing is played (no default is assumed).
+#
 # Settings live in files, not this script: datapin.txt (GP pin), bright.txt
-# (0-100), devicename.txt (BLE name). Wiring: strip data -> that GP pin (default
-# GP0), GND common with the strip's supply. Larger strips need an external 5V
-# supply (lower brightness / use the BLE BRIGHT command).
+# (0-100), devicename.txt (BLE name), selected.txt (pattern filename). The
+# playback mode + solid color (play/solid/off) persist to state.txt at runtime,
+# so what the strip is doing survives a reboot. Wiring: strip data -> that GP pin
+# (default GP0), GND common with the strip's supply. Larger strips need an
+# external 5V supply (lower brightness / use BLE BRIGHT).
 #
 # BLE control - a custom LED Animator service (so an app can filter scans to
 # OUR devices; the name is user-set and UART UUIDs are shared, so neither is
@@ -46,7 +52,6 @@ def _load_pin():
 
 
 DATA_PIN = _load_pin()
-PATTERN_FILE = "pattern.leda"
 PATTERN_EXT = ".leda"
 DEVICE_NAME = "LED Animator"   # default; devicename.txt / NAME command override
 FW_VERSION = ${JSON.stringify(build)}   # build identifier (no real release yet)
@@ -73,15 +78,17 @@ sm.active(1)
 class S:
     bright = 1.0             # 0.0 - 1.0; default, overridden by bright.txt
     speed = 1.0              # playback rate multiplier (1.0 = as authored)
-    mode = "play"            # "play" or "solid"
-    solid = (0, 0, 0)
-    file = PATTERN_FILE
+    mode = "play"            # "play", "solid", or "off" (restored from state.txt)
+    solid = (0, 0, 0)        # current solid color, also restored from state.txt
+    file = None              # selected pattern filename; None = nothing to play
     reload = True
     n = 0                    # LED count of the loaded pattern
     name = DEVICE_NAME       # advertised BLE name (overridable at runtime)
     ble = None               # set once BLE is up, so NAME can update gap_name
     bright_dirty = False     # brightness changed, pending a debounced save
     bright_at = 0            # time.ticks_ms() of the last brightness change
+    state_dirty = False      # mode/solid changed, pending a debounced save
+    state_at = 0             # time.ticks_ms() of the last mode/solid change
     tx = None                # TX characteristic handle (player-loop notifies)
     conns = None             # live set of connected centrals
     list_queue = None        # files left to stream for a LIST (None = idle)
@@ -147,7 +154,8 @@ def _load_name():
 
 
 def _load_current():
-    # Restore the last SELECTed pattern, if it still exists.
+    # The pattern named in selected.txt, if it exists. No fallback: returns None
+    # when there's no selected.txt or it names a file that isn't on the board.
     try:
         with open("selected.txt") as fh:
             nm = fh.read().strip()
@@ -155,7 +163,7 @@ def _load_current():
             return nm
     except OSError:
         pass
-    return PATTERN_FILE
+    return None
 
 
 def _load_bright():
@@ -168,6 +176,40 @@ def _load_bright():
     except (OSError, ValueError):
         pass
     return S.bright
+
+
+def _load_state():
+    # Restore the last playback mode + solid color from state.txt
+    # ("<mode> <r> <g> <b>"), so play/solid/off survives a reboot.
+    try:
+        with open("state.txt") as fh:
+            parts = fh.read().split()
+        if parts and parts[0] in ("play", "solid", "off"):
+            S.mode = parts[0]
+        if len(parts) >= 4:
+            S.solid = (int(parts[1]) & 255, int(parts[2]) & 255, int(parts[3]) & 255)
+    except (OSError, ValueError):
+        pass
+
+
+def _prime_led_count():
+    # Read the selected pattern's LED count so a solid/off restored at boot can
+    # cover the whole strip before any pattern frame is played.
+    if not S.file:
+        return
+    try:
+        with open(S.file, "rb") as fh:
+            h = fh.read(16)
+        if h[0:4] == b"LEDA":
+            S.n = h[6] | (h[7] << 8)
+    except OSError:
+        pass
+
+
+def _mark_state():
+    # Flag the mode/solid color as changed; _persist_state writes it out (debounced).
+    S.state_dirty = True
+    S.state_at = time.ticks_ms()
 
 
 def _notify(msg):
@@ -217,6 +259,18 @@ def _persist_bright():
         _notify("BRIGHT %d" % pct)   # echo the saved value so the app can sync
 
 
+def _persist_state():
+    # Debounced (like brightness): write the mode + solid color once it's been
+    # steady for ~1s, so a color-picker drag doesn't hammer the flash.
+    if S.state_dirty and time.ticks_diff(time.ticks_ms(), S.state_at) > 1000:
+        S.state_dirty = False
+        try:
+            with open("state.txt", "w") as fh:
+                fh.write("%s %d %d %d" % (S.mode, S.solid[0], S.solid[1], S.solid[2]))
+        except Exception:
+            pass
+
+
 def dispatch(line):
     # Transport-agnostic command handler. Returns a short reply string.
     # Reused as-is by any future transport (Wi-Fi/HTTP, USB serial).
@@ -229,8 +283,14 @@ def dispatch(line):
         if c == "PING":
             return "OK"
         if c == "INFO":
-            return "INFO %s %d %s %d %d" % (
-                S.file, S.n, S.mode, int(S.bright * 100), int(S.speed * 100))
+            # <leds> <mode> <bright%> <speed%> <r> <g> <b> <file...>
+            # The filename comes LAST because it may contain spaces; every field
+            # before it is a single token, so the app parses those positionally
+            # and takes the remainder as the name. The solid color lets the app
+            # restore its picker on connect.
+            return "INFO %d %s %d %d %d %d %d %s" % (
+                S.n, S.mode, int(S.bright * 100), int(S.speed * 100),
+                S.solid[0], S.solid[1], S.solid[2], S.file or "")
         if c == "VERSION":
             return "VERSION " + FW_VERSION
         if c == "PLATFORM":
@@ -272,6 +332,7 @@ def dispatch(line):
                 S.file = name
                 S.mode = "play"
                 S.reload = True
+                _mark_state()
                 try:
                     with open("selected.txt", "w") as fh:
                         fh.write(name)
@@ -290,14 +351,17 @@ def dispatch(line):
         if c == "SOLID":
             S.solid = (int(p[1]) & 255, int(p[2]) & 255, int(p[3]) & 255)
             S.mode = "solid"
+            _mark_state()
             return "OK SOLID"
         if c == "OFF":
             S.solid = (0, 0, 0)
-            S.mode = "solid"
+            S.mode = "off"
+            _mark_state()
             return "OK OFF"
         if c == "PLAY":
             S.mode = "play"
             S.reload = True
+            _mark_state()
             return "OK PLAY"
         if c == "DELETE":
             name = line.split(None, 1)[1].strip()
@@ -387,6 +451,8 @@ def main():
     S.name = _load_name()
     S.file = _load_current()
     S.bright = _load_bright()
+    _load_state()          # restore play/solid/off + the solid color
+    _prime_led_count()     # so a restored solid/off covers the strip at boot
     try:
         _start_ble()
         print("BLE control active:", S.name)
@@ -397,11 +463,24 @@ def main():
     frames = 0
     base_delay = 0.03
     while True:
-        if S.mode == "solid":
+        if S.mode != "play":
+            # solid or off - hold the solid color (off is solid black).
             _persist_bright()
+            _persist_state()
             _stream_list()
             _show_solid(S.solid, S.n)
             time.sleep_ms(40)
+            continue
+        if S.file is None:
+            # Nothing selected (or the selection is gone): idle without driving
+            # the strip. No default pattern is assumed.
+            if f:
+                f.close()
+                f = None
+            _persist_bright()
+            _persist_state()
+            _stream_list()
+            time.sleep_ms(100)
             continue
         if S.reload or f is None:
             if f:
@@ -410,17 +489,15 @@ def main():
             try:
                 f = open(S.file, "rb")
             except OSError:
-                S.mode = "solid"
-                S.solid = (0, 0, 0)
-                time.sleep_ms(200)
+                # The selected file vanished - go idle rather than freeze.
+                S.file = None
                 continue
             h = f.read(16)
             if h[0:4] != b"LEDA":
+                # Not a valid pattern - drop it and go idle.
                 f.close()
                 f = None
-                S.mode = "solid"
-                S.solid = (0, 0, 0)
-                time.sleep_ms(200)
+                S.file = None
                 continue
             S.n = h[6] | (h[7] << 8)
             frames = h[8] | (h[9] << 8) | (h[10] << 16) | (h[11] << 24)
@@ -434,6 +511,7 @@ def main():
             if S.reload or S.mode != "play":
                 break
             _persist_bright()
+            _persist_state()
             _stream_list()
             _show_grb(f.read(fb), S.n)
             time.sleep(base_delay / S.speed if S.speed > 0 else base_delay)
@@ -443,21 +521,25 @@ main()
 `
 }
 
-export function rp2040Readme(pin: number): string {
+export function rp2040Readme(pin: number, patternFile: string): string {
   return `LED Animator - RP2040 / Pico W (MicroPython) export
 
 Files:
   main.py         WS2812 player (PIO) + BLE control. No settings baked in.
-  pattern.leda    The baked animation (LEDA v1).
+  ${patternFile}
+                  The baked animation (LEDA v1).
   datapin.txt     The GP pin the strip data line is wired to (GP${pin}).
   bright.txt      Startup brightness percent (0-100).
   devicename.txt  BLE device name.
+  selected.txt    The pattern file to play on boot (${patternFile}).
+  state.txt       Playback mode + solid color, so play/solid/off survives a
+                  reboot. Written by the device at runtime (not in this export).
   project.json    Editable project - re-import into LED Animator to keep editing.
                   (App only; do NOT copy this to the board.)
 
 Install (Thonny or mpremote):
   1. Flash MicroPython for RP2040 onto the Pico / Pico W.
-  2. Copy main.py, pattern.leda, datapin.txt, bright.txt, devicename.txt to the board.
+  2. Copy every file except project.json to the board.
   3. Reset - main.py runs on boot and loops the animation.
 
 Wiring:
@@ -475,7 +557,7 @@ Bluetooth control (Pico W only):
     TX (notify)  6E400003-B5A3-F393-E0A9-E50E24DCCA9E
   Commands:
     PING                 -> OK
-    INFO                 -> file, LED count, mode, brightness%, speed%
+    INFO                 -> LED count, mode, brightness%, speed%, solid r g b, filename (last; may contain spaces)
     VERSION              -> firmware version
     PLATFORM             -> board/runtime (os.uname().machine)
     LIST                 -> streams "LISTLEN <n>", one "FILE <name>" each, then ENDLIST
@@ -483,8 +565,8 @@ Bluetooth control (Pico W only):
     SELECT <name>        -> play a different pattern file (remembered on reboot)
     BRIGHT <0-100>       -> master brightness percent (remembered on reboot)
     SPEED <10-400>       -> playback speed percent (100 = as authored)
-    SOLID <r> <g> <b>    -> hold a solid color (0-255 each)
-    OFF                  -> blank the strip
+    SOLID <r> <g> <b>    -> hold a solid color (0-255 each; remembered on reboot)
+    OFF                  -> blank the strip (mode "off"; remembered on reboot)
     PLAY                 -> resume the selected pattern
     DELETE <name>        -> remove a pattern file (not the active one)
     NAME                 -> report the current advertised name
@@ -513,11 +595,19 @@ and USB-serial control as those are added.
 /**
  * The on-device settings files that main.py reads at boot. These carry what
  * used to be baked into the script, so main.py itself is settings-free.
+ * `patternFile` is the exported pattern's filename, written to selected.txt so
+ * the board plays it on first boot.
  */
-export function rp2040SettingsFiles(pin: number, brightness: number, name: string): Record<string, string> {
+export function rp2040SettingsFiles(
+  pin: number,
+  brightness: number,
+  name: string,
+  patternFile: string,
+): Record<string, string> {
   return {
     'datapin.txt': String(pin),
     'bright.txt': String(Math.round(brightness * 100)),
     'devicename.txt': name,
+    'selected.txt': patternFile,
   }
 }

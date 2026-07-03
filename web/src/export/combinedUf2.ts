@@ -25,21 +25,22 @@ export function usableFsBytes(): number {
 
 /**
  * Build a one-drag combined UF2 = pinned MicroPython firmware + a LittleFS image
- * holding main.py + pattern.leda. Drag onto RPI-RP2 → blank board plays the
+ * holding main.py + the pattern file. Drag onto RPI-RP2 → blank board plays the
  * animation on boot.
  */
 export async function buildRp2040CombinedUf2(
   raster: Raster,
   pin: number,
   brightness: number,
+  patternFile: string,
   name?: string,
   build?: string,
 ): Promise<Uint8Array> {
   const enc = new TextEncoder()
-  const settings = rp2040SettingsFiles(pin, brightness, name ?? 'LED Animator')
+  const settings = rp2040SettingsFiles(pin, brightness, name ?? 'LED Animator', patternFile)
   const files = [
     { name: 'main.py', data: enc.encode(rp2040MainPy(build)) },
-    { name: 'pattern.leda', data: encodeRaster(raster) },
+    { name: patternFile, data: encodeRaster(raster) },
     ...Object.entries(settings).map(([n, v]) => ({ name: n, data: enc.encode(v) })),
   ]
 

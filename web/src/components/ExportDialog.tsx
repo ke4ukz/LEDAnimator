@@ -46,12 +46,13 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
   const hasRp2040 = device.targets.includes('rp2040-micropython')
 
   const exportProject = () => {
+    const patternFile = ledaFilename(projectName)
     const zip = zipProject({
       'main.py': rp2040MainPy(FW_BUILD),
-      'pattern.leda': encodeRaster(raster),
-      ...rp2040SettingsFiles(pin, Number(brightness.toFixed(2)), bleName),
+      [patternFile]: encodeRaster(raster),
+      ...rp2040SettingsFiles(pin, Number(brightness.toFixed(2)), bleName, patternFile),
       'project.json': serializeProjectFile(getProjectFile()),
-      'README.txt': rp2040Readme(pin),
+      'README.txt': rp2040Readme(pin, patternFile),
     })
     downloadBytes('led-animation-rp2040.zip', zip, 'application/zip')
   }
@@ -61,7 +62,7 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
     try {
       // Lazy-load: pulls in the littlefs wasm + firmware only when used.
       const { buildRp2040CombinedUf2 } = await import('../export/combinedUf2')
-      const uf2 = await buildRp2040CombinedUf2(raster, pin, Number(brightness.toFixed(2)), bleName, FW_BUILD)
+      const uf2 = await buildRp2040CombinedUf2(raster, pin, Number(brightness.toFixed(2)), ledaFilename(projectName), bleName, FW_BUILD)
       downloadBytes('led-animation-picow.uf2', uf2, 'application/octet-stream')
     } catch (e) {
       window.alert(`Could not build the UF2: ${(e as Error).message}`)
@@ -101,6 +102,7 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
         </label>
 
         <div className="export-stats">
+          <Stat label="Filename" value={ledaFilename(projectName)} wide />
           <Stat label="LEDs" value={String(raster.numLeds)} />
           <Stat label="Frames" value={String(raster.numFrames)} />
           <Stat label="Rate" value={`${raster.fps} fps`} />
@@ -262,10 +264,10 @@ function formatInfo(format: ExportFormat): ReactNode {
   if (format === 'zip') {
     return (
       <>
-        For a Pico that already runs MicroPython. Contains <code>main.py</code>, <code>pattern.leda</code>,
-        the settings files (<code>datapin.txt</code>, <code>bright.txt</code>, <code>devicename.txt</code>),
-        <code>project.json</code>, and a README. Copy them to the board with <code>mpremote</code> or
-        Thonny — it doesn't touch the firmware.
+        For a Pico that already runs MicroPython. Contains <code>main.py</code>, your pattern (named after
+        the project), the settings files (<code>datapin.txt</code>, <code>bright.txt</code>,{' '}
+        <code>devicename.txt</code>, <code>selected.txt</code>), <code>project.json</code>, and a README.
+        Copy them to the board with <code>mpremote</code> or Thonny — it doesn't touch the firmware.
       </>
     )
   }
@@ -278,9 +280,9 @@ function formatInfo(format: ExportFormat): ReactNode {
   )
 }
 
-function Stat({ label, value }: { label: string; value: string }) {
+function Stat({ label, value, wide }: { label: string; value: string; wide?: boolean }) {
   return (
-    <div className="stat">
+    <div className={wide ? 'stat stat-wide' : 'stat'}>
       <span className="muted">{label}</span>
       <strong>{value}</strong>
     </div>
