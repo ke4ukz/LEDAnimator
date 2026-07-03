@@ -91,8 +91,8 @@ struct ControlView: View {
         }
     }
 
-    /// Show "rainbow" rather than "rainbow.bin" in the list.
+    /// Show "rainbow" rather than "rainbow.leda" in the list.
     private func displayName(_ file: String) -> String {
-        file.hasSuffix(".bin") ? String(file.dropLast(4)) : file
+        file.hasSuffix(".leda") ? String(file.dropLast(5)) : file
     }
 }

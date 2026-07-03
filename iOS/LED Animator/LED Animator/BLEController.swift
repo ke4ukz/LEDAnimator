@@ -49,6 +49,7 @@ final class BLEController: NSObject {
     @ObservationIgnored private var wantScan = false
     @ObservationIgnored private var lastBrightnessSend = Date.distantPast
     @ObservationIgnored private var brightnessWork: DispatchWorkItem?
+    @ObservationIgnored private var incomingPatterns: [String] = []   // accrues FILE… until ENDLIST
 
     override init() {
         super.init()
@@ -86,6 +87,7 @@ final class BLEController: NSObject {
         connectionState = .connecting
         connectedName = device.name
         patterns = []
+        incomingPatterns = []
         currentPattern = nil
         firmwareVersion = nil
         platform = nil
@@ -118,7 +120,13 @@ final class BLEController: NSObject {
         peripheral.writeValue(data, for: rx, type: type)
     }
 
-    func refreshPatterns() { send(.list) }
+    /// Requests the pattern list. Replies stream as FILE…/ENDLIST, so reset the
+    /// accumulator before asking.
+    func refreshPatterns() {
+        incomingPatterns = []
+        send(.list)
+    }
+
     func select(_ name: String) { send(.select(name)) }
 
     /// Updates the UI immediately and throttles the BLE writes so a fast drag
@@ -143,11 +151,10 @@ final class BLEController: NSObject {
     // MARK: Reply parsing
 
     private func handleReply(_ reply: String) {
-        if reply.hasPrefix("LIST ") {
-            let body = reply.dropFirst("LIST ".count)
-            patterns = body.split(separator: ",").map(String.init).filter { !$0.isEmpty }
-        } else if reply == "LIST" {
-            patterns = []
+        if reply.hasPrefix("FILE ") {
+            incomingPatterns.append(String(reply.dropFirst("FILE ".count)))
+        } else if reply == "ENDLIST" {
+            patterns = incomingPatterns
         } else if reply.hasPrefix("INFO ") {
             // INFO <file> <leds> <mode> <bright%> <speed%>
             let parts = reply.split(separator: " ")
@@ -252,7 +259,7 @@ extension BLEController: CBPeripheralDelegate {
         send(.version)
         send(.platform)
         send(.free)
-        send(.list)   // populate the pattern list
+        refreshPatterns()   // stream the pattern list (FILE…/ENDLIST)
     }
 
     func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic,
