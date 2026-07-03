@@ -25,12 +25,14 @@ enum LEDCommand {
     case info
     case list
     case select(String)
+    case bright(Int)   // 0–100
 
     var text: String {
         switch self {
         case .info: return "INFO"
         case .list: return "LIST"
         case .select(let name): return "SELECT \(name)"
+        case .bright(let value): return "BRIGHT \(value)"
         }
     }
 }

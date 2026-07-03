@@ -12,6 +12,30 @@ struct ControlView: View {
 
     var body: some View {
         List {
+            Section {
+                Slider(
+                    value: Binding(
+                        get: { Double(ble.brightness) },
+                        set: { ble.setBrightness(Int($0.rounded())) }
+                    ),
+                    in: 0...100,
+                    step: 1
+                ) {
+                    Text("Brightness")
+                } minimumValueLabel: {
+                    Image(systemName: "sun.min")
+                } maximumValueLabel: {
+                    Image(systemName: "sun.max.fill")
+                }
+            } header: {
+                HStack {
+                    Text("Brightness")
+                    Spacer()
+                    Text("\(ble.brightness)%")
+                        .foregroundStyle(.secondary)
+                }
+            }
+
             if ble.patterns.isEmpty {
                 Section {
                     HStack(spacing: 12) {

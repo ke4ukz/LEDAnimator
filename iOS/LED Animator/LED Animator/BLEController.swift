@@ -34,6 +34,7 @@ final class BLEController: NSObject {
     var connectedName = ""
     var patterns: [String] = []
     var currentPattern: String?
+    var brightness = 100   // 0–100, seeded from INFO
     var lastError: String?
 
     // MARK: CoreBluetooth internals (not observed)
@@ -42,6 +43,8 @@ final class BLEController: NSObject {
     @ObservationIgnored private var connected: CBPeripheral?
     @ObservationIgnored private var rxChar: CBCharacteristic?
     @ObservationIgnored private var wantScan = false
+    @ObservationIgnored private var lastBrightnessSend = Date.distantPast
+    @ObservationIgnored private var brightnessWork: DispatchWorkItem?
 
     override init() {
         super.init()
@@ -110,6 +113,25 @@ final class BLEController: NSObject {
     func refreshPatterns() { send(.list) }
     func select(_ name: String) { send(.select(name)) }
 
+    /// Updates the UI immediately and throttles the BLE writes so a fast drag
+    /// doesn't flood the link — while still guaranteeing the final value lands.
+    func setBrightness(_ value: Int) {
+        let clamped = max(0, min(100, value))
+        brightness = clamped
+        brightnessWork?.cancel()
+        if Date().timeIntervalSince(lastBrightnessSend) > 0.07 {
+            lastBrightnessSend = Date()
+            send(.bright(clamped))
+        } else {
+            let work = DispatchWorkItem { [weak self] in
+                self?.lastBrightnessSend = Date()
+                self?.send(.bright(clamped))
+            }
+            brightnessWork = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.07, execute: work)
+        }
+    }
+
     // MARK: Reply parsing
 
     private func handleReply(_ reply: String) {
@@ -122,6 +144,7 @@ final class BLEController: NSObject {
             // INFO <file> <leds> <mode> <bright%> <speed%>
             let parts = reply.split(separator: " ")
             if parts.count >= 2 { currentPattern = String(parts[1]) }
+            if parts.count >= 5, let b = Int(parts[4]) { brightness = b }
         } else if reply.hasPrefix("OK SELECT ") {
             currentPattern = String(reply.dropFirst("OK SELECT ".count))
         } else if reply.hasPrefix("ERR") {
