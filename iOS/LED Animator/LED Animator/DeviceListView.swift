@@ -14,7 +14,9 @@ struct DeviceListView: View {
         content
             .navigationTitle("Devices")
             .navigationDestination(isPresented: connectedBinding) {
-                ControlView(ble: ble)
+                if let session = ble.session {
+                    ControlView(session: session)
+                }
             }
             .alert("Couldn't Connect", isPresented: failedBinding) {
                 Button("OK", role: .cancel) { ble.clearFailure() }
@@ -57,7 +59,7 @@ struct DeviceListView: View {
     }
 
     private func connecting(_ device: DiscoveredDevice) -> Bool {
-        ble.connectionState == .connecting && ble.connectedName == device.name
+        ble.connectionState == .connecting && ble.connectingName == device.name
     }
 
     private var connectedBinding: Binding<Bool> {

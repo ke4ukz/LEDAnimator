@@ -9,7 +9,7 @@
 import SwiftUI
 
 struct DeviceInfoView: View {
-    let ble: BLEController
+    let session: DeviceSession
     @Environment(\.dismiss) private var dismiss
     @State private var showRename = false
     @State private var editingName = ""
@@ -19,10 +19,10 @@ struct DeviceInfoView: View {
             List {
                 Section("Name") {
                     HStack {
-                        Text(ble.connectedName)
+                        Text(session.connectedName)
                         Spacer()
                         Button {
-                            editingName = ble.connectedName
+                            editingName = session.connectedName
                             showRename = true
                         } label: {
                             Image(systemName: "pencil")
@@ -33,16 +33,16 @@ struct DeviceInfoView: View {
                 }
 
                 Section {
-                    LabeledContent("Platform", value: display(ble.platform))
-                    LabeledContent("Firmware", value: display(ble.firmwareVersion))
-                    LabeledContent("LEDs", value: display(ble.ledCount.map(String.init)))
-                    LabeledContent("Free space", value: display(ble.freeBytes.map(formatBytes)))
+                    LabeledContent("Platform", value: display(session.platform))
+                    LabeledContent("Firmware", value: display(session.firmwareVersion))
+                    LabeledContent("LEDs", value: display(session.ledCount.map(String.init)))
+                    LabeledContent("Free space", value: display(session.freeBytes.map(formatBytes)))
                 }
 
                 Section("Network") {
-                    LabeledContent("Hostname", value: display(ble.hostname))
-                    LabeledContent("Wi-Fi MAC", value: display(ble.wifiMac))
-                    LabeledContent("Bluetooth", value: display(ble.bluetoothMac))
+                    LabeledContent("Hostname", value: display(session.hostname))
+                    LabeledContent("Wi-Fi MAC", value: display(session.wifiMac))
+                    LabeledContent("Bluetooth", value: display(session.bluetoothMac))
                 }
             }
             .navigationTitle("Device Info")
@@ -60,7 +60,7 @@ struct DeviceInfoView: View {
             } message: {
                 Text("Up to 26 characters. Saved on the device and used as its Bluetooth name.")
             }
-            .onAppear { ble.requestMoreInfo() }
+            .onAppear { session.requestMoreInfo() }
         }
     }
 
@@ -68,13 +68,13 @@ struct DeviceInfoView: View {
     /// completes, then "N/A" for anything the device didn't report.
     private func display(_ value: String?) -> String {
         if let value { return value }
-        return ble.moreInfoLoaded ? "N/A" : "Loading…"
+        return session.moreInfoLoaded ? "N/A" : "Loading…"
     }
 
     private func commitRename() {
         let trimmed = editingName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, trimmed != ble.connectedName else { return }
-        ble.rename(trimmed)
+        guard !trimmed.isEmpty, trimmed != session.connectedName else { return }
+        session.rename(trimmed)
     }
 
     private func formatBytes(_ bytes: Int) -> String {

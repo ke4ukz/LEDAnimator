@@ -9,7 +9,7 @@
 import SwiftUI
 
 struct WiFiView: View {
-    let ble: BLEController
+    let session: DeviceSession
     @Environment(\.dismiss) private var dismiss
     @State private var ssid = ""
     @State private var password = ""
@@ -47,19 +47,19 @@ struct WiFiView: View {
                 }
 
                 Section("Nearby networks") {
-                    if ble.isScanningWifi {
+                    if session.isScanningWifi {
                         HStack(spacing: 12) {
                             ProgressView()
                             Text("Scanning…").foregroundStyle(.secondary)
                         }
                     } else {
                         Button {
-                            ble.scanWifi()
+                            session.scanWifi()
                         } label: {
                             Label("Scan for networks", systemImage: "arrow.clockwise")
                         }
                     }
-                    ForEach(ble.wifiNetworks) { net in
+                    ForEach(session.wifiNetworks) { net in
                         Button {
                             ssid = net.ssid
                         } label: {
@@ -75,10 +75,10 @@ struct WiFiView: View {
                     }
                 }
 
-                if ble.wifiState == "connected" || ble.wifiState == "connecting" {
+                if session.wifiState == "connected" || session.wifiState == "connecting" {
                     Section {
                         Button("Forget network", role: .destructive) {
-                            ble.forgetWifi()
+                            session.forgetWifi()
                         }
                     }
                 }
@@ -90,16 +90,16 @@ struct WiFiView: View {
                     Button("Done") { dismiss() }
                 }
             }
-            .onAppear { ble.requestWifiStatus() }
+            .onAppear { session.requestWifiStatus() }
         }
     }
 
     private func connect() {
-        ble.connectWifi(ssid: ssid, password: password)
+        session.connectWifi(ssid: ssid, password: password)
     }
 
     private var statusText: String {
-        switch ble.wifiState {
+        switch session.wifiState {
         case "connected": return "Connected"
         case "connecting": return "Connecting…"
         case "failed": return "Couldn't connect"
@@ -109,10 +109,10 @@ struct WiFiView: View {
 
     /// The IP when connected, or a human reason when failed.
     private var statusDetail: String {
-        switch ble.wifiState {
-        case "connected": return ble.wifiDetail.isEmpty ? "" : "IP \(ble.wifiDetail)"
+        switch session.wifiState {
+        case "connected": return session.wifiDetail.isEmpty ? "" : "IP \(session.wifiDetail)"
         case "failed":
-            switch ble.wifiDetail {
+            switch session.wifiDetail {
             case "wrong-password": return "Wrong password"
             case "no-ap": return "Network not found"
             default: return "Try again"
@@ -122,7 +122,7 @@ struct WiFiView: View {
     }
 
     private var statusIcon: String {
-        switch ble.wifiState {
+        switch session.wifiState {
         case "connected": return "wifi"
         case "connecting": return "wifi"
         case "failed": return "wifi.exclamationmark"
@@ -131,7 +131,7 @@ struct WiFiView: View {
     }
 
     private var statusTint: Color {
-        switch ble.wifiState {
+        switch session.wifiState {
         case "connected": return .green
         case "failed": return .orange
         default: return .secondary

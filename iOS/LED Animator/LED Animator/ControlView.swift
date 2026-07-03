@@ -16,7 +16,7 @@ private enum PlaybackMode: Hashable {
 }
 
 struct ControlView: View {
-    let ble: BLEController
+    let session: DeviceSession
     @State private var showInfo = false
     @State private var showWifi = false
     @State private var playback: PlaybackMode = .play
@@ -45,7 +45,7 @@ struct ControlView: View {
                         set: { color in
                             solidColor = color
                             let (r, g, b) = rgb(from: color)
-                            ble.setSolid(r: r, g: g, b: b)
+                            session.setSolid(r: r, g: g, b: b)
                         }
                     ), supportsOpacity: false)
                 }
@@ -53,57 +53,57 @@ struct ControlView: View {
 
             Section {
                 HStack(spacing: 12) {
-                    bumpButton("sun.min") { ble.setBrightness(bumpedDown(ble.brightness, min: 0)) }
+                    bumpButton("sun.min") { session.setBrightness(bumpedDown(session.brightness, min: 0)) }
                     Slider(
                         value: Binding(
-                            get: { Double(ble.brightness) },
-                            set: { ble.setBrightness(Int($0.rounded())) }
+                            get: { Double(session.brightness) },
+                            set: { session.setBrightness(Int($0.rounded())) }
                         ),
                         in: 0...100
                     )
-                    bumpButton("sun.max.fill") { ble.setBrightness(bumpedUp(ble.brightness, max: 100)) }
+                    bumpButton("sun.max.fill") { session.setBrightness(bumpedUp(session.brightness, max: 100)) }
                 }
             } header: {
                 HStack {
                     Text("Brightness")
                     Spacer()
-                    Text("\(ble.brightness)%")
+                    Text("\(session.brightness)%")
                         .foregroundStyle(.secondary)
                 }
             }
 
             Section {
                 HStack(spacing: 12) {
-                    bumpButton("tortoise") { ble.setSpeed(bumpedDown(ble.speed, min: 10)) }
+                    bumpButton("tortoise") { session.setSpeed(bumpedDown(session.speed, min: 10)) }
                     Slider(
                         value: Binding(
-                            get: { Double(ble.speed) },
-                            set: { ble.setSpeed(Int($0.rounded())) }
+                            get: { Double(session.speed) },
+                            set: { session.setSpeed(Int($0.rounded())) }
                         ),
                         in: 10...400
                     )
-                    bumpButton("hare") { ble.setSpeed(bumpedUp(ble.speed, max: 400)) }
+                    bumpButton("hare") { session.setSpeed(bumpedUp(session.speed, max: 400)) }
                 }
             } header: {
                 HStack {
                     Text("Speed")
                     Spacer()
-                    Text("\(ble.speed)%")
+                    Text("\(session.speed)%")
                         .foregroundStyle(.secondary)
                 }
             } footer: {
-                if ble.speed != 100 {
-                    Button("Reset to 100%") { ble.setSpeed(100) }
+                if session.speed != 100 {
+                    Button("Reset to 100%") { session.setSpeed(100) }
                         .font(.caption)
                 }
             }
 
             Section("Patterns") {
-                if ble.isLoadingPatterns {
+                if session.isLoadingPatterns {
                     VStack(alignment: .leading, spacing: 8) {
-                        if ble.listTotal > 0 {
-                            ProgressView(value: Double(ble.listReceived), total: Double(ble.listTotal))
-                            Text("Loading patterns… \(ble.listReceived) of \(ble.listTotal)")
+                        if session.listTotal > 0 {
+                            ProgressView(value: Double(session.listReceived), total: Double(session.listTotal))
+                            Text("Loading patterns… \(session.listReceived) of \(session.listTotal)")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         } else {
@@ -115,7 +115,7 @@ struct ControlView: View {
                         }
                     }
                     .padding(.vertical, 4)
-                } else if ble.listFailed {
+                } else if session.listFailed {
                     HStack(spacing: 12) {
                         Image(systemName: "exclamationmark.triangle")
                             .foregroundStyle(.orange)
@@ -126,20 +126,20 @@ struct ControlView: View {
                                 .foregroundStyle(.secondary)
                         }
                     }
-                } else if ble.patterns.isEmpty {
+                } else if session.patterns.isEmpty {
                     Text("No patterns on this device.")
                         .foregroundStyle(.secondary)
                 } else {
-                    ForEach(ble.patterns, id: \.self) { name in
+                    ForEach(session.patterns, id: \.self) { name in
                         Button {
-                            ble.select(name)
+                            session.select(name)
                             playback = .play   // selecting a pattern resumes playback
                         } label: {
                             HStack {
                                 Text(displayName(name))
                                     .foregroundStyle(.primary)
                                 Spacer()
-                                if ble.currentPattern == name && playback == .play {
+                                if session.currentPattern == name && playback == .play {
                                     Image(systemName: "checkmark")
                                         .foregroundStyle(.tint)
                                 }
@@ -151,7 +151,7 @@ struct ControlView: View {
                 }
             }
 
-            if let error = ble.lastError {
+            if let error = session.lastError {
                 Section {
                     Text(error)
                         .font(.caption)
@@ -159,8 +159,8 @@ struct ControlView: View {
                 }
             }
         }
-        .refreshable { ble.refreshPatterns() }
-        .navigationTitle(ble.connectedName)
+        .refreshable { session.refreshPatterns() }
+        .navigationTitle(session.connectedName)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
@@ -179,19 +179,19 @@ struct ControlView: View {
             }
         }
         .sheet(isPresented: $showInfo) {
-            DeviceInfoView(ble: ble)
+            DeviceInfoView(session: session)
         }
         .sheet(isPresented: $showWifi) {
-            WiFiView(ble: ble)
+            WiFiView(session: session)
         }
         // Seed the controls from what the device reports (INFO on connect, and
         // command echoes). These set @State directly, so they don't send anything.
         .onAppear {
-            playback = mapMode(ble.mode)
-            solidColor = color(from: ble.solid)
+            playback = mapMode(session.mode)
+            solidColor = color(from: session.solid)
         }
-        .onChange(of: ble.mode) { _, m in playback = mapMode(m) }
-        .onChange(of: ble.solid) { _, s in solidColor = color(from: s) }
+        .onChange(of: session.mode) { _, m in playback = mapMode(m) }
+        .onChange(of: session.solid) { _, s in solidColor = color(from: s) }
     }
 
     /// A tappable slider end-cap icon that nudges the value by a 5% step.
@@ -231,12 +231,12 @@ struct ControlView: View {
     private func apply(_ mode: PlaybackMode) {
         switch mode {
         case .play:
-            ble.play()
+            session.play()
         case .solid:
             let (r, g, b) = rgb(from: solidColor)
-            ble.setSolid(r: r, g: g, b: b)
+            session.setSolid(r: r, g: g, b: b)
         case .off:
-            ble.turnOff()
+            session.turnOff()
         }
     }
 
