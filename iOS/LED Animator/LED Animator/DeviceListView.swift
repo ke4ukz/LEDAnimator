@@ -11,22 +11,36 @@ struct DeviceListView: View {
     let ble: BLEController
 
     var body: some View {
-        List {
-            if !ble.bluetoothOn {
-                ContentUnavailableView(
-                    "Bluetooth Off",
-                    systemImage: "antenna.radiowaves.left.and.right.slash",
-                    description: Text("Turn on Bluetooth to find your LED devices.")
-                )
-            } else if ble.devices.isEmpty {
-                Section {
-                    HStack(spacing: 12) {
-                        ProgressView()
-                        Text("Searching for LED devices…")
-                            .foregroundStyle(.secondary)
-                    }
-                }
-            } else {
+        content
+            .navigationTitle("Devices")
+            .navigationDestination(isPresented: connectedBinding) {
+                ControlView(ble: ble)
+            }
+            .alert("Couldn't Connect", isPresented: failedBinding) {
+                Button("OK", role: .cancel) { ble.clearFailure() }
+            } message: {
+                Text(failureMessage)
+            }
+            .onAppear { ble.startScan() }
+            .onDisappear { ble.stopScan() }
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        if !ble.bluetoothOn {
+            ContentUnavailableView(
+                "Bluetooth Off",
+                systemImage: "antenna.radiowaves.left.and.right.slash",
+                description: Text("Turn on Bluetooth to find your LED devices.")
+            )
+        } else if ble.devices.isEmpty {
+            ContentUnavailableView {
+                Label("Searching for devices…", systemImage: "antenna.radiowaves.left.and.right")
+            } description: {
+                Text("Make sure your device is powered on and nearby.")
+            }
+        } else {
+            List {
                 Section("Devices") {
                     ForEach(ble.devices) { device in
                         Button {
@@ -38,19 +52,8 @@ struct DeviceListView: View {
                     }
                 }
             }
+            .refreshable { ble.startScan() }
         }
-        .navigationTitle("LED Devices")
-        .navigationDestination(isPresented: connectedBinding) {
-            ControlView(ble: ble)
-        }
-        .alert("Couldn't Connect", isPresented: failedBinding) {
-            Button("OK", role: .cancel) { ble.clearFailure() }
-        } message: {
-            Text(failureMessage)
-        }
-        .onAppear { ble.startScan() }
-        .onDisappear { ble.stopScan() }
-        .refreshable { ble.startScan() }
     }
 
     private func connecting(_ device: DiscoveredDevice) -> Bool {
@@ -84,10 +87,10 @@ private struct DeviceRow: View {
         HStack(spacing: 12) {
             Image(systemName: "lightbulb.fill")
                 .foregroundStyle(.tint)
-            Text(device.name)
-            Spacer()
             Image(systemName: "cellularbars", variableValue: signalFraction(device.rssi))
                 .foregroundStyle(.secondary)
+            Text(device.name)
+            Spacer()
             if connecting {
                 ProgressView()
             } else {

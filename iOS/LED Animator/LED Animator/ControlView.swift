@@ -2,30 +2,30 @@
 //  ControlView.swift
 //  LED Animator
 //
-//  Connected device: list its patterns and pick which one plays.
+//  Connected device: brightness + pick which pattern plays.
 //
 
 import SwiftUI
 
 struct ControlView: View {
     let ble: BLEController
+    @State private var showInfo = false
 
     var body: some View {
         List {
             Section {
-                Slider(
-                    value: Binding(
-                        get: { Double(ble.brightness) },
-                        set: { ble.setBrightness(Int($0.rounded())) }
-                    ),
-                    in: 0...100,
-                    step: 1
-                ) {
-                    Text("Brightness")
-                } minimumValueLabel: {
+                HStack(spacing: 12) {
                     Image(systemName: "sun.min")
-                } maximumValueLabel: {
+                        .foregroundStyle(.secondary)
+                    Slider(
+                        value: Binding(
+                            get: { Double(ble.brightness) },
+                            set: { ble.setBrightness(Int($0.rounded())) }
+                        ),
+                        in: 0...100
+                    )
                     Image(systemName: "sun.max.fill")
+                        .foregroundStyle(.secondary)
                 }
             } header: {
                 HStack {
@@ -74,16 +74,20 @@ struct ControlView: View {
                 }
             }
         }
+        .refreshable { ble.refreshPatterns() }
         .navigationTitle(ble.connectedName)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
-                    ble.refreshPatterns()
+                    showInfo = true
                 } label: {
-                    Image(systemName: "arrow.clockwise")
+                    Image(systemName: "info.circle")
                 }
             }
+        }
+        .sheet(isPresented: $showInfo) {
+            DeviceInfoView(ble: ble)
         }
     }
 

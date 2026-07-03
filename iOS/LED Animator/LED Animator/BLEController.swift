@@ -35,6 +35,10 @@ final class BLEController: NSObject {
     var patterns: [String] = []
     var currentPattern: String?
     var brightness = 100   // 0–100, seeded from INFO
+    var firmwareVersion: String?
+    var platform: String?
+    var ledCount: Int?
+    var freeBytes: Int?
     var lastError: String?
 
     // MARK: CoreBluetooth internals (not observed)
@@ -83,6 +87,10 @@ final class BLEController: NSObject {
         connectedName = device.name
         patterns = []
         currentPattern = nil
+        firmwareVersion = nil
+        platform = nil
+        ledCount = nil
+        freeBytes = nil
         lastError = nil
         connected = peripheral
         peripheral.delegate = self
@@ -104,10 +112,10 @@ final class BLEController: NSObject {
 
     // MARK: Commands
 
-    func send(_ command: LEDCommand) {
+    func send(_ command: LEDCommand, type: CBCharacteristicWriteType = .withResponse) {
         guard let peripheral = connected, let rx = rxChar,
               let data = command.text.data(using: .utf8) else { return }
-        peripheral.writeValue(data, for: rx, type: .withResponse)
+        peripheral.writeValue(data, for: rx, type: type)
     }
 
     func refreshPatterns() { send(.list) }
@@ -121,11 +129,11 @@ final class BLEController: NSObject {
         brightnessWork?.cancel()
         if Date().timeIntervalSince(lastBrightnessSend) > 0.07 {
             lastBrightnessSend = Date()
-            send(.bright(clamped))
+            send(.bright(clamped), type: .withoutResponse)
         } else {
             let work = DispatchWorkItem { [weak self] in
                 self?.lastBrightnessSend = Date()
-                self?.send(.bright(clamped))
+                self?.send(.bright(clamped), type: .withoutResponse)
             }
             brightnessWork = work
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.07, execute: work)
@@ -144,7 +152,14 @@ final class BLEController: NSObject {
             // INFO <file> <leds> <mode> <bright%> <speed%>
             let parts = reply.split(separator: " ")
             if parts.count >= 2 { currentPattern = String(parts[1]) }
+            if parts.count >= 3, let n = Int(parts[2]) { ledCount = n }
             if parts.count >= 5, let b = Int(parts[4]) { brightness = b }
+        } else if reply.hasPrefix("VERSION ") {
+            firmwareVersion = String(reply.dropFirst("VERSION ".count))
+        } else if reply.hasPrefix("PLATFORM ") {
+            platform = String(reply.dropFirst("PLATFORM ".count))
+        } else if reply.hasPrefix("FREE ") {
+            freeBytes = Int(reply.dropFirst("FREE ".count))
         } else if reply.hasPrefix("OK SELECT ") {
             currentPattern = String(reply.dropFirst("OK SELECT ".count))
         } else if reply.hasPrefix("ERR") {
@@ -230,6 +245,9 @@ extension BLEController: CBPeripheralDelegate {
         }
         connectionState = .connected
         send(.info)   // confirms it's ours + reports the active pattern
+        send(.version)
+        send(.platform)
+        send(.free)
         send(.list)   // populate the pattern list
     }
 

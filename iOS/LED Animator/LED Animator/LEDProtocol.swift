@@ -26,6 +26,9 @@ enum LEDCommand {
     case list
     case select(String)
     case bright(Int)   // 0–100
+    case version
+    case platform
+    case free
 
     var text: String {
         switch self {
@@ -33,6 +36,9 @@ enum LEDCommand {
         case .list: return "LIST"
         case .select(let name): return "SELECT \(name)"
         case .bright(let value): return "BRIGHT \(value)"
+        case .version: return "VERSION"
+        case .platform: return "PLATFORM"
+        case .free: return "FREE"
         }
     }
 }
