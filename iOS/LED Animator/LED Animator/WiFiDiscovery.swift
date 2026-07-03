@@ -19,6 +19,14 @@ struct DiscoveredWiFiDevice: Identifiable, Equatable {
     var name: String       // friendly device name
     var id: String { hostname }
     var displayName: String { name.isEmpty ? hostname : name }
+
+    /// The trailing "-XXXXXX" MAC suffix, matching the BLE advert's device id.
+    var deviceID: String? {
+        guard let dash = hostname.lastIndex(of: "-") else { return nil }
+        let suffix = String(hostname[hostname.index(after: dash)...])
+        guard suffix.count == 6, suffix.allSatisfy({ $0.isHexDigit }) else { return nil }
+        return suffix.uppercased()
+    }
 }
 
 @Observable

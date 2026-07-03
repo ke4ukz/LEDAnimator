@@ -16,6 +16,15 @@ struct DiscoveredDevice: Identifiable, Equatable {
     let id: UUID       // peripheral.identifier
     var name: String
     var rssi: Int
+    var deviceID: String?   // 3-byte hex from the advert (= Wi-Fi hostname suffix), for BLE<->Wi-Fi matching
+
+    /// Parse our manufacturer data (0xFFFF company + 3-byte id) into hex.
+    static func parseDeviceID(_ mfg: Data?) -> String? {
+        guard let mfg, mfg.count >= 5 else { return nil }
+        let bytes = [UInt8](mfg)
+        guard bytes[0] == 0xFF, bytes[1] == 0xFF else { return nil }
+        return bytes[2..<5].map { String(format: "%02X", $0) }.joined()
+    }
 }
 
 /// A solid color as the firmware carries it: 0–255 per channel.
@@ -131,10 +140,12 @@ extension BLEController: CBCentralManagerDelegate {
                         advertisementData: [String: Any], rssi RSSI: NSNumber) {
         peripherals[peripheral.identifier] = peripheral
         let advName = advertisementData[CBAdvertisementDataLocalNameKey] as? String
+        let mfg = advertisementData[CBAdvertisementDataManufacturerDataKey] as? Data
         let device = DiscoveredDevice(
             id: peripheral.identifier,
             name: advName ?? peripheral.name ?? "LED device",
-            rssi: RSSI.intValue
+            rssi: RSSI.intValue,
+            deviceID: DiscoveredDevice.parseDeviceID(mfg)
         )
         if let i = devices.firstIndex(where: { $0.id == device.id }) {
             devices[i] = device

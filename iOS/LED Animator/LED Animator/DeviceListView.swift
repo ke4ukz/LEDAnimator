@@ -77,48 +77,70 @@ struct DeviceListView: View {
 
     private var content: some View {
         List {
-            Section("On Your Network") {
-                if discovery.devices.isEmpty {
-                    HStack(spacing: 12) {
-                        ProgressView()
-                        Text("Searching over Wi-Fi…").foregroundStyle(.secondary)
-                    }
-                } else {
-                    ForEach(discovery.devices) { device in
-                        Button {
-                            wifi.connect(host: device.host, name: device.displayName)
-                        } label: {
-                            WiFiDeviceRow(device: device)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-            }
-            Section("Nearby (Bluetooth)") {
-                if !ble.bluetoothOn {
-                    Text("Bluetooth is off.").foregroundStyle(.secondary)
-                } else if ble.devices.isEmpty {
+            Section {
+                if unifiedDevices.isEmpty {
                     HStack(spacing: 12) {
                         ProgressView()
                         Text("Searching…").foregroundStyle(.secondary)
                     }
                 } else {
-                    ForEach(ble.devices) { device in
+                    ForEach(unifiedDevices) { device in
                         Button {
-                            ble.connect(device)
+                            connect(device)
                         } label: {
-                            DeviceRow(device: device, connecting: connecting(device))
+                            UnifiedDeviceRow(device: device, connecting: connecting(device))
                         }
                         .buttonStyle(.plain)
                     }
+                }
+            } header: {
+                Text("Devices")
+            } footer: {
+                if !ble.bluetoothOn {
+                    Text("Bluetooth is off — only Wi-Fi devices will appear.")
                 }
             }
         }
         .refreshable { ble.startScan(); discovery.scan() }
     }
 
-    private func connecting(_ device: DiscoveredDevice) -> Bool {
-        ble.connectionState == .connecting && ble.connectingName == device.name
+    /// One row per physical device: a Wi-Fi discovery and a BLE discovery with
+    /// the same device id (the advert MAC / hostname suffix) collapse together,
+    /// Wi-Fi preferred.
+    private var unifiedDevices: [UnifiedDevice] {
+        var map: [String: UnifiedDevice] = [:]
+        var order: [String] = []
+        func slot(_ key: String, _ name: String) -> Int {
+            if map[key] == nil { map[key] = UnifiedDevice(id: key, name: name); order.append(key) }
+            return 0
+        }
+        for w in discovery.devices {   // Wi-Fi first (preferred)
+            let key = w.deviceID ?? "wifi:" + w.hostname
+            _ = slot(key, w.displayName)
+            map[key]?.wifi = w
+            map[key]?.name = w.displayName
+        }
+        for b in ble.devices {
+            let key = b.deviceID ?? "ble:" + b.id.uuidString
+            _ = slot(key, b.name)
+            map[key]?.ble = b
+            if map[key]?.wifi == nil { map[key]?.name = b.name }
+        }
+        return order.compactMap { map[$0] }
+            .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+    }
+
+    private func connect(_ device: UnifiedDevice) {
+        if let w = device.wifi {
+            wifi.connect(host: w.host, name: w.displayName)
+        } else if let b = device.ble {
+            ble.connect(b)
+        }
+    }
+
+    private func connecting(_ device: UnifiedDevice) -> Bool {
+        guard let b = device.ble else { return false }
+        return ble.connectionState == .connecting && ble.connectingName == b.name
     }
 
     private var activeSession: DeviceSession? { ble.session ?? wifi.session }
@@ -148,41 +170,40 @@ struct DeviceListView: View {
     }
 }
 
-private struct WiFiDeviceRow: View {
-    let device: DiscoveredWiFiDevice
-
-    var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: "lightbulb.fill")
-                .foregroundStyle(.tint)
-            Image(systemName: "wifi")
-                .foregroundStyle(.secondary)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(device.displayName)
-                Text(device.host)
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-            }
-            Spacer()
-            Image(systemName: "chevron.right")
-                .font(.caption)
-                .foregroundStyle(.tertiary)
-        }
-        .contentShape(Rectangle())
-    }
+/// One physical device, reachable over Wi-Fi and/or Bluetooth.
+struct UnifiedDevice: Identifiable {
+    var id: String
+    var name: String
+    var wifi: DiscoveredWiFiDevice?
+    var ble: DiscoveredDevice?
+    /// Only reachable over Bluetooth right now (not seen on the network).
+    var isBTOnly: Bool { wifi == nil }
 }
 
-private struct DeviceRow: View {
-    let device: DiscoveredDevice
+private struct UnifiedDeviceRow: View {
+    let device: UnifiedDevice
     let connecting: Bool
 
     var body: some View {
         HStack(spacing: 12) {
             Image(systemName: "lightbulb.fill")
                 .foregroundStyle(.tint)
-            Image(systemName: "cellularbars", variableValue: signalFraction(device.rssi))
-                .foregroundStyle(.secondary)
-            Text(device.name)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(device.name)
+                if let ip = device.wifi?.host {
+                    Text(ip)
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+            }
+            if device.isBTOnly {
+                // No official SF Symbol for Bluetooth; the radio-waves glyph is
+                // the app's existing "over the air / nearby" visual.
+                Image(systemName: "antenna.radiowaves.left.and.right")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .accessibilityLabel("Bluetooth only")
+            }
             Spacer()
             if connecting {
                 ProgressView()
@@ -193,12 +214,5 @@ private struct DeviceRow: View {
             }
         }
         .contentShape(Rectangle())
-    }
-
-    /// Maps RSSI to 0–1 for the variable-value bars (~-50 dBm strong → full,
-    /// ~-90 dBm weak → roughly one bar).
-    private func signalFraction(_ rssi: Int) -> Double {
-        let clamped = Double(min(-50, max(-90, rssi)))
-        return max(0.2, (clamped + 90) / 40)
     }
 }
