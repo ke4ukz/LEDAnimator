@@ -28,9 +28,14 @@ export function usableFsBytes(): number {
  * holding main.py + pattern.bin. Drag onto RPI-RP2 → blank board plays the
  * animation on boot.
  */
-export async function buildRp2040CombinedUf2(raster: Raster, pin: number, brightness: number): Promise<Uint8Array> {
+export async function buildRp2040CombinedUf2(
+  raster: Raster,
+  pin: number,
+  brightness: number,
+  name?: string,
+): Promise<Uint8Array> {
   const enc = new TextEncoder()
-  const mainPy = enc.encode(rp2040MainPy(pin, brightness))
+  const mainPy = enc.encode(rp2040MainPy(pin, brightness, name))
   const patternBin = encodeRaster(raster)
 
   const total = mainPy.length + patternBin.length

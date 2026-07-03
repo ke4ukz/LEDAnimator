@@ -4,7 +4,7 @@
 // color / pattern selection. The BLE half is skipped automatically on a plain
 // Pico (no radio), so the same script runs on both.
 
-export function rp2040MainPy(pin: number, brightness: number): string {
+export function rp2040MainPy(pin: number, brightness: number, name = 'LED Animator'): string {
   return `# main.py - LED Animator player for RP2040 / Pico W (MicroPython)
 # Plays pattern.bin (LEDA v1) on a WS2812 / NeoPixel strip using PIO, and on a
 # Pico W exposes a Bluetooth LE control channel for live control.
@@ -18,7 +18,8 @@ export function rp2040MainPy(pin: number, brightness: number): string {
 #   RX (write)  6E400002-...   TX (notify) 6E400003-...
 # Send one text command per write to RX; the reply arrives as a TX notify.
 #   PING | INFO | LIST | FREE | SELECT <name> | BRIGHT <0-100> |
-#   SPEED <10-400> | SOLID <r> <g> <b> | OFF | PLAY | DELETE <name>
+#   SPEED <10-400> | SOLID <r> <g> <b> | OFF | PLAY | DELETE <name> |
+#   NAME [new name]  (no arg reports it; setting it persists across reboots)
 
 import array, time, os
 from machine import Pin
@@ -26,7 +27,7 @@ import rp2
 
 DATA_PIN = ${pin}
 PATTERN_FILE = "pattern.bin"
-DEVICE_NAME = "LED Animator"
+DEVICE_NAME = ${JSON.stringify(name)}   # default BLE name; NAME command overrides
 
 
 @rp2.asm_pio(sideset_init=rp2.PIO.OUT_LOW, out_shiftdir=rp2.PIO.SHIFT_LEFT,
@@ -55,6 +56,8 @@ class S:
     file = PATTERN_FILE
     reload = True
     n = 0                    # LED count of the loaded pattern
+    name = DEVICE_NAME       # advertised BLE name (overridable at runtime)
+    ble = None               # set once BLE is up, so NAME can update gap_name
 
 
 _buf = None
@@ -102,6 +105,17 @@ def _free_bytes():
         return 0
 
 
+def _load_name():
+    try:
+        with open("device.name") as fh:
+            nm = fh.read().strip()
+            if nm:
+                return nm
+    except OSError:
+        pass
+    return DEVICE_NAME
+
+
 def dispatch(line):
     # Transport-agnostic command handler. Returns a short reply string.
     # Reused as-is by any future transport (Wi-Fi/HTTP, USB serial).
@@ -116,6 +130,23 @@ def dispatch(line):
         if c == "INFO":
             return "INFO %s %d %s %d %d" % (
                 S.file, S.n, S.mode, int(S.bright * 100), int(S.speed * 100))
+        if c == "NAME":
+            if len(p) < 2:
+                return "NAME " + S.name
+            new = line.split(None, 1)[1].strip()[:26]
+            if not new:
+                return "ERR args"
+            S.name = new
+            try:
+                with open("device.name", "w") as fh:
+                    fh.write(new)
+            except Exception:
+                pass
+            try:
+                S.ble.config(gap_name=new)
+            except Exception:
+                pass
+            return "OK NAME " + new
         if c == "LIST":
             return "LIST " + ",".join(list_patterns())
         if c == "FREE":
@@ -177,6 +208,11 @@ def _start_ble():
 
     ble = bluetooth.BLE()
     ble.active(True)
+    try:
+        ble.config(gap_name=S.name)
+    except Exception:
+        pass
+    S.ble = ble
     ((tx, rx),) = ble.gatts_register_services(((_SVC, (_TX, _RX)),))
     ble.gatts_set_buffer(rx, 200)   # room for longer commands (SELECT <name>)
     conns = set()
@@ -185,8 +221,8 @@ def _start_ble():
         return struct.pack("BB", len(v) + 1, t) + v
 
     def advertise():
-        # Name fits in the advertisement; the 128-bit UUID rides the scan resp.
-        adv_data = field(0x01, bytes((6,))) + field(0x09, DEVICE_NAME.encode())
+        # Name rides the advertisement (truncated to fit 31B); UUID the scan resp.
+        adv_data = field(0x01, bytes((6,))) + field(0x09, S.name.encode()[:26])
         rsp = field(0x07, bytes(_SVC))
         ble.gap_advertise(500000, adv_data=adv_data, resp_data=rsp)
 
@@ -218,9 +254,10 @@ def _start_ble():
 
 
 def main():
+    S.name = _load_name()
     try:
         _start_ble()
-        print("BLE control active:", DEVICE_NAME)
+        print("BLE control active:", S.name)
     except Exception as e:
         print("BLE unavailable:", e)
 
@@ -307,7 +344,11 @@ Bluetooth control (Pico W only):
     OFF                  -> blank the strip
     PLAY                 -> resume the selected pattern
     DELETE <name>        -> remove a pattern file (not the active one)
-  On a plain Pico (no radio) the BLE half is skipped and playback still runs.
+    NAME                 -> report the current advertised name
+    NAME <new name>      -> rename the device (saved to device.name, survives reboot)
+  The advertised name defaults to what you set at export time; renaming over BLE
+  overrides it. On a plain Pico (no radio) the BLE half is skipped and playback
+  still runs.
 
 LEDA v1 binary format (little-endian):
   off size field

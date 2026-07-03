@@ -20,7 +20,10 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
   const [deviceId, setDeviceId] = useState('rp2040')
   const [pin, setPin] = useState(0)
   const [brightness, setBrightness] = useState(1)
+  const [deviceName, setDeviceName] = useState('LED Animator')
   const [building, setBuilding] = useState(false)
+
+  const bleName = deviceName.trim() || 'LED Animator'
 
   const device = DEVICES.find((d) => d.id === deviceId)!
   const bytes = estimateBytes(raster)
@@ -31,7 +34,7 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
   const exportProject = () => {
     const data = encodeRaster(raster)
     const zip = zipProject({
-      'main.py': rp2040MainPy(pin, Number(brightness.toFixed(2))),
+      'main.py': rp2040MainPy(pin, Number(brightness.toFixed(2)), bleName),
       'pattern.bin': data,
       'project.json': serializeProjectFile(getProjectFile()),
       'README.txt': rp2040Readme(pin),
@@ -44,7 +47,7 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
     try {
       // Lazy-load: pulls in the littlefs wasm + firmware only when used.
       const { buildRp2040CombinedUf2 } = await import('../export/combinedUf2')
-      const uf2 = await buildRp2040CombinedUf2(raster, pin, Number(brightness.toFixed(2)))
+      const uf2 = await buildRp2040CombinedUf2(raster, pin, Number(brightness.toFixed(2)), bleName)
       downloadBytes('led-animation-picow.uf2', uf2, 'application/octet-stream')
     } catch (e) {
       window.alert(`Could not build the UF2: ${(e as Error).message}`)
@@ -91,6 +94,16 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
 
         {hasRp2040 ? (
           <>
+            <label className="field-row">
+              <span>Device name</span>
+              <input
+                type="text"
+                maxLength={26}
+                value={deviceName}
+                placeholder="LED Animator"
+                onChange={(e) => setDeviceName(e.target.value)}
+              />
+            </label>
             <label className="field-row">
               <span>Data pin (GP)</span>
               <input type="number" min={0} max={29} value={pin} onChange={(e) => setPin(Number(e.target.value))} />
