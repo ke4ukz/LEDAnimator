@@ -1,0 +1,219 @@
+//
+//  BLEController.swift
+//  LED Animator
+//
+//  CoreBluetooth central that discovers LED Animator devices (by service UUID),
+//  connects, and exchanges the text control protocol. Observable so SwiftUI
+//  views update automatically.
+//
+
+import CoreBluetooth
+import Foundation
+import Observation
+
+struct DiscoveredDevice: Identifiable, Equatable {
+    let id: UUID       // peripheral.identifier
+    var name: String
+    var rssi: Int
+}
+
+enum ConnectionState: Equatable {
+    case disconnected
+    case connecting
+    case connected
+    case failed(String)
+}
+
+@Observable
+final class BLEController: NSObject {
+    // MARK: Observed UI state
+    var bluetoothOn = false
+    var isScanning = false
+    var devices: [DiscoveredDevice] = []
+    var connectionState: ConnectionState = .disconnected
+    var connectedName = ""
+    var patterns: [String] = []
+    var currentPattern: String?
+    var lastError: String?
+
+    // MARK: CoreBluetooth internals (not observed)
+    @ObservationIgnored private var central: CBCentralManager!
+    @ObservationIgnored private var peripherals: [UUID: CBPeripheral] = [:]
+    @ObservationIgnored private var connected: CBPeripheral?
+    @ObservationIgnored private var rxChar: CBCharacteristic?
+    @ObservationIgnored private var wantScan = false
+
+    override init() {
+        super.init()
+        central = CBCentralManager(delegate: self, queue: .main)
+    }
+
+    // MARK: Scanning
+
+    func startScan() {
+        wantScan = true
+        devices.removeAll()
+        if central.state == .poweredOn { beginScan() }
+    }
+
+    func stopScan() {
+        wantScan = false
+        isScanning = false
+        central.stopScan()
+    }
+
+    private func beginScan() {
+        guard central.state == .poweredOn else { return }
+        isScanning = true
+        central.scanForPeripherals(
+            withServices: [LEDGATT.service],
+            options: [CBCentralManagerScanOptionAllowDuplicatesKey: false]
+        )
+    }
+
+    // MARK: Connection
+
+    func connect(_ device: DiscoveredDevice) {
+        guard let peripheral = peripherals[device.id] else { return }
+        stopScan()
+        connectionState = .connecting
+        connectedName = device.name
+        patterns = []
+        currentPattern = nil
+        lastError = nil
+        connected = peripheral
+        peripheral.delegate = self
+        central.connect(peripheral)
+    }
+
+    func disconnect() {
+        if let peripheral = connected {
+            central.cancelPeripheralConnection(peripheral)
+        }
+        connected = nil
+        rxChar = nil
+        connectionState = .disconnected
+    }
+
+    func clearFailure() {
+        if case .failed = connectionState { connectionState = .disconnected }
+    }
+
+    // MARK: Commands
+
+    func send(_ command: LEDCommand) {
+        guard let peripheral = connected, let rx = rxChar,
+              let data = command.text.data(using: .utf8) else { return }
+        peripheral.writeValue(data, for: rx, type: .withResponse)
+    }
+
+    func refreshPatterns() { send(.list) }
+    func select(_ name: String) { send(.select(name)) }
+
+    // MARK: Reply parsing
+
+    private func handleReply(_ reply: String) {
+        if reply.hasPrefix("LIST ") {
+            let body = reply.dropFirst("LIST ".count)
+            patterns = body.split(separator: ",").map(String.init).filter { !$0.isEmpty }
+        } else if reply == "LIST" {
+            patterns = []
+        } else if reply.hasPrefix("INFO ") {
+            // INFO <file> <leds> <mode> <bright%> <speed%>
+            let parts = reply.split(separator: " ")
+            if parts.count >= 2 { currentPattern = String(parts[1]) }
+        } else if reply.hasPrefix("OK SELECT ") {
+            currentPattern = String(reply.dropFirst("OK SELECT ".count))
+        } else if reply.hasPrefix("ERR") {
+            lastError = reply
+        }
+    }
+}
+
+// MARK: - CBCentralManagerDelegate
+
+extension BLEController: CBCentralManagerDelegate {
+    func centralManagerDidUpdateState(_ central: CBCentralManager) {
+        bluetoothOn = central.state == .poweredOn
+        if central.state == .poweredOn {
+            if wantScan { beginScan() }
+        } else {
+            isScanning = false
+        }
+    }
+
+    func centralManager(_ central: CBCentralManager, didDiscover peripheral: CBPeripheral,
+                        advertisementData: [String: Any], rssi RSSI: NSNumber) {
+        peripherals[peripheral.identifier] = peripheral
+        let advName = advertisementData[CBAdvertisementDataLocalNameKey] as? String
+        let device = DiscoveredDevice(
+            id: peripheral.identifier,
+            name: advName ?? peripheral.name ?? "LED device",
+            rssi: RSSI.intValue
+        )
+        if let i = devices.firstIndex(where: { $0.id == device.id }) {
+            devices[i] = device
+        } else {
+            devices.append(device)
+        }
+    }
+
+    func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
+        peripheral.discoverServices([LEDGATT.service])
+    }
+
+    func centralManager(_ central: CBCentralManager, didFailToConnect peripheral: CBPeripheral,
+                        error: Error?) {
+        connectionState = .failed(error?.localizedDescription ?? "Couldn't connect to the device.")
+        connected = nil
+        rxChar = nil
+    }
+
+    func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral,
+                        error: Error?) {
+        connected = nil
+        rxChar = nil
+        if connectionState == .connected || connectionState == .connecting {
+            connectionState = .disconnected
+        }
+    }
+}
+
+// MARK: - CBPeripheralDelegate
+
+extension BLEController: CBPeripheralDelegate {
+    func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
+        guard let service = peripheral.services?.first(where: { $0.uuid == LEDGATT.service }) else {
+            connectionState = .failed("This isn't an LED Animator device.")
+            central.cancelPeripheralConnection(peripheral)
+            return
+        }
+        peripheral.discoverCharacteristics([LEDGATT.rx, LEDGATT.tx], for: service)
+    }
+
+    func peripheral(_ peripheral: CBPeripheral, didDiscoverCharacteristicsFor service: CBService,
+                    error: Error?) {
+        for characteristic in service.characteristics ?? [] {
+            switch characteristic.uuid {
+            case LEDGATT.rx: rxChar = characteristic
+            case LEDGATT.tx: peripheral.setNotifyValue(true, for: characteristic)
+            default: break
+            }
+        }
+        guard rxChar != nil else {
+            connectionState = .failed("The device is missing its control characteristic.")
+            central.cancelPeripheralConnection(peripheral)
+            return
+        }
+        connectionState = .connected
+        send(.info)   // confirms it's ours + reports the active pattern
+        send(.list)   // populate the pattern list
+    }
+
+    func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic,
+                    error: Error?) {
+        guard characteristic.uuid == LEDGATT.tx, let data = characteristic.value,
+              let text = String(data: data, encoding: .utf8) else { return }
+        handleReply(text.trimmingCharacters(in: .whitespacesAndNewlines))
+    }
+}
