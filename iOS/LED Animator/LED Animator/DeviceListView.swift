@@ -11,17 +11,10 @@ struct DeviceListView: View {
     let ble: BLEController
     let wifi: TCPController
     let discovery: WiFiDiscovery
-    @State private var showWifiConnect = false
-    @State private var wifiIP = ""
 
     var body: some View {
         content
             .navigationTitle("Devices")
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button { showWifiConnect = true } label: { Image(systemName: "wifi") }
-                }
-            }
             .navigationDestination(isPresented: connectedBinding) {
                 if let session = activeSession {
                     ControlView(session: session)
@@ -32,7 +25,6 @@ struct DeviceListView: View {
             } message: {
                 Text(failureMessage)
             }
-            .sheet(isPresented: $showWifiConnect) { wifiConnectSheet }
             .onAppear { ble.startScan() }
             .onDisappear { ble.stopScan() }
             .task {
@@ -43,36 +35,6 @@ struct DeviceListView: View {
                     try? await Task.sleep(for: .seconds(4))
                 }
             }
-    }
-
-    private var wifiConnectSheet: some View {
-        NavigationStack {
-            Form {
-                Section {
-                    TextField("Device IP address", text: $wifiIP)
-                        .keyboardType(.numbersAndPunctuation)
-                        .autocorrectionDisabled()
-                        .textInputAutocapitalization(.never)
-                } footer: {
-                    Text("For a device that doesn't appear in the list (e.g. on a network that blocks discovery).")
-                }
-            }
-            .navigationTitle("Connect over Wi-Fi")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { showWifiConnect = false }
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Connect") {
-                        showWifiConnect = false
-                        wifi.connect(host: wifiIP)
-                    }
-                    .disabled(wifiIP.trimmingCharacters(in: .whitespaces).isEmpty)
-                }
-            }
-        }
-        .presentationDetents([.medium])
     }
 
     private var content: some View {
