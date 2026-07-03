@@ -1,5 +1,4 @@
 import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react'
-import { buildTime, commit } from 'virtual:build-info'
 import { Viewport } from './components/Viewport'
 import { Transport } from './components/Transport'
 import { GradientEditor } from './components/GradientEditor'
@@ -11,13 +10,15 @@ import { LedList } from './components/LedList'
 import { Inspector } from './components/Inspector'
 import { Timeline } from './components/Timeline'
 import { ExportDialog } from './components/ExportDialog'
+import { AboutDialog } from './components/AboutDialog'
+import { PrivacyDialog } from './components/PrivacyDialog'
 import { readProjectFromFile } from './export/projectFile'
 import { useStore } from './store'
 import { usePlayer } from './usePlayer'
 import './App.css'
 
 const clamp = (x: number, lo: number, hi: number) => (x < lo ? lo : x > hi ? hi : x)
-const BUILD = `${commit} · ${new Date(buildTime).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}`
+const FOOTER_H = 26
 
 /**
  * App shell: a DAW-style layout — tracks/source on the left, the 3D simulation
@@ -31,6 +32,8 @@ export default function App() {
   const [inspectorW, setInspectorW] = useState(290)
   const [timelineH, setTimelineH] = useState(220)
   const [exportOpen, setExportOpen] = useState(false)
+  const [aboutOpen, setAboutOpen] = useState(false)
+  const [privacyOpen, setPrivacyOpen] = useState(false)
   const [dragging, setDragging] = useState(false)
   const loadProject = useStore((s) => s.loadProject)
   const newProject = useStore((s) => s.newProject)
@@ -93,7 +96,7 @@ export default function App() {
       className="app"
       style={{
         gridTemplateColumns: `${sidebarW}px 1fr ${inspectorW}px`,
-        gridTemplateRows: `44px 1fr ${timelineH}px`,
+        gridTemplateRows: `44px 1fr ${timelineH}px ${FOOTER_H}px`,
       }}
     >
       <header className="topbar">
@@ -102,6 +105,7 @@ export default function App() {
         <button className="btn export-btn" onClick={onNew}>New</button>
         <button className="btn" onClick={() => fileRef.current?.click()}>Import</button>
         <button className="btn" onClick={() => setExportOpen(true)}>Export</button>
+        <button className="btn" onClick={() => setAboutOpen(true)}>About</button>
         <input
           ref={fileRef}
           type="file"
@@ -109,10 +113,11 @@ export default function App() {
           style={{ display: 'none' }}
           onChange={onImport}
         />
-        <span className="build" title="loaded build (commit · build time)">build {BUILD}</span>
       </header>
 
       {exportOpen && <ExportDialog onClose={() => setExportOpen(false)} />}
+      {aboutOpen && <AboutDialog onClose={() => setAboutOpen(false)} />}
+      {privacyOpen && <PrivacyDialog onClose={() => setPrivacyOpen(false)} />}
       {dragging && <div className="drop-overlay">Drop a project (.json or .zip) to import</div>}
 
       <aside className="sidebar">
@@ -146,17 +151,26 @@ export default function App() {
         </Panel>
       </aside>
 
-      <footer className="timeline">
+      <section className="timeline">
         <Transport />
         <Timeline />
+      </section>
+
+      <footer className="appfoot">
+        <span>© 2026 Jonathan Dean</span>
+        <nav className="foot-links">
+          <a href="https://github.com/ke4ukz/LEDAnimator" target="_blank" rel="noopener noreferrer">GitHub</a>
+          <a href="https://github.com/ke4ukz/LEDAnimator/issues/new" target="_blank" rel="noopener noreferrer">Report an issue</a>
+          <button type="button" className="linkbtn" onClick={() => setPrivacyOpen(true)}>Privacy</button>
+        </nav>
       </footer>
 
-      <Splitter className="v" style={{ left: sidebarW - 3, top: 44, bottom: timelineH }}
+      <Splitter className="v" style={{ left: sidebarW - 3, top: 44, bottom: timelineH + FOOTER_H }}
         onDrag={(x) => setSidebarW(clamp(x - rect().left, 180, 460))} />
-      <Splitter className="v" style={{ right: inspectorW - 3, top: 44, bottom: timelineH }}
+      <Splitter className="v" style={{ right: inspectorW - 3, top: 44, bottom: timelineH + FOOTER_H }}
         onDrag={(x) => setInspectorW(clamp(rect().right - x, 200, 540))} />
-      <Splitter className="h" style={{ left: 0, right: 0, bottom: timelineH - 3 }}
-        onDrag={(_x, y) => setTimelineH(clamp(rect().bottom - y, 130, 480))} />
+      <Splitter className="h" style={{ left: 0, right: 0, bottom: timelineH + FOOTER_H - 3 }}
+        onDrag={(_x, y) => setTimelineH(clamp(rect().bottom - y - FOOTER_H, 130, 480))} />
     </div>
   )
 }
