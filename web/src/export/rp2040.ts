@@ -34,9 +34,15 @@ export function rp2040MainPy(build = 'dev'): string {
 #   RX (write)  6E400002-B5A3-F393-E0A9-E50E24DCCA9E
 #   TX (notify) 6E400003-B5A3-F393-E0A9-E50E24DCCA9E
 # Send one text command per write to RX; the reply arrives as a TX notify.
-#   PING | INFO | LIST | FREE | SELECT <name> | BRIGHT <0-100> |
+#   PING | INFO | MOREINFO | LIST | FREE | SELECT <name> | BRIGHT <0-100> |
 #   SPEED <10-400> | SOLID <r> <g> <b> | OFF | PLAY | DELETE <name> |
 #   NAME [new name]  (no arg reports it; setting it persists across reboots)
+# INFO is lean control state; MOREINFO carries version/leds/free/MACs/platform.
+# Once on Wi-Fi, the SAME text commands are accepted over a plain TCP socket on
+# port 4550 (newline-terminated), e.g.  nc <device-ip> 4550  then type PING.
+# Wi-Fi provisioning (Pico W): WIFISCAN (streams nearby SSIDs), WIFISSID <ssid>,
+#   WIFIPASS <password>, WIFICONNECT (joins + saves to networks.txt, auto-joins
+#   on boot), WIFISTATUS, WIFIFORGET. Status arrives async as "WIFI <state> <ip>".
 
 import array, time, os
 from machine import Pin
@@ -55,6 +61,7 @@ DATA_PIN = _load_pin()
 PATTERN_EXT = ".leda"
 DEVICE_NAME = "LED Animator"   # default; devicename.txt / NAME command override
 FW_VERSION = ${JSON.stringify(build)}   # build identifier (no real release yet)
+CONTROL_PORT = 4550            # TCP port for the (same) text control protocol over Wi-Fi
 
 
 @rp2.asm_pio(sideset_init=rp2.PIO.OUT_LOW, out_shiftdir=rp2.PIO.SHIFT_LEFT,
@@ -87,6 +94,8 @@ class S:
     ble = None               # set once BLE is up, so NAME can update gap_name
     bright_dirty = False     # brightness changed, pending a debounced save
     bright_at = 0            # time.ticks_ms() of the last brightness change
+    speed_dirty = False      # speed changed, pending a debounced broadcast echo
+    speed_at = 0             # time.ticks_ms() of the last speed change
     state_dirty = False      # mode/solid changed, pending a debounced save
     state_at = 0             # time.ticks_ms() of the last mode/solid change
     tx = None                # TX characteristic handle (player-loop notifies)
@@ -95,6 +104,28 @@ class S:
     list_at = 0              # time.ticks_ms() of the last streamed FILE
     list_total = 0           # count announced (LISTLEN) at the start of a stream
     list_header_sent = False
+    list_dest = None         # who asked for the LIST (route the stream back only there)
+    scan_dest = None         # who asked for the WIFISCAN
+    out_dest = None          # who asked for the MOREINFO batch
+    # Wi-Fi (Pico W) - station interface + provisioning. All guarded so a plain
+    # Pico (no radio) just skips it.
+    wlan = None              # network.WLAN(STA_IF), created + activated lazily
+    wifi_state = "off"       # off / connecting / connected / failed
+    wifi_ip = ""             # IP when connected, or a short reason when failed
+    wifi_ssid = ""           # credentials stashed by WIFISSID, used by WIFICONNECT
+    wifi_pass = ""
+    wifi_connect_req = False  # player loop should (re)start a connection
+    wifi_last_status = None   # last wlan.status() reported (change detection)
+    scan_queue = None        # networks left to stream for a WIFISCAN (None = idle)
+    scan_at = 0              # time.ticks_ms() of the last streamed WIFINET
+    scan_total = 0
+    scan_header_sent = False
+    scan_req = False         # player loop should run a (blocking) scan
+    out_queue = None         # generic labeled replies to stream paced (MOREINFO)
+    out_at = 0               # time.ticks_ms() of the last streamed out_queue line
+    tcp_srv = None           # listening socket (once Wi-Fi is up); None = no server
+    tcp_client = None        # the one connected TCP control client (single client)
+    tcp_buf = b""            # inbound byte buffer, split on newline into commands
 
 
 _buf = None
@@ -212,24 +243,46 @@ def _mark_state():
     S.state_at = time.ticks_ms()
 
 
-def _notify(msg):
-    # Push an unsolicited notification from the player loop (not the IRQ).
-    if not S.ble or not S.conns:
+def _send_to(origin, msg):
+    # Send one line to a SINGLE client (the one that made a request), not a
+    # broadcast. origin is ("ble", conn) or ("tcp", None); None falls back to a
+    # broadcast. Used for request-responses (LIST / WIFISCAN / MOREINFO streams)
+    # so other connected clients don't receive replies they never asked for.
+    if origin is None:
+        _notify(msg)
         return
-    try:
-        data = msg.encode()
-    except Exception:
-        return
-    for c in tuple(S.conns):
+    kind, ref = origin
+    if kind == "tcp":
+        _tcp_send(msg + "\\n")
+    elif S.ble is not None:
         try:
-            S.ble.gatts_notify(c, S.tx, data)
+            S.ble.gatts_notify(ref, S.tx, msg.encode())
         except Exception:
             pass
 
 
+def _notify(msg):
+    # BROADCAST an unsolicited line to every connected control transport - BLE
+    # notify (message-framed, no newline) and the TCP client (newline-terminated).
+    # For genuine shared-state changes (BRIGHT / SPEED echoes, WIFI status) that
+    # every client should see. Called from the player loop (not the IRQ).
+    if S.ble and S.conns:
+        try:
+            data = msg.encode()
+            for c in tuple(S.conns):
+                try:
+                    S.ble.gatts_notify(c, S.tx, data)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+    _tcp_send(msg + "\\n")
+
+
 def _stream_list():
     # Emit one queued filename per call, paced (~30ms) so we don't outrun the
-    # BLE link and drop notifications; finish with ENDLIST.
+    # BLE link and drop notifications; finish with ENDLIST. Routed to the client
+    # that asked (S.list_dest), so other clients don't get an unsolicited list.
     if S.list_queue is None:
         return
     if time.ticks_diff(time.ticks_ms(), S.list_at) < 30:
@@ -237,12 +290,12 @@ def _stream_list():
     S.list_at = time.ticks_ms()
     if not S.list_header_sent:
         S.list_header_sent = True
-        _notify("LISTLEN %d" % S.list_total)
+        _send_to(S.list_dest, "LISTLEN %d" % S.list_total)
     elif S.list_queue:
-        _notify("FILE " + S.list_queue.pop(0))
+        _send_to(S.list_dest, "FILE " + S.list_queue.pop(0))
     else:
         S.list_queue = None
-        _notify("ENDLIST")
+        _send_to(S.list_dest, "ENDLIST")
 
 
 def _persist_bright():
@@ -259,6 +312,14 @@ def _persist_bright():
         _notify("BRIGHT %d" % pct)   # echo the saved value so the app can sync
 
 
+def _echo_speed():
+    # Debounced like brightness (but no flash write - speed isn't persisted):
+    # once speed has been steady ~1s, broadcast it so other clients stay in sync.
+    if S.speed_dirty and time.ticks_diff(time.ticks_ms(), S.speed_at) > 1000:
+        S.speed_dirty = False
+        _notify("SPEED %d" % int(S.speed * 100))
+
+
 def _persist_state():
     # Debounced (like brightness): write the mode + solid color once it's been
     # steady for ~1s, so a color-picker drag doesn't hammer the flash.
@@ -271,9 +332,345 @@ def _persist_state():
             pass
 
 
-def dispatch(line):
-    # Transport-agnostic command handler. Returns a short reply string.
-    # Reused as-is by any future transport (Wi-Fi/HTTP, USB serial).
+# ---- Wi-Fi (Pico W) --------------------------------------------------------
+# Provisioning + status only: set credentials over BLE, join, report the IP
+# back over BLE. NO HTTP yet. The station interface shares the CYW43 radio with
+# BLE, so everything here is guarded and never raises into the player loop; a
+# plain Pico (no radio) simply reports "off". The actual join runs in the player
+# loop (not the IRQ), polled non-blocking between frames so playback keeps going.
+
+def _wifi_iface():
+    # Lazily create + activate the station interface. Returns None if there's no
+    # wireless (plain Pico) or activation fails.
+    if S.wlan is None:
+        try:
+            import network
+            S.wlan = network.WLAN(network.STA_IF)
+        except Exception:
+            return None
+    try:
+        if not S.wlan.active():
+            S.wlan.active(True)
+    except Exception:
+        return None
+    return S.wlan
+
+
+def _wifi_status_str():
+    # "WIFI <state> <detail>" - detail is the IP when connected, a short reason
+    # when failed, else empty. State + detail are each a single token.
+    return "WIFI %s %s" % (S.wifi_state, S.wifi_ip)
+
+
+def _wifi_hostname():
+    # DHCP/mDNS hostname = sanitized device name + "-" + last 6 hex of the MAC.
+    # The MAC suffix keeps two devices with the same friendly name distinct on
+    # the network. The device name is already <=26 chars, so length is not a
+    # concern (hostname labels allow up to 63).
+    base = ""
+    prev_hyphen = False
+    for ch in S.name:
+        if ("a" <= ch <= "z") or ("A" <= ch <= "Z") or ("0" <= ch <= "9"):
+            base += ch
+            prev_hyphen = False
+        elif not prev_hyphen:   # collapse any run of other chars to one hyphen
+            base += "-"
+            prev_hyphen = True
+    base = base.strip("-")
+    if not base:
+        base = "led-animator"
+    try:
+        mac = S.wlan.config("mac")
+        base += "-%02X%02X%02X" % (mac[-3], mac[-2], mac[-1])
+    except Exception:
+        pass
+    return base
+
+
+def _fmt_mac(raw):
+    return ":".join("%02X" % b for b in raw)
+
+
+def _wifi_mac():
+    # The station MAC. Creates the WLAN object if needed (doesn't activate the
+    # radio just to read it). Empty on a plain Pico with no wireless.
+    try:
+        if S.wlan is None:
+            import network
+            S.wlan = network.WLAN(network.STA_IF)
+        return _fmt_mac(S.wlan.config("mac"))
+    except Exception:
+        return ""
+
+
+def _ble_mac():
+    try:
+        _, addr = S.ble.config("mac")
+        return _fmt_mac(addr)
+    except Exception:
+        return ""
+
+
+def _load_networks():
+    # networks.txt: line 1 = SSID, line 2 = password. Auto-connect on boot.
+    try:
+        with open("networks.txt") as fh:
+            lines = fh.read().split("\\n")
+    except OSError:
+        return
+    ssid = lines[0].strip() if lines else ""
+    if ssid:
+        S.wifi_ssid = ssid
+        S.wifi_pass = lines[1] if len(lines) > 1 else ""
+        S.wifi_connect_req = True
+
+
+def _save_networks():
+    try:
+        with open("networks.txt", "w") as fh:
+            fh.write(S.wifi_ssid + "\\n" + S.wifi_pass)
+    except Exception:
+        pass
+
+
+def _begin_connect():
+    wl = _wifi_iface()
+    if wl is None:
+        S.wifi_state = "off"
+        S.wifi_ip = ""
+        _notify(_wifi_status_str())
+        return
+    S.wifi_state = "connecting"
+    S.wifi_ip = ""
+    S.wifi_last_status = None
+    try:   # identify ourselves to DHCP/mDNS (before connecting, so it's used)
+        import network
+        network.hostname(_wifi_hostname())
+    except Exception:
+        pass
+    try:
+        wl.connect(S.wifi_ssid, S.wifi_pass)
+    except Exception:
+        S.wifi_state = "failed"
+        S.wifi_ip = "error"
+    _notify(_wifi_status_str())
+
+
+def _poll_wifi():
+    # Non-blocking: watch a pending connection and notify when it resolves.
+    if S.wifi_state != "connecting" or S.wlan is None:
+        return
+    try:
+        st = S.wlan.status()
+    except Exception:
+        return
+    if st == S.wifi_last_status:
+        return
+    S.wifi_last_status = st
+    try:
+        import network
+        if st == network.STAT_GOT_IP:
+            S.wifi_state = "connected"
+            S.wifi_ip = S.wlan.ifconfig()[0]
+            _start_tcp()   # the control port is only reachable once we have an IP
+            _notify(_wifi_status_str())
+        elif st < 0:   # negative status codes are the error states
+            reasons = {network.STAT_WRONG_PASSWORD: "wrong-password",
+                       network.STAT_NO_AP_FOUND: "no-ap",
+                       network.STAT_CONNECT_FAIL: "failed"}
+            S.wifi_state = "failed"
+            S.wifi_ip = reasons.get(st, "failed")
+            _notify(_wifi_status_str())
+    except Exception:
+        pass
+
+
+def _do_scan():
+    # Blocking (~2s) - runs from the player loop, so playback pauses briefly.
+    # Streams the results afterwards (paced) via _stream_scan.
+    wl = _wifi_iface()
+    if wl is None:
+        _send_to(S.scan_dest, "WIFISCANEND")
+        return
+    try:
+        nets = wl.scan()
+    except Exception:
+        _send_to(S.scan_dest, "WIFISCANEND")
+        return
+    seen = []
+    out = []
+    for net in nets:
+        try:
+            ssid = net[0].decode()
+        except Exception:
+            ssid = ""
+        if not ssid or ssid in seen:
+            continue
+        seen.append(ssid)
+        out.append((net[3], ssid))   # (RSSI, SSID)
+    out.sort(key=lambda x: x[0], reverse=True)   # strongest first
+    S.scan_queue = out
+    S.scan_total = len(out)
+    S.scan_header_sent = False
+
+
+def _stream_scan():
+    # One WIFINET per call (~30ms paced), like the pattern LIST stream. SSID is
+    # last on the line, so an SSID with spaces survives.
+    if S.scan_queue is None:
+        return
+    if time.ticks_diff(time.ticks_ms(), S.scan_at) < 30:
+        return
+    S.scan_at = time.ticks_ms()
+    if not S.scan_header_sent:
+        S.scan_header_sent = True
+        _send_to(S.scan_dest, "WIFISCANLEN %d" % S.scan_total)
+    elif S.scan_queue:
+        rssi, ssid = S.scan_queue.pop(0)
+        _send_to(S.scan_dest, "WIFINET %d %s" % (rssi, ssid))
+    else:
+        S.scan_queue = None
+        _send_to(S.scan_dest, "WIFISCANEND")
+
+
+def _wifi_step():
+    if S.scan_req:
+        S.scan_req = False
+        _do_scan()
+    if S.wifi_connect_req:
+        S.wifi_connect_req = False
+        _begin_connect()
+    _poll_wifi()
+
+
+def _stream_out():
+    # One queued labeled reply per call (~25ms paced), so a burst (e.g. MOREINFO)
+    # never overflows the notify buffer and drops lines.
+    if S.out_queue is None:
+        return
+    if time.ticks_diff(time.ticks_ms(), S.out_at) < 25:
+        return
+    S.out_at = time.ticks_ms()
+    if S.out_queue:
+        _send_to(S.out_dest, S.out_queue.pop(0))
+    else:
+        S.out_queue = None
+
+
+# ---- TCP control transport (Wi-Fi) -----------------------------------------
+# The SAME text protocol as BLE, over a plain TCP socket on CONTROL_PORT. TCP is
+# a byte stream (no message boundaries like BLE), so commands are newline-framed
+# and buffered until a full line arrives; replies are newline-terminated too. No
+# HTTP - the client is a native app, so the raw line protocol is all we need.
+# Runs non-blocking from the player loop; a single client at a time.
+
+def _tcp_send(s):
+    if S.tcp_client is None:
+        return
+    try:
+        S.tcp_client.send(s.encode())
+    except Exception:
+        _tcp_close_client()
+
+
+def _tcp_close_client():
+    if S.tcp_client is not None:
+        try:
+            S.tcp_client.close()
+        except Exception:
+            pass
+    S.tcp_client = None
+    S.tcp_buf = b""
+
+
+def _start_tcp():
+    # Bring up the listening socket once Wi-Fi has an IP. Idempotent.
+    if S.tcp_srv is not None:
+        return
+    try:
+        import socket
+        srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        srv.bind(("0.0.0.0", CONTROL_PORT))
+        srv.listen(1)
+        srv.setblocking(False)
+        S.tcp_srv = srv
+        print("TCP control on port", CONTROL_PORT)
+    except Exception as e:
+        print("TCP server unavailable:", e)
+        S.tcp_srv = None
+
+
+def _stop_tcp():
+    _tcp_close_client()
+    if S.tcp_srv is not None:
+        try:
+            S.tcp_srv.close()
+        except Exception:
+            pass
+    S.tcp_srv = None
+
+
+def _tcp_step():
+    # Non-blocking: accept one client, then drain whatever bytes are ready and
+    # dispatch any complete (newline-terminated) commands.
+    if S.tcp_srv is None:
+        return
+    if S.tcp_client is None:
+        try:
+            cl, _ = S.tcp_srv.accept()
+            cl.setblocking(False)
+            S.tcp_client = cl
+            S.tcp_buf = b""
+        except OSError:
+            return   # nothing waiting to be accepted
+    try:
+        data = S.tcp_client.recv(256)
+    except OSError as e:
+        if e.args[0] in (11, 35):   # EAGAIN / EWOULDBLOCK - no data right now
+            return
+        _tcp_close_client()
+        return
+    if not data:                    # empty recv = peer closed
+        _tcp_close_client()
+        return
+    S.tcp_buf += data
+    if b"\\n" not in S.tcp_buf and len(S.tcp_buf) > 512:
+        S.tcp_buf = b""             # runaway line with no terminator - drop it
+        return
+    while b"\\n" in S.tcp_buf:
+        line, S.tcp_buf = S.tcp_buf.split(b"\\n", 1)
+        try:
+            text = line.decode().strip()
+        except Exception:
+            continue
+        if not text:
+            continue
+        try:
+            reply = dispatch(text, ("tcp", None))
+        except Exception as e:
+            reply = "ERR " + str(e)
+        if reply:
+            _tcp_send(reply + "\\n")
+
+
+def _tick():
+    # Per-loop housekeeping shared by every branch of the player loop.
+    _persist_bright()
+    _echo_speed()
+    _persist_state()
+    _stream_list()
+    _stream_scan()
+    _stream_out()
+    _tcp_step()
+    _wifi_step()
+
+
+def dispatch(line, origin=None):
+    # Transport-agnostic command handler. Returns a short direct reply string
+    # (sent by the caller to the origin only). Commands that STREAM their reply
+    # (LIST / WIFISCAN / MOREINFO) stash the origin so the player loop routes the
+    # stream back to just the requester. origin = ("ble", conn) or ("tcp", None).
     line = line.strip()
     if not line:
         return None
@@ -283,14 +680,44 @@ def dispatch(line):
         if c == "PING":
             return "OK"
         if c == "INFO":
-            # <leds> <mode> <bright%> <speed%> <r> <g> <b> <file...>
-            # The filename comes LAST because it may contain spaces; every field
-            # before it is a single token, so the app parses those positionally
-            # and takes the remainder as the name. The solid color lets the app
-            # restore its picker on connect.
-            return "INFO %d %s %d %d %d %d %d %s" % (
-                S.n, S.mode, int(S.bright * 100), int(S.speed * 100),
+            # Lean, control-only (fetched on every connect):
+            # <mode> <bright%> <speed%> <r> <g> <b> <file...>. The filename is
+            # LAST because it may contain spaces; the app parses the fixed fields
+            # positionally and takes the remainder as the name. Static/rarely-used
+            # details (version, LED count, free space, MACs, platform) live in
+            # MOREINFO, fetched lazily, so this stays small.
+            return "INFO %s %d %d %d %d %d %s" % (
+                S.mode, int(S.bright * 100), int(S.speed * 100),
                 S.solid[0], S.solid[1], S.solid[2], S.file or "")
+        if c == "MOREINFO":
+            # Everything the Info tab shows, as a set of DISCRETE labeled
+            # notifications (streamed paced by the player loop, like LIST). Each
+            # is "KEY <value...>" - self-describing, order-independent, and each
+            # value gets its own line so spaces are never a problem. Add fields
+            # freely; the app ignores keys it doesn't know.
+            try:
+                machine = os.uname().machine
+            except Exception:
+                machine = "unknown"
+            fields = [
+                "VERSION " + FW_VERSION,
+                "LEDS %d" % S.n,
+                "FREE %d" % _free_bytes(),
+            ]
+            wm = _wifi_mac()
+            if wm:
+                fields.append("WIFIMAC " + wm)
+            bm = _ble_mac()
+            if bm:
+                fields.append("BTMAC " + bm)
+            fields.append("HOSTNAME " + _wifi_hostname())
+            fields.append("PLATFORM " + machine)
+            # A field with no hardware is OMITTED (not sent as a placeholder); the
+            # app shows N/A for anything still missing once ENDINFO arrives.
+            fields.append("ENDINFO")
+            S.out_queue = fields
+            S.out_dest = origin
+            return None
         if c == "VERSION":
             return "VERSION " + FW_VERSION
         if c == "PLATFORM":
@@ -301,7 +728,10 @@ def dispatch(line):
         if c == "NAME":
             if len(p) < 2:
                 return "NAME " + S.name
-            new = line.split(None, 1)[1].strip()[:26]
+            # Keep names (which ride the protocol + BLE advert) to printable
+            # ASCII only, then trim + cap at 26.
+            raw = line.split(None, 1)[1]
+            new = "".join(ch for ch in raw if 32 <= ord(ch) < 127).strip()[:26]
             if not new:
                 return "ERR args"
             S.name = new
@@ -323,6 +753,7 @@ def dispatch(line):
             S.list_queue = files
             S.list_total = len(files)
             S.list_header_sent = False
+            S.list_dest = origin
             return None
         if c == "FREE":
             return "FREE %d" % _free_bytes()
@@ -347,6 +778,8 @@ def dispatch(line):
             return "OK BRIGHT %d" % int(S.bright * 100)
         if c == "SPEED":
             S.speed = max(10, min(400, int(p[1]))) / 100.0
+            S.speed_dirty = True   # broadcast a debounced echo so other clients sync
+            S.speed_at = time.ticks_ms()
             return "OK SPEED %d" % int(S.speed * 100)
         if c == "SOLID":
             S.solid = (int(p[1]) & 255, int(p[2]) & 255, int(p[3]) & 255)
@@ -372,6 +805,43 @@ def dispatch(line):
                 return "OK DELETE " + name
             except OSError:
                 return "ERR no-file"
+        # --- Wi-Fi provisioning (Pico W). The heavy work (scan/connect) runs in
+        # the player loop; these handlers just stash state and set a request. ---
+        if c == "WIFISCAN":
+            S.scan_req = True
+            S.scan_dest = origin
+            return None            # results stream as WIFISCANLEN/WIFINET/WIFISCANEND
+        if c == "WIFISSID":
+            S.wifi_ssid = line.split(None, 1)[1].strip() if len(p) > 1 else ""
+            return "OK WIFISSID"
+        if c == "WIFIPASS":
+            S.wifi_pass = line.split(None, 1)[1] if len(p) > 1 else ""
+            return "OK WIFIPASS"
+        if c == "WIFICONNECT":
+            if not S.wifi_ssid:
+                return "ERR no-ssid"
+            _save_networks()
+            S.wifi_connect_req = True
+            return None            # status arrives async as WIFI <state> <detail>
+        if c == "WIFISTATUS":
+            return _wifi_status_str()
+        if c == "WIFIFORGET":
+            S.wifi_ssid = ""
+            S.wifi_pass = ""
+            try:
+                os.remove("networks.txt")
+            except OSError:
+                pass
+            _stop_tcp()
+            try:
+                if S.wlan:
+                    S.wlan.disconnect()
+                    S.wlan.active(False)
+            except Exception:
+                pass
+            S.wifi_state = "off"
+            S.wifi_ip = ""
+            return "OK WIFIFORGET"
         return "ERR unknown"
     except (IndexError, ValueError):
         return "ERR args"
@@ -432,15 +902,14 @@ def _start_ble():
             conn, handle = data
             if handle == rx:
                 try:
-                    reply = dispatch(ble.gatts_read(rx).decode())
+                    reply = dispatch(ble.gatts_read(rx).decode(), ("ble", conn))
                 except Exception as e:
                     reply = "ERR " + str(e)
-                if reply:
-                    for c in conns:
-                        try:
-                            ble.gatts_notify(c, tx, reply.encode())
-                        except Exception:
-                            pass
+                if reply:   # direct reply -> only the client that asked
+                    try:
+                        ble.gatts_notify(conn, tx, reply.encode())
+                    except Exception:
+                        pass
 
     ble.irq(irq)
     advertise()
@@ -453,6 +922,7 @@ def main():
     S.bright = _load_bright()
     _load_state()          # restore play/solid/off + the solid color
     _prime_led_count()     # so a restored solid/off covers the strip at boot
+    _load_networks()       # queue a Wi-Fi auto-connect if provisioned
     try:
         _start_ble()
         print("BLE control active:", S.name)
@@ -465,9 +935,7 @@ def main():
     while True:
         if S.mode != "play":
             # solid or off - hold the solid color (off is solid black).
-            _persist_bright()
-            _persist_state()
-            _stream_list()
+            _tick()
             _show_solid(S.solid, S.n)
             time.sleep_ms(40)
             continue
@@ -477,9 +945,7 @@ def main():
             if f:
                 f.close()
                 f = None
-            _persist_bright()
-            _persist_state()
-            _stream_list()
+            _tick()
             time.sleep_ms(100)
             continue
         if S.reload or f is None:
@@ -510,9 +976,7 @@ def main():
         for _ in range(frames):
             if S.reload or S.mode != "play":
                 break
-            _persist_bright()
-            _persist_state()
-            _stream_list()
+            _tick()
             _show_grb(f.read(fb), S.n)
             time.sleep(base_delay / S.speed if S.speed > 0 else base_delay)
 
@@ -534,6 +998,8 @@ Files:
   selected.txt    The pattern file to play on boot (${patternFile}).
   state.txt       Playback mode + solid color, so play/solid/off survives a
                   reboot. Written by the device at runtime (not in this export).
+  networks.txt    Wi-Fi credentials (SSID + password) once provisioned over BLE,
+                  so it re-joins on boot. Written at runtime (not in this export).
   project.json    Editable project - re-import into LED Animator to keep editing.
                   (App only; do NOT copy this to the board.)
 
@@ -557,7 +1023,8 @@ Bluetooth control (Pico W only):
     TX (notify)  6E400003-B5A3-F393-E0A9-E50E24DCCA9E
   Commands:
     PING                 -> OK
-    INFO                 -> LED count, mode, brightness%, speed%, solid r g b, filename (last; may contain spaces)
+    INFO                 -> mode, brightness%, speed%, solid r g b, filename (last; may contain spaces)
+    MOREINFO             -> streams discrete labeled replies "KEY <value>" (VERSION, LEDS, FREE, WIFIMAC, BTMAC, HOSTNAME, PLATFORM), then ENDINFO. Fields with no hardware are omitted. All values are printable ASCII.
     VERSION              -> firmware version
     PLATFORM             -> board/runtime (os.uname().machine)
     LIST                 -> streams "LISTLEN <n>", one "FILE <name>" each, then ENDLIST
@@ -571,9 +1038,24 @@ Bluetooth control (Pico W only):
     DELETE <name>        -> remove a pattern file (not the active one)
     NAME                 -> report the current advertised name
     NAME <new name>      -> rename the device (saved to devicename.txt, survives reboot)
-  The advertised name defaults to what you set at export time; renaming over BLE
-  overrides it. On a plain Pico (no radio) the BLE half is skipped and playback
-  still runs.
+    WIFISCAN             -> streams "WIFISCANLEN <n>", one "WIFINET <rssi> <ssid>" each, then WIFISCANEND
+    WIFISSID <ssid>      -> stash the network name for the next WIFICONNECT
+    WIFIPASS <password>  -> stash the password for the next WIFICONNECT
+    WIFICONNECT          -> join with the stashed credentials, save to networks.txt (auto-joins on boot)
+    WIFISTATUS           -> "WIFI <state> <detail>" (state = off/connecting/connected/failed; detail = IP or reason)
+    WIFIFORGET           -> clear networks.txt and disconnect
+  Wi-Fi status is also pushed unsolicited as "WIFI <state> <detail>" when a join
+  resolves. The advertised name defaults to what you set at export time; renaming
+  over BLE overrides it. On a plain Pico (no radio) the BLE/Wi-Fi halves are
+  skipped and playback still runs.
+
+Wi-Fi control (Pico W, once provisioned):
+  The SAME text commands are accepted over a plain TCP socket on port 4550,
+  one command per line (newline-terminated); each reply is newline-terminated
+  too. No HTTP - it's the identical protocol as BLE over a raw socket. Try it:
+    nc <device-ip> 4550     then type:  PING   ->  OK
+  Streamed replies (LIST / WIFISCAN / MOREINFO) arrive as lines ending in
+  ENDLIST / WIFISCANEND / ENDINFO, same as over BLE.
 
 LEDA v1 binary format (little-endian):
   off size field
