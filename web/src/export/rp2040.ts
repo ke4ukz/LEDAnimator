@@ -91,6 +91,8 @@ class S:
     reload = True
     n = 0                    # LED count of the loaded pattern
     name = DEVICE_NAME       # advertised BLE name (overridable at runtime)
+    device_id = b""          # last 3 bytes of the Wi-Fi MAC (= hostname suffix),
+                             # advertised so the app correlates BLE <-> Wi-Fi
     ble = None               # set once BLE is up, so NAME can update gap_name
     bright_dirty = False     # brightness changed, pending a debounced save
     bright_at = 0            # time.ticks_ms() of the last brightness change
@@ -422,6 +424,18 @@ def _ble_mac():
         return _fmt_mac(addr)
     except Exception:
         return ""
+
+
+def _device_id_bytes():
+    # Last 3 bytes of the Wi-Fi (STA) MAC - same bytes the hostname suffix uses -
+    # so the app can match this BLE device to its Wi-Fi discovery. b"" if no radio.
+    try:
+        if S.wlan is None:
+            import network
+            S.wlan = network.WLAN(network.STA_IF)
+        return bytes(S.wlan.config("mac")[-3:])
+    except Exception:
+        return b""
 
 
 def _load_networks():
@@ -934,6 +948,7 @@ def _start_ble():
     conns = set()
     S.tx = tx
     S.conns = conns
+    S.device_id = _device_id_bytes()   # cached once; advertised for BLE<->Wi-Fi matching
 
     def field(t, v):
         return struct.pack("BB", len(v) + 1, t) + v
@@ -944,6 +959,10 @@ def _start_ble():
         # interval so discovery and connection initiation are quick (only
         # advertises while disconnected, so it never competes with playback).
         adv_data = field(0x01, bytes((6,))) + field(0x07, bytes(_SVC))
+        if S.device_id:
+            # Manufacturer data: 0xFFFF (no company) + the 3-byte device id, so the
+            # app can correlate this device with its Wi-Fi discovery (hostname suffix).
+            adv_data += field(0xFF, b"\\xff\\xff" + S.device_id)
         rsp = field(0x09, S.name.encode()[:26])
         ble.gap_advertise(100000, adv_data=adv_data, resp_data=rsp)
 
