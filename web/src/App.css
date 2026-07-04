@@ -1312,6 +1312,15 @@ input[type='color'] {
   width: 100%;
 }
 
+.track-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.track-actions .btn {
+  flex: 1;
+}
+
 /* Track inspector */
 .track-insp {
   display: flex;

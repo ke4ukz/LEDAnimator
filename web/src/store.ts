@@ -64,6 +64,8 @@ interface AppState {
   /** Merge a patch into the selected track's source post-processing (adjustments). */
   updatePost: (patch: Partial<PostFx>) => void
   addTrack: () => void
+  /** Clone a track's settings + source (starts with no LEDs assigned). */
+  duplicateTrack: (id: string) => void
   deleteTrack: (id: string) => void
   updateTrack: (id: string, patch: Partial<Track>) => void
   /** Set (or clear, when auto is null) an automation curve for a track param. */
@@ -312,6 +314,38 @@ export const useStore = create<AppState>((set, get) => {
       }
       set({ selectedTrack: track.id })
       commit(next)
+    },
+
+    duplicateTrack: (id) => {
+      const { project } = get()
+      const src = project.tracks.find((t) => t.id === id)
+      if (!src) return
+      const source = project.sources.find((s) => s.id === src.sourceId)
+      // Clone the source (own gradient + adjustments) so edits stay independent.
+      const newSource: Source = source
+        ? {
+            ...source,
+            id: newId('src'),
+            name: `${source.name} copy`,
+            gradient: structuredClone(source.gradient),
+            post: source.post ? { ...source.post } : undefined,
+          }
+        : { id: newId('src'), name: 'Source', kind: 'gradient', gradient: defaultGradient() }
+      // Clone the track's settings; it starts with no LEDs (assign them after).
+      const newTrack: Track = {
+        ...src,
+        id: newId('trk'),
+        name: `${src.name} copy`,
+        sourceId: newSource.id,
+        path: { ...src.path },
+        automations: src.automations ? structuredClone(src.automations) : undefined,
+      }
+      set({ selectedTrack: newTrack.id })
+      commit({
+        ...project,
+        sources: [...project.sources, newSource],
+        tracks: [...project.tracks, newTrack],
+      })
     },
 
     deleteTrack: (id) => {

@@ -7,6 +7,7 @@ export function TrackPanel() {
   const selected = useStore((s) => s.selectedTrack)
   const selectTrack = useStore((s) => s.selectTrack)
   const addTrack = useStore((s) => s.addTrack)
+  const duplicateTrack = useStore((s) => s.duplicateTrack)
   const deleteTrack = useStore((s) => s.deleteTrack)
 
   return (
@@ -38,7 +39,17 @@ export function TrackPanel() {
           )
         })}
       </ul>
-      <button className="btn add-track" onClick={addTrack}>+ Add track</button>
+      <div className="track-actions">
+        <button className="btn" onClick={addTrack}>+ Add</button>
+        <button
+          className="btn"
+          title="Clone the selected track's settings into a new empty track"
+          disabled={!selected}
+          onClick={() => selected && duplicateTrack(selected)}
+        >
+          Duplicate
+        </button>
+      </div>
     </div>
   )
 }
