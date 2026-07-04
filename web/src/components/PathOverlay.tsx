@@ -156,7 +156,7 @@ export function PathOverlay({ track }: { track: Track }) {
         <polyline points={curve} className="path-curve" />
         <polygon points={arrow} className="path-arrow" />
         {samplePts.map((p, i) => (
-          <circle key={i} cx={p[0]} cy={p[1]} r={1.6} className="path-sample" />
+          <circle key={i} cx={p[0]} cy={p[1]} r={2} className="path-sample" />
         ))}
       </svg>
       {handles.map((h) => (

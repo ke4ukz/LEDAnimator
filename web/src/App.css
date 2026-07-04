@@ -1146,10 +1146,14 @@ input[type='color'] {
   fill: #fff;
 }
 
-/* Dim ghost markers showing where each LED samples the path (chase spread). */
+/* Dim ghost markers showing where each LED samples the path (chase spread).
+   Green like the start marker, but dimmer, and with a dark edge so they read
+   against both the white path line and any gradient color. */
 .path-sample {
-  fill: #fff;
-  opacity: 0.4;
+  fill: #7bd06a;
+  stroke: rgba(0, 0, 0, 0.4);
+  stroke-width: 0.4;
+  opacity: 0.55;
   pointer-events: none;
 }
 
