@@ -98,10 +98,7 @@ struct HomeView: View {
         } detail: {
             detail
         }
-        // TEMP (iOS 27 beta): do NOT auto-start Bluetooth — creating
-        // CBCentralManager is aborting at launch there. BLE now spins up only
-        // when you tap the Devices "rescan" button; Wi-Fi discovery below still
-        // runs automatically, so Wi-Fi devices appear on their own.
+        .onAppear { ble.startScan() }
         .onDisappear { ble.stopScan() }
         .task {
             while !Task.isCancelled {
