@@ -3,9 +3,10 @@
 //  LED Animator
 //
 //  The app's home shell for the unified authoring + control app. A sidebar with
-//  two sections — your Animations (a mock library for now) and discovered
-//  Devices — with the real device control reused from ControlView. The editor
-//  and file-push flows are placeholders/mocks until the native editor exists.
+//  two collapsible sections — your Animations (a mock library for now) and
+//  discovered Devices — with the real device control reused from ControlView.
+//  Opening the editor takes over the whole window; the editor + file-push flows
+//  are placeholders/mocks until the native editor exists.
 //
 
 import SwiftUI
@@ -15,7 +16,7 @@ import SwiftUI
 struct MockAnimation: Identifiable, Hashable {
     let id: String
     let name: String
-    let colors: [Color]     // for a gradient thumbnail
+    let tracks: [[Color]]   // one gradient per track (drives the segmented thumbnail)
     let ledCount: Int
     let frameCount: Int
     let fps: Int
@@ -23,11 +24,33 @@ struct MockAnimation: Identifiable, Hashable {
 }
 
 let sampleAnimations: [MockAnimation] = [
-    MockAnimation(id: "rainbow", name: "Rainbow Cycle", colors: [.red, .orange, .yellow, .green, .blue, .purple], ledCount: 60, frameCount: 120, fps: 30),
-    MockAnimation(id: "fire", name: "Fire Flicker", colors: [.red, .orange, .yellow], ledCount: 30, frameCount: 90, fps: 30),
-    MockAnimation(id: "ocean", name: "Ocean Waves", colors: [.teal, .blue, .cyan], ledCount: 144, frameCount: 200, fps: 24),
-    MockAnimation(id: "sparkle", name: "Sparkle", colors: [.white, .blue, .white], ledCount: 50, frameCount: 60, fps: 30),
+    MockAnimation(id: "rainbow", name: "Rainbow Cycle",
+                  tracks: [[.red, .orange, .yellow, .green, .blue, .purple]],
+                  ledCount: 60, frameCount: 120, fps: 30),
+    MockAnimation(id: "fire", name: "Fire Flicker",
+                  tracks: [[.red, .orange, .yellow], [.orange, .red]],
+                  ledCount: 30, frameCount: 90, fps: 30),
+    MockAnimation(id: "ocean", name: "Ocean Waves",
+                  tracks: [[.teal, .blue], [.cyan, .teal], [.blue, .indigo]],
+                  ledCount: 144, frameCount: 200, fps: 24),
+    MockAnimation(id: "sparkle", name: "Sparkle",
+                  tracks: [[.white, .blue, .white]],
+                  ledCount: 50, frameCount: 60, fps: 30),
 ]
+
+/// A stacked-band preview: one horizontal gradient per track, so more tracks
+/// split the image into more (thinner) segments.
+struct AnimationThumbnail: View {
+    let tracks: [[Color]]
+    var body: some View {
+        VStack(spacing: 1) {
+            ForEach(Array(tracks.enumerated()), id: \.offset) { _, colors in
+                LinearGradient(colors: colors, startPoint: .leading, endPoint: .trailing)
+            }
+        }
+        .background(.black)   // shows through the 1pt gaps as thin dividers
+    }
+}
 
 private enum HomeSelection: Hashable {
     case animation(String)
@@ -42,7 +65,9 @@ struct HomeView: View {
     let discovery: WiFiDiscovery
 
     @State private var selection: HomeSelection?
-    @State private var showEditor = false          // "New Animation" / "Edit" → placeholder
+    @State private var showEditor = false          // full-screen editor takeover
+    @State private var animationsExpanded = true
+    @State private var devicesExpanded = true
     @State private var animations = sampleAnimations
 
     private var devices: [UnifiedDevice] {
@@ -51,6 +76,20 @@ struct HomeView: View {
     private var activeSession: DeviceSession? { ble.session ?? wifi.session }
 
     var body: some View {
+        ZStack {
+            home
+            if showEditor {
+                // Full-window takeover — the editor is a Photoshop-like surface,
+                // not a sheet. Opaque so home is fully covered.
+                EditorPlaceholderView(onClose: { showEditor = false })
+                    .transition(.move(edge: .bottom))
+                    .zIndex(1)
+            }
+        }
+        .animation(.snappy(duration: 0.28), value: showEditor)
+    }
+
+    private var home: some View {
         NavigationSplitView {
             sidebar
                 .navigationSplitViewColumnWidth(min: 240, ideal: 280, max: 360)
@@ -73,19 +112,25 @@ struct HomeView: View {
         } message: {
             Text(failureMessage)
         }
-        .sheet(isPresented: $showEditor) { EditorPlaceholderView() }
     }
 
     // MARK: Sidebar
 
     private var sidebar: some View {
         List(selection: $selection) {
-            Section("Animations") {
+            Section(isExpanded: $animationsExpanded) {
                 ForEach(animations) { a in
                     AnimationRow(animation: a).tag(HomeSelection.animation(a.id))
                 }
+            } header: {
+                sectionHeader("Animations") {
+                    Button { showEditor = true } label: { Image(systemName: "plus") }
+                        .buttonStyle(.borderless)
+                        .help("New animation")
+                }
             }
-            Section("Devices") {
+
+            Section(isExpanded: $devicesExpanded) {
                 if devices.isEmpty {
                     HStack(spacing: 8) {
                         ProgressView().controlSize(.small)
@@ -96,19 +141,23 @@ struct HomeView: View {
                         HomeDeviceRow(device: d, connecting: connecting(d)).tag(HomeSelection.device(d.id))
                     }
                 }
+            } header: {
+                sectionHeader("Devices") {
+                    Button { ble.startScan(); discovery.scan() } label: { Image(systemName: "arrow.clockwise") }
+                        .buttonStyle(.borderless)
+                        .help("Rescan for devices")
+                }
             }
         }
         .listStyle(.sidebar)
         .navigationTitle("LED Animator")
-        .toolbar {
-            ToolbarItem {
-                Button { showEditor = true } label: { Label("New Animation", systemImage: "plus") }
-                    .help("New animation")
-            }
-            ToolbarItem {
-                Button { ble.startScan(); discovery.scan() } label: { Image(systemName: "arrow.clockwise") }
-                    .help("Rescan for devices")
-            }
+    }
+
+    private func sectionHeader<Trailing: View>(_ title: String, @ViewBuilder trailing: () -> Trailing) -> some View {
+        HStack {
+            Text(title)
+            Spacer()
+            trailing()
         }
     }
 
@@ -189,13 +238,15 @@ private struct AnimationRow: View {
     let animation: MockAnimation
     var body: some View {
         HStack(spacing: 10) {
-            RoundedRectangle(cornerRadius: 5)
-                .fill(LinearGradient(colors: animation.colors, startPoint: .leading, endPoint: .trailing))
-                .frame(width: 34, height: 22)
+            AnimationThumbnail(tracks: animation.tracks)
+                .frame(width: 34, height: 24)
+                .clipShape(RoundedRectangle(cornerRadius: 5))
                 .overlay(RoundedRectangle(cornerRadius: 5).strokeBorder(.white.opacity(0.15)))
             VStack(alignment: .leading, spacing: 1) {
                 Text(animation.name)
-                Text("\(animation.ledCount) LEDs").font(.caption2).foregroundStyle(.secondary)
+                Text(animation.tracks.count == 1 ? "\(animation.ledCount) LEDs"
+                                                  : "\(animation.ledCount) LEDs · \(animation.tracks.count) tracks")
+                    .font(.caption2).foregroundStyle(.secondary)
             }
         }
         .padding(.vertical, 2)
@@ -236,14 +287,15 @@ private struct AnimationDetailView: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 22) {
-                RoundedRectangle(cornerRadius: 16)
-                    .fill(LinearGradient(colors: animation.colors, startPoint: .leading, endPoint: .trailing))
+                AnimationThumbnail(tracks: animation.tracks)
                     .frame(height: 150)
                     .frame(maxWidth: 520)
+                    .clipShape(RoundedRectangle(cornerRadius: 16))
 
                 VStack(spacing: 14) {
                     HStack(spacing: 28) {
                         metric("\(animation.ledCount)", "LEDs")
+                        metric("\(animation.tracks.count)", animation.tracks.count == 1 ? "Track" : "Tracks")
                         metric("\(animation.frameCount)", "Frames")
                         metric(String(format: "%.1fs", animation.duration), "Length")
                     }
@@ -284,32 +336,40 @@ private struct AnimationDetailView: View {
     }
 }
 
-// MARK: - Editor placeholder ("coming soon")
+// MARK: - Editor placeholder ("coming soon", full-window)
 
 private struct EditorPlaceholderView: View {
-    @Environment(\.dismiss) private var dismiss
+    let onClose: () -> Void
     var body: some View {
-        NavigationStack {
+        VStack(spacing: 0) {
+            HStack {
+                Button { onClose() } label: {
+                    Label("Close", systemImage: "chevron.backward")
+                }
+                Spacer()
+                Text("New Animation").font(.headline)
+                Spacer()
+                // Invisible spacer to keep the title centered.
+                Label("Close", systemImage: "chevron.backward").opacity(0)
+            }
+            .padding()
+            Divider()
+            Spacer()
             VStack(spacing: 16) {
                 Image(systemName: "paintbrush.pointed.fill")
-                    .font(.system(size: 52))
+                    .font(.system(size: 56))
                     .foregroundStyle(.tint)
-                Text("Editor — Coming Soon").font(.title2.bold())
-                Text("The native LED animation editor will live here — a 3D viewport, a timeline, and gradient tools. For now, design in the web app and send the .leda file to your device.")
+                Text("Editor — Coming Soon").font(.title.bold())
+                Text("The native LED animation editor will take over the whole screen here — a 3D viewport, a multi-track timeline, and gradient tools. For now, design in the web app and send the .leda file to your device.")
                     .multilineTextAlignment(.center)
                     .foregroundStyle(.secondary)
-                    .frame(maxWidth: 420)
+                    .frame(maxWidth: 440)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            .padding(32)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .navigationTitle("New Animation")
-            .inlineNavTitle()
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
-            }
+            Spacer()
         }
-        .macSheetFrame()
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(.background)
     }
 }
 
