@@ -17,11 +17,14 @@ export interface GradientSource {
 // Images will join this union later.
 export type Source = GradientSource
 
-/** A sampling path across a source's normalized (u,v) space, parameter s ∈ [0,1). */
+/** A sampling path across a source's normalized (u,v) space, parameter s ∈ [0,1).
+ *  Rotations (`rot`) are in DEGREES. */
 export type PathDef =
   | { type: 'line'; x0: number; y0: number; x1: number; y1: number }
   | { type: 'sine'; midV: number; amp: number; freq: number; phase: number }
-  | { type: 'ellipse'; cx: number; cy: number; rx: number; ry: number }
+  | { type: 'ellipse'; cx: number; cy: number; rx: number; ry: number; rot: number }
+  | { type: 'spiral'; cx: number; cy: number; r0: number; r1: number; turns: number; rot: number }
+  | { type: 'polygon'; cx: number; cy: number; size: number; sides: number; rot: number }
 
 /** Easing of the segment leaving a keyframe toward the next one. */
 export type EaseType = 'linear' | 'smooth' | 'hold'
@@ -58,6 +61,8 @@ export interface Track {
   automations?: Partial<Record<AutoParam, Automation>>
 }
 
+const DEG = Math.PI / 180
+
 /** Evaluate a path at parameter s, returning normalized (u, v). */
 export function pathPoint(path: PathDef, s: number): [number, number] {
   switch (path.type) {
@@ -67,7 +72,30 @@ export function pathPoint(path: PathDef, s: number): [number, number] {
       return [s, path.midV + path.amp * Math.sin(2 * Math.PI * (path.freq * s + path.phase))]
     case 'ellipse': {
       const a = 2 * Math.PI * s
-      return [path.cx + path.rx * Math.cos(a), path.cy + path.ry * Math.sin(a)]
+      const x = path.rx * Math.cos(a)
+      const y = path.ry * Math.sin(a)
+      const r = (path.rot ?? 0) * DEG
+      return [path.cx + x * Math.cos(r) - y * Math.sin(r), path.cy + x * Math.sin(r) + y * Math.cos(r)]
+    }
+    case 'spiral': {
+      const a = 2 * Math.PI * path.turns * s + (path.rot ?? 0) * DEG
+      const rad = path.r0 + (path.r1 - path.r0) * s
+      return [path.cx + rad * Math.cos(a), path.cy + rad * Math.sin(a)]
+    }
+    case 'polygon': {
+      const n = Math.max(3, Math.round(path.sides))
+      const r = (path.rot ?? 0) * DEG
+      // Vertex k, first at the top (−90°) then rotated by `rot`.
+      const vert = (k: number): [number, number] => {
+        const ang = r - Math.PI / 2 + (2 * Math.PI * k) / n
+        return [path.cx + path.size * Math.cos(ang), path.cy + path.size * Math.sin(ang)]
+      }
+      const t = s * n
+      const edge = Math.floor(t) % n
+      const local = t - Math.floor(t)
+      const [x0, y0] = vert(edge)
+      const [x1, y1] = vert(edge + 1)
+      return [x0 + (x1 - x0) * local, y0 + (y1 - y0) * local]
     }
   }
 }

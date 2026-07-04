@@ -4,6 +4,7 @@ import { type PathDef, type Track, pathPoint } from '../project'
 
 const clamp01 = (x: number) => (x < 0 ? 0 : x > 1 ? 1 : x)
 const clamp = (x: number, lo: number, hi: number) => (x < lo ? lo : x > hi ? hi : x)
+const DEG = Math.PI / 180
 
 interface Handle {
   id: string
@@ -33,31 +34,73 @@ export function PathOverlay({ track }: { track: Track }) {
   const onMove = (e: React.PointerEvent) => {
     const id = drag.current
     if (!id) return
+    const p = path
     const { u, v } = fromEvent(e)
-    if (path.type === 'line') {
-      setPath(id === 'a' ? { ...path, x0: u, y0: v } : { ...path, x1: u, y1: v })
-    } else if (path.type === 'ellipse') {
-      if (id === 'c') setPath({ ...path, cx: u, cy: v })
-      else if (id === 'rx') setPath({ ...path, rx: Math.abs(u - path.cx) })
-      else setPath({ ...path, ry: Math.abs(v - path.cy) })
+    if (p.type === 'line') {
+      setPath(id === 'a' ? { ...p, x0: u, y0: v } : { ...p, x1: u, y1: v })
+    } else if (p.type === 'ellipse') {
+      if (id === 'c') return setPath({ ...p, cx: u, cy: v })
+      const r = (p.rot ?? 0) * DEG
+      const du = u - p.cx
+      const dv = v - p.cy
+      if (id === 'rx') setPath({ ...p, rx: Math.abs(du * Math.cos(r) + dv * Math.sin(r)) })
+      else if (id === 'ry') setPath({ ...p, ry: Math.abs(-du * Math.sin(r) + dv * Math.cos(r)) })
+      else if (id === 'rot') setPath({ ...p, rot: Math.atan2(dv, du) / DEG })
+    } else if (p.type === 'spiral') {
+      if (id === 'c') setPath({ ...p, cx: u, cy: v })
+      else if (id === 'outer') setPath({ ...p, r1: Math.hypot(u - p.cx, v - p.cy) })
+    } else if (p.type === 'polygon') {
+      if (id === 'c') setPath({ ...p, cx: u, cy: v })
+      else if (id === 'vtx') {
+        const du = u - p.cx
+        const dv = v - p.cy
+        // Vertex 0 sits at (rot − 90°); recover both size and angle from the drag.
+        setPath({ ...p, size: Math.hypot(du, dv), rot: Math.atan2(dv, du) / DEG + 90 })
+      }
     } else {
       // sine: bias node sets vertical (midV) and horizontal (phase);
       // amplitude is signed so dragging past the midline flips the wave.
-      if (id === 'mid') setPath({ ...path, midV: v, phase: clamp01(u) })
-      else setPath({ ...path, amp: clamp(path.midV - v, -1, 1) })
+      if (id === 'mid') setPath({ ...p, midV: v, phase: clamp01(u) })
+      else setPath({ ...p, amp: clamp(p.midV - v, -1, 1) })
     }
   }
 
-  const handles: Handle[] =
-    path.type === 'line'
-      ? [{ id: 'a', u: path.x0, v: path.y0, start: true }, { id: 'b', u: path.x1, v: path.y1 }]
-      : path.type === 'ellipse'
-        ? [
-            { id: 'c', u: path.cx, v: path.cy },
-            { id: 'rx', u: clamp01(path.cx + path.rx), v: path.cy },
-            { id: 'ry', u: path.cx, v: clamp01(path.cy + path.ry) },
-          ]
-        : [{ id: 'mid', u: clamp01(path.phase), v: path.midV }, { id: 'amp', u: 0.25, v: clamp01(path.midV - path.amp) }]
+  const handles: Handle[] = (() => {
+    if (path.type === 'line') {
+      return [{ id: 'a', u: path.x0, v: path.y0, start: true }, { id: 'b', u: path.x1, v: path.y1 }]
+    }
+    if (path.type === 'ellipse') {
+      const r = (path.rot ?? 0) * DEG
+      const at = (mx: number, my: number): [number, number] => [
+        path.cx + mx * Math.cos(r) - my * Math.sin(r),
+        path.cy + mx * Math.sin(r) + my * Math.cos(r),
+      ]
+      const rx = at(path.rx, 0)
+      const ry = at(0, path.ry)
+      const rot = at(path.rx + 0.12, 0)
+      return [
+        { id: 'c', u: path.cx, v: path.cy },
+        { id: 'rx', u: clamp01(rx[0]), v: clamp01(rx[1]) },
+        { id: 'ry', u: clamp01(ry[0]), v: clamp01(ry[1]) },
+        { id: 'rot', u: clamp01(rot[0]), v: clamp01(rot[1]) },
+      ]
+    }
+    if (path.type === 'spiral') {
+      const [ox, oy] = pathPoint(path, 1)
+      return [
+        { id: 'c', u: path.cx, v: path.cy },
+        { id: 'outer', u: clamp01(ox), v: clamp01(oy) },
+      ]
+    }
+    if (path.type === 'polygon') {
+      const a = (path.rot ?? 0) * DEG - Math.PI / 2
+      return [
+        { id: 'c', u: path.cx, v: path.cy },
+        { id: 'vtx', u: clamp01(path.cx + path.size * Math.cos(a)), v: clamp01(path.cy + path.size * Math.sin(a)) },
+      ]
+    }
+    return [{ id: 'mid', u: clamp01(path.phase), v: path.midV }, { id: 'amp', u: 0.25, v: clamp01(path.midV - path.amp) }]
+  })()
 
   const pts = Array.from({ length: 65 }, (_, i) => {
     const [u, v] = pathPoint(path, i / 64)

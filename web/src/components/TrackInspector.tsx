@@ -46,6 +46,8 @@ export function TrackInspector() {
           <option value="line">Line</option>
           <option value="sine">Sine</option>
           <option value="ellipse">Ellipse</option>
+          <option value="spiral">Spiral</option>
+          <option value="polygon">Polygon</option>
         </select>
         <button className="btn" title="Reset this path to its defaults" onClick={() => setPath(pathOfType(track.path.type))}>
           Reset
@@ -74,6 +76,26 @@ export function TrackInspector() {
           <Num label="Center Y" value={track.path.cy} onChange={(cy) => setPath({ ...track.path, cy } as PathDef)} />
           <Num label="Radius X" value={track.path.rx} onChange={(rx) => setPath({ ...track.path, rx } as PathDef)} />
           <Num label="Radius Y" value={track.path.ry} onChange={(ry) => setPath({ ...track.path, ry } as PathDef)} />
+          <Num label="Angle°" value={track.path.rot ?? 0} min={-360} max={360} step={5} onChange={(rot) => setPath({ ...track.path, rot } as PathDef)} />
+        </>
+      )}
+      {track.path.type === 'spiral' && (
+        <>
+          <Num label="Center X" value={track.path.cx} onChange={(cx) => setPath({ ...track.path, cx } as PathDef)} />
+          <Num label="Center Y" value={track.path.cy} onChange={(cy) => setPath({ ...track.path, cy } as PathDef)} />
+          <Num label="Inner radius" value={track.path.r0} onChange={(r0) => setPath({ ...track.path, r0 } as PathDef)} />
+          <Num label="Outer radius" value={track.path.r1} onChange={(r1) => setPath({ ...track.path, r1 } as PathDef)} />
+          <Num label="Turns" value={track.path.turns} min={0.25} max={12} step={0.25} onChange={(turns) => setPath({ ...track.path, turns } as PathDef)} />
+          <Num label="Angle°" value={track.path.rot ?? 0} min={-360} max={360} step={5} onChange={(rot) => setPath({ ...track.path, rot } as PathDef)} />
+        </>
+      )}
+      {track.path.type === 'polygon' && (
+        <>
+          <Num label="Center X" value={track.path.cx} onChange={(cx) => setPath({ ...track.path, cx } as PathDef)} />
+          <Num label="Center Y" value={track.path.cy} onChange={(cy) => setPath({ ...track.path, cy } as PathDef)} />
+          <Num label="Size" value={track.path.size} onChange={(size) => setPath({ ...track.path, size } as PathDef)} />
+          <Num label="Sides" value={track.path.sides} min={3} max={12} step={1} onChange={(sides) => setPath({ ...track.path, sides: Math.round(sides) } as PathDef)} />
+          <Num label="Angle°" value={track.path.rot ?? 0} min={-360} max={360} step={5} onChange={(rot) => setPath({ ...track.path, rot } as PathDef)} />
         </>
       )}
 
@@ -125,7 +147,9 @@ function pathOfType(type: PathDef['type']): PathDef {
   switch (type) {
     case 'line': return { type, x0: 0, y0: 0.5, x1: 1, y1: 0.5 }
     case 'sine': return { type, midV: 0.5, amp: 0.4, freq: 1, phase: 0 }
-    case 'ellipse': return { type, cx: 0.5, cy: 0.5, rx: 0.4, ry: 0.4 }
+    case 'ellipse': return { type, cx: 0.5, cy: 0.5, rx: 0.4, ry: 0.4, rot: 0 }
+    case 'spiral': return { type, cx: 0.5, cy: 0.5, r0: 0.05, r1: 0.45, turns: 3, rot: 0 }
+    case 'polygon': return { type, cx: 0.5, cy: 0.5, size: 0.4, sides: 3, rot: 0 }
   }
 }
 
