@@ -667,6 +667,12 @@
   gap: 8px;
 }
 
+/* Fixed label column so every control (sliders especially) lines up and the
+   sliders are all the same length. */
+.grad-editor .field-row > span {
+  flex: 0 0 80px;
+}
+
 .grad-preview {
   width: 100%;
   height: auto;
@@ -1301,10 +1307,11 @@ input[type='color'] {
   width: 130px;
 }
 
-.track-insp .sep {
+.sep {
   border: none;
   border-top: 1px solid var(--border);
   margin: 4px 0;
+  width: 100%;
 }
 
 /* Lane grouping + speed automation lane */
