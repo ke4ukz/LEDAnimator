@@ -56,6 +56,20 @@ struct DeviceInfoView: View {
                 LabeledContent("Free space", value: display(session.freeBytes.map(formatBytes)))
             }
 
+            Section("Power") {
+                HStack(spacing: 12) {
+                    Image(systemName: powerIcon.name)
+                        .foregroundStyle(powerIcon.color)
+                        .imageScale(.large)
+                        .frame(width: 24)
+                    Text(powerText)
+                    Spacer()
+                    if let volts = voltageText {
+                        Text(volts).foregroundStyle(.secondary)
+                    }
+                }
+            }
+
             Section("Network") {
                 LabeledContent("Hostname", value: display(session.hostname))
                 LabeledContent("Wi-Fi MAC", value: display(session.wifiMac))
@@ -71,6 +85,47 @@ struct DeviceInfoView: View {
             Text("Up to 26 characters. Saved on the device and used as its Bluetooth name.")
         }
         .onAppear { session.requestMoreInfo() }
+        .task {
+            // Power drifts slowly; re-poll while the panel is open (the initial
+            // value arrives in the MOREINFO batch).
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(15))
+                if Task.isCancelled { break }
+                session.requestPower()
+            }
+        }
+    }
+
+    /// Plug icon when on USB; a battery whose fill approximates the 1S LiPo
+    /// charge (rough — VSYS sags under LED load), amber/red when it's getting low.
+    private var powerIcon: (name: String, color: Color) {
+        switch session.powerSource {
+        case "usb": return ("powerplug.fill", .green)
+        case "batt":
+            guard let mv = session.vsysMillivolts else { return ("battery.100", .primary) }
+            switch mv {
+            case 3900...: return ("battery.100", .primary)
+            case 3650..<3900: return ("battery.50", .primary)
+            case 3450..<3650: return ("battery.25", .orange)
+            default: return ("battery.0", .red)
+            }
+        default: return ("bolt.slash", .secondary)
+        }
+    }
+
+    private var powerText: String {
+        switch session.powerSource {
+        case "usb": return "Plugged in"
+        case "batt": return "On battery"
+        case nil: return session.moreInfoLoaded ? "N/A" : "Loading…"
+        default: return "N/A"
+        }
+    }
+
+    /// Only shown on battery — on USB, VSYS is the ~4.7 V USB rail, not the pack.
+    private var voltageText: String? {
+        guard session.powerSource == "batt", let mv = session.vsysMillivolts else { return nil }
+        return String(format: "%.2f V", Double(mv) / 1000)
     }
 
     /// A value if we have one; otherwise "Loading" until the MOREINFO batch

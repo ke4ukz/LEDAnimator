@@ -34,10 +34,11 @@ export function rp2040MainPy(build = 'dev'): string {
 #   RX (write)  6E400002-B5A3-F393-E0A9-E50E24DCCA9E
 #   TX (notify) 6E400003-B5A3-F393-E0A9-E50E24DCCA9E
 # Send one text command per write to RX; the reply arrives as a TX notify.
-#   PING | INFO | MOREINFO | LIST | FREE | SELECT <name> | BRIGHT <0-100> |
+#   PING | INFO | MOREINFO | LIST | FREE | POWER | SELECT <name> | BRIGHT <0-100> |
 #   SPEED <10-400> | SOLID <r> <g> <b> | OFF | PLAY | DELETE <name> |
 #   NAME [new name]  (no arg reports it; setting it persists across reboots)
-# INFO is lean control state; MOREINFO carries version/leds/free/MACs/platform.
+# INFO is lean control state; MOREINFO carries version/leds/free/MACs/platform/power.
+# POWER -> "POWER usb|batt|unknown <mv>" (VSYS millivolts; 0 = unavailable).
 # Once on Wi-Fi, the SAME text commands are accepted over a plain TCP socket on
 # port 4550 (newline-terminated), e.g.  nc <device-ip> 4550  then type PING.
 # Wi-Fi provisioning (Pico W): WIFISCAN (streams nearby SSIDs), WIFISSID <ssid>,
@@ -45,7 +46,7 @@ export function rp2040MainPy(build = 'dev'): string {
 #   on boot), WIFISTATUS, WIFIFORGET. Status arrives async as "WIFI <state> <ip>".
 
 import array, time, os
-from machine import Pin
+from machine import Pin, ADC
 import rp2
 
 
@@ -896,6 +897,42 @@ def _tick():
     _wifi_step()
 
 
+# --- Power sensing (Pico W) --------------------------------------------------
+# USB present: WL_GPIO2 on the CYW43 (high = USB power). Battery/VSYS: ADC3 on
+# GPIO29 reads VSYS/3. GPIO29 is shared with the wireless SPI clock, so a read
+# can glitch while the radio is busy -> median of a few samples, tolerate errors.
+# Only sampled on request (POWER / MOREINFO), never in the LED hot loop.
+_vbus = None
+_vsys = None   # ADC once created, or False if this board has no VSYS ADC
+
+
+def _power_status():
+    global _vbus, _vsys
+    try:
+        if _vbus is None:
+            _vbus = Pin("WL_GPIO2", Pin.IN)
+        plugged = bool(_vbus.value())
+    except Exception:
+        plugged = None   # no CYW43 (not a Pico W) -> can't tell
+    mv = 0
+    if _vsys is None:
+        try:
+            _vsys = ADC(29)
+        except Exception:
+            try:
+                _vsys = ADC(3)
+            except Exception:
+                _vsys = False
+    if _vsys:
+        try:
+            s = sorted(_vsys.read_u16() for _ in range(5))
+            mv = int(s[2] * 3.3 * 3 / 65535 * 1000)   # median * VREF * divider
+        except Exception:
+            mv = 0
+    src = "unknown" if plugged is None else ("usb" if plugged else "batt")
+    return "POWER %s %d" % (src, mv)   # mv == 0 -> voltage unavailable
+
+
 def dispatch(line, origin=None):
     # Transport-agnostic command handler. Returns a short direct reply string
     # (sent by the caller to the origin only). Commands that STREAM their reply
@@ -938,12 +975,16 @@ def dispatch(line, origin=None):
                 fields.append("BTMAC " + bm)
             fields.append("HOSTNAME " + _wifi_hostname())
             fields.append("PLATFORM " + machine)
+            fields.append(_power_status())   # "POWER usb|batt|unknown <mv>"
             # A field with no hardware is OMITTED (not sent as a placeholder); the
             # app shows N/A for anything still missing once ENDINFO arrives.
             fields.append("ENDINFO")
             S.out_queue = fields
             S.out_dest = origin
             return None
+        if c == "POWER":
+            # Live power status, polled by the app while the Info panel is open.
+            return _power_status()
         if c == "VERSION":
             return "VERSION " + FW_VERSION
         if c == "PLATFORM":
@@ -1267,7 +1308,8 @@ Bluetooth control (Pico W only):
   Commands:
     PING                 -> OK
     INFO                 -> mode, brightness%, speed%, solid r g b, filename (last; may contain spaces)
-    MOREINFO             -> streams discrete labeled replies "KEY <value>" (VERSION, LEDS, FREE, WIFIMAC, BTMAC, HOSTNAME, PLATFORM), then ENDINFO. Fields with no hardware are omitted. All values are printable ASCII.
+    MOREINFO             -> streams discrete labeled replies "KEY <value>" (VERSION, LEDS, FREE, WIFIMAC, BTMAC, HOSTNAME, PLATFORM, POWER), then ENDINFO. Fields with no hardware are omitted. All values are printable ASCII.
+    POWER                -> "POWER usb|batt|unknown <mv>" (VSYS millivolts; 0 = unavailable)
     VERSION              -> firmware version
     PLATFORM             -> board/runtime (os.uname().machine)
     LIST                 -> streams "LISTLEN <n>", one "FILE <name>" each, then ENDLIST
