@@ -555,6 +555,8 @@
   justify-content: center;
   pointer-events: none; /* clicks pass through to the canvas… */
   font-size: 12px;
+  user-select: none; /* fast label clicks shouldn't select text */
+  -webkit-user-select: none;
 }
 
 .vt-group {
