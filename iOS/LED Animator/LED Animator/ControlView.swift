@@ -146,6 +146,23 @@ struct ControlView: View {
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
+                        .swipeActions(edge: .trailing) {
+                            if session.currentPattern != name {   // can't delete the active one
+                                Button(role: .destructive) {
+                                    session.delete(name)
+                                } label: {
+                                    Label("Delete", systemImage: "trash")
+                                }
+                            }
+                        }
+                        .contextMenu {
+                            Button(role: .destructive) {
+                                session.delete(name)
+                            } label: {
+                                Label("Delete", systemImage: "trash")
+                            }
+                            .disabled(session.currentPattern == name)
+                        }
                     }
                 }
             }

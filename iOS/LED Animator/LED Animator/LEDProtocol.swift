@@ -26,6 +26,7 @@ enum LEDCommand {
     case moreInfo              // static/rarely-used details for the Info tab
     case list
     case select(String)
+    case delete(String)        // remove a pattern file (not the active one)
     case bright(Int)            // 0–100
     case speed(Int)            // 10–400 (percent; 100 = as authored)
     case solid(Int, Int, Int)  // r, g, b — each 0–255
@@ -49,6 +50,7 @@ enum LEDCommand {
         case .moreInfo: return "MOREINFO"
         case .list: return "LIST"
         case .select(let name): return "SELECT \(name)"
+        case .delete(let name): return "DELETE \(name)"
         case .bright(let value): return "BRIGHT \(value)"
         case .speed(let value): return "SPEED \(value)"
         case .solid(let r, let g, let b): return "SOLID \(r) \(g) \(b)"

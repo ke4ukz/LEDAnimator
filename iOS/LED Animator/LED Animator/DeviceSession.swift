@@ -85,6 +85,10 @@ final class DeviceSession {
 
     func select(_ name: String) { send(.select(name)) }
 
+    /// Delete a pattern file. The device refuses to delete the active one
+    /// ("ERR in-use"); the app hides that option, but the guard is defense in depth.
+    func delete(_ name: String) { send(.delete(name)) }
+
     /// Fetch the Info-tab details (version, LEDs, free space, MACs, hostname,
     /// platform). They stream back as discrete labeled replies ending in ENDINFO.
     /// Until then fields read "Loading"; after, a missing field reads "N/A".
@@ -295,6 +299,9 @@ final class DeviceSession {
             mode = "solid"
         } else if reply.hasPrefix("OK NAME ") {
             connectedName = String(reply.dropFirst("OK NAME ".count))
+        } else if reply.hasPrefix("OK DELETE ") {
+            let name = String(reply.dropFirst("OK DELETE ".count))
+            patterns.removeAll { $0 == name }
         } else if reply.hasPrefix("WIFISCANLEN ") {
             incomingNetworks = []
             armWifiScanTimeout()
