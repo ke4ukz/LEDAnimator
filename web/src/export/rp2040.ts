@@ -37,6 +37,7 @@ export function rp2040MainPy(build = 'dev'): string {
 #   PING | INFO | MOREINFO | LIST | FREE | POWER | SELECT <name> | BRIGHT <0-100> |
 #   SPEED <10-400> | SOLID <r> <g> <b> | OFF | PLAY | DELETE <name> |
 #   NAME [new name]  (no arg reports it; setting it persists across reboots)
+#   PIN [n]  (no arg reports the data GP pin; "PIN <n>" re-points it live + persists)
 # INFO is lean control state; MOREINFO carries version/leds/free/MACs/platform/power.
 # POWER -> "POWER usb|batt|unknown <mv>" (VSYS millivolts; 0 = unavailable).
 # Once on Wi-Fi, the SAME text commands are accepted over a plain TCP socket on
@@ -166,6 +167,32 @@ def _show_solid(rgb, n):
     for i in range(n):
         _buf[i] = v
     sm.put(_buf, 8)
+
+
+def _set_pin(arg):
+    # Re-point the WS2812 output at a new GP pin at runtime and persist it, so a
+    # single prebuilt firmware works for any wiring (no per-device UF2 needed).
+    global DATA_PIN, sm
+    try:
+        n = int(arg)
+    except (ValueError, TypeError):
+        return "ERR pin"
+    if n < 0 or n > 29:
+        return "ERR pin"
+    try:
+        sm.active(0)
+        sm = rp2.StateMachine(0, ws2812, freq=8_000_000, sideset_base=Pin(n))
+        sm.active(1)
+    except Exception:
+        return "ERR pin"
+    DATA_PIN = n
+    S.reload = True   # re-render the current frame on the new pin
+    try:
+        with open("datapin.txt", "w") as fh:
+            fh.write(str(DATA_PIN))
+    except Exception:
+        pass
+    return "OK PIN %d" % DATA_PIN
 
 
 def list_patterns():
@@ -999,6 +1026,7 @@ def dispatch(line, origin=None):
                 fields.append("BTMAC " + bm)
             fields.append("HOSTNAME " + _wifi_hostname())
             fields.append("PLATFORM " + machine)
+            fields.append("PIN %d" % DATA_PIN)
             fields.append(_power_status())   # "POWER usb|batt|unknown <mv>"
             # A field with no hardware is OMITTED (not sent as a placeholder); the
             # app shows N/A for anything still missing once ENDINFO arrives.
@@ -1006,6 +1034,12 @@ def dispatch(line, origin=None):
             S.out_queue = fields
             S.out_dest = origin
             return None
+        if c == "PIN":
+            # No arg reports the current data pin; "PIN <n>" re-points the strip
+            # output live and persists it (so one prebuilt firmware fits any wiring).
+            if len(p) >= 2:
+                return _set_pin(p[1])
+            return "PIN %d" % DATA_PIN
         if c == "POWER":
             # Live power status, polled by the app while the Info panel is open.
             return _power_status()
@@ -1334,6 +1368,7 @@ Bluetooth control (Pico W only):
     INFO                 -> mode, brightness%, speed%, solid r g b, filename (last; may contain spaces)
     MOREINFO             -> streams discrete labeled replies "KEY <value>" (VERSION, LEDS, FREE, WIFIMAC, BTMAC, HOSTNAME, PLATFORM, POWER), then ENDINFO. Fields with no hardware are omitted. All values are printable ASCII.
     POWER                -> "POWER usb|batt|unknown <mv>" (VSYS millivolts; 0 = unavailable)
+    PIN [n]              -> no arg reports "PIN <n>"; "PIN <n>" re-points the strip output live + persists (OK PIN <n> / ERR pin)
     VERSION              -> firmware version
     PLATFORM             -> board/runtime (os.uname().machine)
     LIST                 -> streams "LISTLEN <n>", one "FILE <name>" each, then ENDLIST
