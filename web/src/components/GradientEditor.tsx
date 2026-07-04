@@ -8,6 +8,7 @@ import {
   type RadialMetric,
   makeStop,
 } from '../gradient'
+import type { PathDef } from '../project'
 import { PRESETS, instantiateGradient } from '../presets'
 import { GradientPreview } from './GradientPreview'
 import { PathOverlay } from './PathOverlay'
@@ -51,6 +52,7 @@ export function GradientEditor() {
   const selectedTrack = useStore((s) => s.selectedTrack)
   const setGradient = useStore((s) => s.updateGradient)
   const updatePost = useStore((s) => s.updatePost)
+  const updateTrack = useStore((s) => s.updateTrack)
 
   const track = project.tracks.find((t) => t.id === selectedTrack)
   const source = project.sources.find((s) => s.id === track?.sourceId)
@@ -59,6 +61,7 @@ export function GradientEditor() {
   if (!track || !gradient) return <p className="placeholder">Select a track to edit its source.</p>
 
   const post = source?.post ?? {}
+  const setPath = (p: PathDef) => updateTrack(track.id, { path: p })
   // Spread-and-cast patch: the discriminated union keeps the active variant.
   const patch = (p: Partial<Gradient>) => setGradient({ ...gradient, ...p } as Gradient)
 
@@ -69,6 +72,65 @@ export function GradientEditor() {
         <PathOverlay track={track} />
       </div>
       <span className="muted preview-hint">Drag the handles to edit this track's sampling path.</span>
+
+      <Row label="Path">
+        <select value={track.path.type} onChange={(e) => setPath(pathOfType(e.target.value as PathDef['type']))}>
+          <option value="line">Line</option>
+          <option value="sine">Sine</option>
+          <option value="ellipse">Ellipse</option>
+          <option value="spiral">Spiral</option>
+          <option value="polygon">Polygon</option>
+        </select>
+        <button className="btn" title="Reset this path to its defaults" onClick={() => setPath(pathOfType(track.path.type))}>
+          Reset
+        </button>
+      </Row>
+      {track.path.type === 'line' && (
+        <>
+          <Num label="From X" value={track.path.x0} onChange={(x0) => setPath({ ...track.path, x0 } as PathDef)} />
+          <Num label="From Y" value={track.path.y0} onChange={(y0) => setPath({ ...track.path, y0 } as PathDef)} />
+          <Num label="To X" value={track.path.x1} onChange={(x1) => setPath({ ...track.path, x1 } as PathDef)} />
+          <Num label="To Y" value={track.path.y1} onChange={(y1) => setPath({ ...track.path, y1 } as PathDef)} />
+        </>
+      )}
+      {track.path.type === 'sine' && (
+        <>
+          <Num label="Mid Y" value={track.path.midV} onChange={(midV) => setPath({ ...track.path, midV } as PathDef)} />
+          <Num label="Amplitude" value={track.path.amp} min={-1} max={1} onChange={(amp) => setPath({ ...track.path, amp } as PathDef)} />
+          <Num label="Frequency" value={track.path.freq} min={0} max={8} step={0.25} onChange={(freq) => setPath({ ...track.path, freq } as PathDef)} />
+          <Num label="Phase" value={track.path.phase} onChange={(phase) => setPath({ ...track.path, phase } as PathDef)} />
+        </>
+      )}
+      {track.path.type === 'ellipse' && (
+        <>
+          <Num label="Center X" value={track.path.cx} onChange={(cx) => setPath({ ...track.path, cx } as PathDef)} />
+          <Num label="Center Y" value={track.path.cy} onChange={(cy) => setPath({ ...track.path, cy } as PathDef)} />
+          <Num label="Radius X" value={track.path.rx} onChange={(rx) => setPath({ ...track.path, rx } as PathDef)} />
+          <Num label="Radius Y" value={track.path.ry} onChange={(ry) => setPath({ ...track.path, ry } as PathDef)} />
+          <Num label="Angle°" value={track.path.rot ?? 0} min={-360} max={360} step={5} onChange={(rot) => setPath({ ...track.path, rot } as PathDef)} />
+        </>
+      )}
+      {track.path.type === 'spiral' && (
+        <>
+          <Num label="Center X" value={track.path.cx} onChange={(cx) => setPath({ ...track.path, cx } as PathDef)} />
+          <Num label="Center Y" value={track.path.cy} onChange={(cy) => setPath({ ...track.path, cy } as PathDef)} />
+          <Num label="Inner radius" value={track.path.r0} onChange={(r0) => setPath({ ...track.path, r0 } as PathDef)} />
+          <Num label="Outer radius" value={track.path.r1} onChange={(r1) => setPath({ ...track.path, r1 } as PathDef)} />
+          <Num label="Turns" value={track.path.turns} min={0.25} max={12} step={0.25} onChange={(turns) => setPath({ ...track.path, turns } as PathDef)} />
+          <Num label="Angle°" value={track.path.rot ?? 0} min={-360} max={360} step={5} onChange={(rot) => setPath({ ...track.path, rot } as PathDef)} />
+        </>
+      )}
+      {track.path.type === 'polygon' && (
+        <>
+          <Num label="Center X" value={track.path.cx} onChange={(cx) => setPath({ ...track.path, cx } as PathDef)} />
+          <Num label="Center Y" value={track.path.cy} onChange={(cy) => setPath({ ...track.path, cy } as PathDef)} />
+          <Num label="Size" value={track.path.size} onChange={(size) => setPath({ ...track.path, size } as PathDef)} />
+          <Num label="Sides" value={track.path.sides} min={3} max={12} step={1} onChange={(sides) => setPath({ ...track.path, sides: Math.round(sides) } as PathDef)} />
+          <Num label="Angle°" value={track.path.rot ?? 0} min={-360} max={360} step={5} onChange={(rot) => setPath({ ...track.path, rot } as PathDef)} />
+        </>
+      )}
+
+      <hr className="sep" />
 
       <Row label="Preset">
         <select
@@ -218,12 +280,26 @@ function Row({ label, children }: { label: string; children: ReactNode }) {
   )
 }
 
-function Num({ label, value, onChange }: { label: string; value: number; onChange: (v: number) => void }) {
+function Num({
+  label, value, onChange, min = 0, max = 1, step = 0.01,
+}: {
+  label: string; value: number; onChange: (v: number) => void; min?: number; max?: number; step?: number
+}) {
   return (
     <Row label={label}>
-      <input type="number" min={0} max={1} step={0.01} value={Number(value.toFixed(3))} onChange={(e) => onChange(Number(e.target.value))} />
+      <input type="number" min={min} max={max} step={step} value={Number(value.toFixed(3))} onChange={(e) => onChange(Number(e.target.value))} />
     </Row>
   )
+}
+
+function pathOfType(type: PathDef['type']): PathDef {
+  switch (type) {
+    case 'line': return { type, x0: 0, y0: 0.5, x1: 1, y1: 0.5 }
+    case 'sine': return { type, midV: 0.5, amp: 0.4, freq: 1, phase: 0 }
+    case 'ellipse': return { type, cx: 0.5, cy: 0.5, rx: 0.4, ry: 0.4, rot: 0 }
+    case 'spiral': return { type, cx: 0.5, cy: 0.5, r0: 0.05, r1: 0.45, turns: 3, rot: 0 }
+    case 'polygon': return { type, cx: 0.5, cy: 0.5, size: 0.4, sides: 3, rot: 0 }
+  }
 }
 
 function Angle({ label, rad, onChange }: { label: string; rad: number; onChange: (rad: number) => void }) {
