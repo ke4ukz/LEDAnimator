@@ -66,6 +66,7 @@ struct HomeView: View {
 
     @State private var selection: HomeSelection?
     @State private var showEditor = false          // full-screen editor takeover
+    @State private var editingTitle = "Untitled Animation"
     @State private var animationsExpanded = true
     @State private var devicesExpanded = true
     @State private var animations = sampleAnimations
@@ -77,13 +78,14 @@ struct HomeView: View {
 
     var body: some View {
         ZStack {
-            home
             if showEditor {
-                // Full-window takeover — the editor is a Photoshop-like surface,
-                // not a sheet. Opaque so home is fully covered.
-                EditorPlaceholderView(onClose: { showEditor = false })
+                // The editor REPLACES home (not an overlay) so the split view and
+                // its window toolbar — the sidebar toggle, the Wi-Fi/Info buttons —
+                // are gone entirely. A true full-window authoring surface.
+                EditorView(title: editingTitle, onClose: { showEditor = false })
                     .transition(.move(edge: .bottom))
-                    .zIndex(1)
+            } else {
+                home
             }
         }
         .animation(.snappy(duration: 0.28), value: showEditor)
@@ -131,7 +133,7 @@ struct HomeView: View {
                 .onDelete { deleteAnimations(at: $0) }   // swipe-to-delete
             } header: {
                 sectionHeader("Animations") {
-                    Button { showEditor = true } label: { Image(systemName: "plus") }
+                    Button { editingTitle = "Untitled Animation"; showEditor = true } label: { Image(systemName: "plus") }
                         .buttonStyle(.borderless)
                         .help("New animation")
                 }
@@ -193,7 +195,8 @@ struct HomeView: View {
         switch selection {
         case .animation(let id):
             if let a = animations.first(where: { $0.id == id }) {
-                AnimationDetailView(animation: a, devices: devices, onEdit: { showEditor = true })
+                AnimationDetailView(animation: a, devices: devices,
+                                    onEdit: { editingTitle = a.name; showEditor = true })
             }
         case .device:
             if let session = activeSession {
@@ -358,43 +361,6 @@ private struct AnimationDetailView: View {
             Text(value).font(.title3.bold().monospacedDigit())
             Text(label).font(.caption).foregroundStyle(.secondary)
         }
-    }
-}
-
-// MARK: - Editor placeholder ("coming soon", full-window)
-
-private struct EditorPlaceholderView: View {
-    let onClose: () -> Void
-    var body: some View {
-        VStack(spacing: 0) {
-            HStack {
-                Button { onClose() } label: {
-                    Label("Close", systemImage: "chevron.backward")
-                }
-                Spacer()
-                Text("New Animation").font(.headline)
-                Spacer()
-                // Invisible spacer to keep the title centered.
-                Label("Close", systemImage: "chevron.backward").opacity(0)
-            }
-            .padding()
-            Divider()
-            Spacer()
-            VStack(spacing: 16) {
-                Image(systemName: "paintbrush.pointed.fill")
-                    .font(.system(size: 56))
-                    .foregroundStyle(.tint)
-                Text("Editor — Coming Soon").font(.title.bold())
-                Text("The native LED animation editor will take over the whole screen here — a 3D viewport, a multi-track timeline, and gradient tools. For now, design in the web app and send the .leda file to your device.")
-                    .multilineTextAlignment(.center)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: 440)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            Spacer()
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(.background)
     }
 }
 
