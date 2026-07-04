@@ -15,16 +15,18 @@ import SceneKit
 
 struct EditorLED: Identifiable {
     let id: Int
-    let position: SIMD3<Float>
-    let r: Double
-    let g: Double
-    let b: Double
+    var position: SIMD3<Float>
+    var r: Double
+    var g: Double
+    var b: Double
+    var trackIndex: Int = 0
     var cgColor: CGColor { CGColor(srgbRed: r, green: g, blue: b, alpha: 1) }
+    var color: Color { Color(red: r, green: g, blue: b) }
 }
 
 /// A rainbow helix — visually unambiguously 3D (a common real layout: LEDs
 /// spiralled around a cylinder). Placeholder until real layouts exist.
-func helixLayout(count: Int) -> [EditorLED] {
+func helixLayout(count: Int, trackCount: Int = 1) -> [EditorLED] {
     (0..<count).map { i in
         let t = Float(i) / Float(max(1, count - 1))
         let angle = t * .pi * 6          // three turns
@@ -33,7 +35,8 @@ func helixLayout(count: Int) -> [EditorLED] {
         return EditorLED(
             id: i,
             position: SIMD3(cos(angle) * radius, (t - 0.5) * 3.2, sin(angle) * radius),
-            r: r, g: g, b: b
+            r: r, g: g, b: b,
+            trackIndex: min(trackCount - 1, i * trackCount / count)
         )
     }
 }
@@ -101,35 +104,90 @@ struct EditorView: View {
     let title: String
     let onClose: () -> Void
 
+    @State private var model = EditorModel()
     private let scene: SCNScene
+    @State private var showLeft = true
+    @State private var showRight = true
+
+    #if os(iOS)
+    @Environment(\.horizontalSizeClass) private var hSize
+    private var isCompact: Bool { hSize == .compact }
+    #else
+    private var isCompact: Bool { false }
+    #endif
 
     init(title: String, onClose: @escaping () -> Void) {
         self.title = title
         self.onClose = onClose
-        self.scene = buildLEDScene(helixLayout(count: 64))
+        let m = EditorModel()
+        _model = State(initialValue: m)
+        self.scene = buildLEDScene(m.leds)
     }
 
     var body: some View {
         VStack(spacing: 0) {
             topBar
             Divider()
-            SceneView(scene: scene, options: [.allowsCameraControl])
-                .background(Color.black)
-            Divider()
-            timelineStrip
+            HStack(spacing: 0) {
+                // Regular width: panels are pinned columns beside the viewport.
+                if showLeft && !isCompact {
+                    LayersPanel(model: model).frame(width: 250)
+                    Divider()
+                }
+                VStack(spacing: 0) {
+                    SceneView(scene: scene, options: [.allowsCameraControl])
+                        .background(Color.black)
+                    Divider()
+                    timelineStrip
+                }
+                if showRight && !isCompact {
+                    Divider()
+                    InspectorPanel(model: model).frame(width: 290)
+                }
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(.background)
+        // Compact width (iPhone): panels are drawers presented as sheets.
+        .sheet(isPresented: leftSheet) {
+            panelSheet("Layers") { LayersPanel(model: model) }
+        }
+        .sheet(isPresented: rightSheet) {
+            panelSheet("Inspector") { InspectorPanel(model: model) }
+        }
+    }
+
+    // Sheet bindings only fire in compact width; the toggles below drive them.
+    private var leftSheet: Binding<Bool> {
+        Binding(get: { showLeft && isCompact }, set: { showLeft = $0 })
+    }
+    private var rightSheet: Binding<Bool> {
+        Binding(get: { showRight && isCompact }, set: { showRight = $0 })
+    }
+
+    private func panelSheet<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
+        NavigationStack {
+            content()
+                .navigationTitle(title)
+                .inlineNavTitle()
+        }
+        .presentationDetents([.medium, .large])
     }
 
     private var topBar: some View {
-        HStack {
+        HStack(spacing: 12) {
             Button { onClose() } label: {
                 Label("Close", systemImage: "chevron.backward")
             }
+            Button { showLeft.toggle() } label: {
+                Image(systemName: "sidebar.left")
+            }
+            .help("Toggle layers")
+
             Spacer()
             Text(title).font(.headline).lineLimit(1)
             Spacer()
+
             // Placeholder tool modes (Select / Camera / Paint) — wired up later.
             Picker("Tool", selection: .constant(1)) {
                 Image(systemName: "cursorarrow").tag(0)
@@ -140,6 +198,11 @@ struct EditorView: View {
             .labelsHidden()
             .frame(width: 150)
             .disabled(true)
+
+            Button { showRight.toggle() } label: {
+                Image(systemName: "sidebar.right")
+            }
+            .help("Toggle inspector")
         }
         .padding()
     }
