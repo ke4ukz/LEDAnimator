@@ -146,6 +146,9 @@ struct ControlView: View {
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
+                        #if os(macOS)
+                        // File management (delete/upload) lives on the Mac; the
+                        // phone stays a control-only companion.
                         .swipeActions(edge: .trailing) {
                             if session.currentPattern != name {   // can't delete the active one
                                 Button(role: .destructive) {
@@ -163,6 +166,7 @@ struct ControlView: View {
                             }
                             .disabled(session.currentPattern == name)
                         }
+                        #endif
                     }
                 }
             }
