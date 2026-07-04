@@ -13,6 +13,14 @@ export interface LedPosition {
   x: number
   y: number
   z: number
+  /** Blackout: stays in the chain and in the `order` sequence (so the pattern
+   *  doesn't shift), but its output is forced to black. For dead/intentionally
+   *  dark pixels. */
+  disabled?: boolean
+  /** Not part of the physical chain at all: skipped in every track's `order`
+   *  sequence AND dropped from the exported stream (reduces numLeds). For
+   *  layout/reference LEDs that aren't wired. */
+  unassigned?: boolean
 }
 
 /**

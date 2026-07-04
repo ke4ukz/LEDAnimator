@@ -1,6 +1,7 @@
-import { type ReactNode, useEffect, useRef, useState } from 'react'
+import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useStore } from '../store'
+import { compactRaster } from '../bake'
 import { DEVICES, checkLimits } from '../export/devices'
 import { encodeRaster, estimateBytes } from '../export/format'
 import { rp2040MainPy, rp2040Readme, rp2040SettingsFiles } from '../export/rp2040'
@@ -26,6 +27,9 @@ const PICO_W_FS_BYTES = 212 * 4096
 /** Export modal: pick a target device, see size/limits, download program + data. */
 export function ExportDialog({ onClose }: { onClose: () => void }) {
   const raster = useStore((s) => s.raster)
+  const leds = useStore((s) => s.leds)
+  // The physical export stream: unassigned LEDs dropped (they aren't wired).
+  const exportRaster = useMemo(() => compactRaster(raster, leds), [raster, leds])
   const getProjectFile = useStore((s) => s.getProjectFile)
   // Remember the last target device + format across sessions.
   const [deviceId, setDeviceId] = useState(() => {
@@ -49,29 +53,29 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
   const needsSettings = format === 'uf2' || format === 'zip'
 
   const device = DEVICES.find((d) => d.id === deviceId)!
-  const bytes = estimateBytes(raster)
-  const warnings = checkLimits(device, raster, bytes)
-  const duration = raster.numFrames / raster.fps
+  const bytes = estimateBytes(exportRaster)
+  const warnings = checkLimits(device, exportRaster, bytes)
+  const duration = exportRaster.numFrames / exportRaster.fps
   const hasRp2040 = device.targets.includes('rp2040-micropython')
 
   const exportProject = () => {
     const patternFile = ledaFilename(projectName)
     const zip = zipProject({
       'main.py': rp2040MainPy(FW_BUILD),
-      [patternFile]: encodeRaster(raster),
+      [patternFile]: encodeRaster(exportRaster),
       ...rp2040SettingsFiles(pin, Number(brightness.toFixed(2)), bleName, patternFile),
       'project.json': serializeProjectFile(getProjectFile()),
       'README.txt': rp2040Readme(pin, patternFile),
     })
     downloadBytes('led-animation-rp2040.zip', zip, 'application/zip')
   }
-  const exportData = () => downloadBytes(ledaFilename(projectName), encodeRaster(raster), 'application/octet-stream')
+  const exportData = () => downloadBytes(ledaFilename(projectName), encodeRaster(exportRaster), 'application/octet-stream')
   const exportUf2 = async () => {
     setBuilding(true)
     try {
       // Lazy-load: pulls in the littlefs wasm + firmware only when used.
       const { buildRp2040CombinedUf2 } = await import('../export/combinedUf2')
-      const uf2 = await buildRp2040CombinedUf2(raster, pin, Number(brightness.toFixed(2)), ledaFilename(projectName), bleName, FW_BUILD)
+      const uf2 = await buildRp2040CombinedUf2(exportRaster, pin, Number(brightness.toFixed(2)), ledaFilename(projectName), bleName, FW_BUILD)
       downloadBytes('led-animation-picow.uf2', uf2, 'application/octet-stream')
     } catch (e) {
       window.alert(`Could not build the UF2: ${(e as Error).message}`)
@@ -112,9 +116,9 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
 
         <div className="export-stats">
           <Stat label="Filename" value={ledaFilename(projectName)} wide />
-          <Stat label="LEDs" value={String(raster.numLeds)} />
-          <Stat label="Frames" value={String(raster.numFrames)} />
-          <Stat label="Rate" value={`${raster.fps} fps`} />
+          <Stat label="LEDs" value={String(exportRaster.numLeds)} />
+          <Stat label="Frames" value={String(exportRaster.numFrames)} />
+          <Stat label="Rate" value={`${exportRaster.fps} fps`} />
           <Stat label="Loop" value={`${duration.toFixed(2)} s`} />
           <Stat
             label="Data size"

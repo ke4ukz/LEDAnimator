@@ -58,6 +58,10 @@ interface AppState {
   /** Patch position fields on the given LED indices (does not re-bake — position
    *  doesn't affect baked colors). */
   updateLeds: (indices: number[], patch: Partial<LedPosition>) => void
+  /** Blackout: force these LEDs' output to black (kept in the chain + order). */
+  setLedDisabled: (indices: number[], value: boolean) => void
+  /** Exclude/include these LEDs from the physical chain + export stream. */
+  setLedUnassigned: (indices: number[], value: boolean) => void
   /** Append LEDs to the arrangement (assigned to the first track; re-bakes). */
   addLeds: (leds: LedPosition[]) => void
   /** Remove LEDs by index (compacts assignments, remaps selection; re-bakes). */
@@ -155,7 +159,7 @@ function initialState(): Init {
       projectId: saved.id,
       projectName: saved.name,
       dirty: loadSavedDirty(),
-      raster: bakeProject(project, saved.leds.length, saved.numFrames, saved.fps),
+      raster: bakeProject(project, saved.leds.length, saved.numFrames, saved.fps, saved.leds),
       selectedTrack: saved.tracks[0]?.id ?? null,
       ledScale: saved.display?.ledScale ?? 1,
       ledShape: saved.display?.ledShape ?? 'cube',
@@ -190,7 +194,7 @@ export const useStore = create<AppState>((set, get) => {
   /** Re-bake the raster from the current project, preserving frames/fps. */
   const rebake = (project: Project): Raster => {
     const { leds, raster } = get()
-    return bakeProject(project, leds.length, raster.numFrames, raster.fps)
+    return bakeProject(project, leds.length, raster.numFrames, raster.fps, leds)
   }
   const commit = (project: Project) => set({ project, raster: rebake(project) })
   // A programmatic (non-user) editable change — the subscription won't mark it dirty.
@@ -311,13 +315,27 @@ export const useStore = create<AppState>((set, get) => {
       set((s) => ({ leds: s.leds.map((p, i) => (set2.has(i) ? { ...p, ...patch } : p)) }))
     },
 
+    setLedDisabled: (indices, value) => {
+      const { leds, project, raster } = get()
+      const set2 = new Set(indices)
+      const newLeds = leds.map((p, i) => (set2.has(i) ? { ...p, disabled: value } : p))
+      set({ leds: newLeds, raster: bakeProject(project, newLeds.length, raster.numFrames, raster.fps, newLeds) })
+    },
+
+    setLedUnassigned: (indices, value) => {
+      const { leds, project, raster } = get()
+      const set2 = new Set(indices)
+      const newLeds = leds.map((p, i) => (set2.has(i) ? { ...p, unassigned: value } : p))
+      set({ leds: newLeds, raster: bakeProject(project, newLeds.length, raster.numFrames, raster.fps, newLeds) })
+    },
+
     addLeds: (newLeds) => {
       const { leds, project, raster } = get()
       const fallback = project.tracks[0]?.id ?? ''
       const allLeds = [...leds, ...newLeds]
       const assignments = [...project.assignments, ...newLeds.map(() => fallback)]
       const next = { ...project, assignments }
-      set({ leds: allLeds, project: next, raster: bakeProject(next, allLeds.length, raster.numFrames, raster.fps) })
+      set({ leds: allLeds, project: next, raster: bakeProject(next, allLeds.length, raster.numFrames, raster.fps, allLeds) })
     },
 
     deleteLeds: (indices) => {
@@ -334,7 +352,7 @@ export const useStore = create<AppState>((set, get) => {
         leds: newLeds,
         project: next,
         selection: newSelection,
-        raster: bakeProject(next, newLeds.length, raster.numFrames, raster.fps),
+        raster: bakeProject(next, newLeds.length, raster.numFrames, raster.fps, newLeds),
       })
     },
 
@@ -359,7 +377,7 @@ export const useStore = create<AppState>((set, get) => {
         leds: newLeds,
         project: next,
         selection: selection.map(remap),
-        raster: bakeProject(next, newLeds.length, raster.numFrames, raster.fps),
+        raster: bakeProject(next, newLeds.length, raster.numFrames, raster.fps, newLeds),
       })
     },
 
@@ -445,7 +463,7 @@ export const useStore = create<AppState>((set, get) => {
         selectedTrack: f.tracks[0]?.id ?? null,
         ghost: null,
         frame: 0,
-        raster: bakeProject(project, f.leds.length, f.numFrames, f.fps),
+        raster: bakeProject(project, f.leds.length, f.numFrames, f.fps, f.leds),
       })
     },
 
@@ -520,13 +538,13 @@ export const useStore = create<AppState>((set, get) => {
       fps = Math.max(1, Math.min(240, Math.round(fps)))
       const duration = raster.numFrames / raster.fps
       const numFrames = Math.max(1, Math.round(duration * fps))
-      set({ raster: bakeProject(project, leds.length, numFrames, fps), frame: Math.min(frame, numFrames - 1) })
+      set({ raster: bakeProject(project, leds.length, numFrames, fps, leds), frame: Math.min(frame, numFrames - 1) })
     },
     setDuration: (seconds) => {
       const { project, leds, raster, frame } = get()
       seconds = Math.max(0.05, seconds)
       const numFrames = Math.max(1, Math.round(seconds * raster.fps))
-      set({ raster: bakeProject(project, leds.length, numFrames, raster.fps), frame: Math.min(frame, numFrames - 1) })
+      set({ raster: bakeProject(project, leds.length, numFrames, raster.fps, leds), frame: Math.min(frame, numFrames - 1) })
     },
 
     play: () => set({ playing: true }),
