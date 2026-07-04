@@ -41,6 +41,10 @@ interface AppState {
   selectedTrack: string | null
   /** Preview LEDs for a pending "add shape" (rendered as ghosts). */
   ghost: LedPosition[] | null
+  /** Active viewport tool. In 'renumber', a click reassigns chain order. */
+  tool: 'select' | 'renumber'
+  /** The chain number the renumber tool assigns on the next click. */
+  renumberNext: number
   // Display settings.
   ledScale: number
   ledShape: 'sphere' | 'cube'
@@ -77,6 +81,12 @@ interface AppState {
   selectTrack: (id: string | null) => void
   /** replace = set to [i]; toggle = add/remove i; range = i…anchor inclusive. */
   selectLed: (i: number, mode?: 'replace' | 'toggle' | 'range') => void
+  /** Enter the renumber tool, assigning consecutive numbers from `start`. */
+  startRenumber: (start: number) => void
+  /** Assign the next number to the LED at `index` (moves it there), then advance. */
+  renumberAt: (index: number) => void
+  /** Leave the renumber tool. */
+  endRenumber: () => void
   setSelection: (indices: number[]) => void
   clearSelection: () => void
 
@@ -220,6 +230,8 @@ export const useStore = create<AppState>((set, get) => {
     selectionAnchor: init.leds.length ? 0 : null,
     selectedTrack: init.selectedTrack,
     ghost: null,
+    tool: 'select',
+    renumberNext: 0,
     ledScale: init.ledScale,
     ledShape: init.ledShape,
     showLabels: init.showLabels,
@@ -409,6 +421,17 @@ export const useStore = create<AppState>((set, get) => {
       }),
     setSelection: (indices) => set({ selection: indices }),
     clearSelection: () => set({ selection: [] }),
+
+    startRenumber: (start) => set({ tool: 'renumber', renumberNext: Math.max(0, Math.floor(start) || 0) }),
+    endRenumber: () => set({ tool: 'select' }),
+    renumberAt: (index) => {
+      const { leds, renumberNext } = get()
+      const to = Math.max(0, Math.min(leds.length - 1, renumberNext))
+      // moveLedTo reorders leds + assignments (array index = chain position),
+      // re-bakes, and remaps selection; then advance to the next number.
+      get().moveLedTo(index, to)
+      set({ renumberNext: Math.min(to + 1, leds.length - 1), selection: [to] })
+    },
 
     getProjectFile: () => {
       const s = get()

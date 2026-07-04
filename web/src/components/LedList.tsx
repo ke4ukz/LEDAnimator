@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useStore } from '../store'
 import { sampleRaster } from '../types'
 
@@ -58,6 +58,19 @@ export function LedList() {
   const addLeds = useStore((s) => s.addLeds)
   const deleteLeds = useStore((s) => s.deleteLeds)
   const moveLedTo = useStore((s) => s.moveLedTo)
+  const tool = useStore((s) => s.tool)
+  const renumberNext = useStore((s) => s.renumberNext)
+  const startRenumber = useStore((s) => s.startRenumber)
+  const endRenumber = useStore((s) => s.endRenumber)
+  const [start, setStart] = useState(0)
+
+  // Escape leaves the renumber tool.
+  useEffect(() => {
+    if (tool !== 'renumber') return
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') endRenumber() }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [tool, endRenumber])
 
   return (
     <div className="led-list">
@@ -93,6 +106,26 @@ export function LedList() {
           Delete{selection.length > 1 ? ` (${selection.length})` : ''}
         </button>
       </div>
+
+      {tool === 'renumber' ? (
+        <div className="renumber-bar active">
+          <span>Click LEDs in order — next <strong>#{renumberNext}</strong></span>
+          <button className="btn" onClick={endRenumber}>Done</button>
+        </div>
+      ) : (
+        <div className="renumber-bar">
+          <label className="muted">Renumber from</label>
+          <input
+            className="order"
+            type="number"
+            min={0}
+            max={Math.max(0, leds.length - 1)}
+            value={start}
+            onChange={(e) => setStart(Math.max(0, parseInt(e.target.value, 10) || 0))}
+          />
+          <button className="btn" disabled={leds.length === 0} onClick={() => startRenumber(start)}>Start</button>
+        </div>
+      )}
     </div>
   )
 }

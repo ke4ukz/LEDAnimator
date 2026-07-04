@@ -63,7 +63,11 @@ export function Leds() {
       args={[undefined, undefined, leds.length]}
       onClick={(e) => {
         e.stopPropagation()
-        if (e.instanceId != null) selectLed(e.instanceId, e.shiftKey ? 'toggle' : 'replace')
+        if (e.instanceId == null) return
+        // In the renumber tool a click reassigns chain order instead of selecting.
+        const { tool, renumberAt } = useStore.getState()
+        if (tool === 'renumber') renumberAt(e.instanceId)
+        else selectLed(e.instanceId, e.shiftKey ? 'toggle' : 'replace')
       }}
     >
       <Geometry shape={ledShape} />
