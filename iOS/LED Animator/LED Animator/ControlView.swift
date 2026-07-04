@@ -21,6 +21,7 @@ struct ControlView: View {
     @State private var showInfo = false
     @State private var showWifi = false
     @State private var showImporter = false      // macOS pattern upload
+    @State private var dropTargeted = false      // Finder drag-and-drop highlight
     @State private var playback: PlaybackMode = .play
     @State private var solidColor: Color = .white
     @Environment(\.self) private var environment
@@ -171,6 +172,18 @@ struct ControlView: View {
             }
         }
         .refreshable { session.refreshPatterns() }
+        #if os(macOS)
+        // Drag a .leda file from Finder anywhere onto the window to upload it.
+        .dropDestination(for: URL.self) { urls, _ in handleDrop(urls) } isTargeted: { dropTargeted = $0 }
+        .overlay {
+            if dropTargeted {
+                RoundedRectangle(cornerRadius: 8)
+                    .strokeBorder(Color.accentColor, lineWidth: 2)
+                    .padding(4)
+                    .allowsHitTesting(false)
+            }
+        }
+        #endif
         .navigationTitle(session.connectedName)
         .inlineNavTitle()
         .toolbar {
@@ -263,6 +276,18 @@ struct ControlView: View {
 
     #if os(macOS)
     private var ledaType: UTType { UTType(filenameExtension: "leda") ?? .data }
+
+    /// Handle a Finder drag-and-drop: upload the first dropped .leda file.
+    /// Requires a Wi-Fi (TCP) session; returns false to reject the drop otherwise.
+    private func handleDrop(_ urls: [URL]) -> Bool {
+        guard let uploader, !uploader.uploadInProgress else { return false }
+        guard let url = urls.first(where: { $0.pathExtension.lowercased() == "leda" }) else { return false }
+        let access = url.startAccessingSecurityScopedResource()
+        defer { if access { url.stopAccessingSecurityScopedResource() } }
+        guard let data = try? Data(contentsOf: url) else { return false }
+        uploader.upload(name: url.lastPathComponent, data: data)
+        return true
+    }
     #endif
 
     /// A tappable slider end-cap icon that nudges the value by a 5% step.
@@ -343,13 +368,17 @@ private struct MacPatternRow: View {
                 .opacity(isCurrent ? 1 : 0)   // reserve the space so text doesn't jump
             Text(title)
             Spacer()
-            if hovering && canDelete {
-                Button(action: onDelete) {
-                    Image(systemName: "trash").foregroundStyle(.secondary)
-                }
-                .buttonStyle(.borderless)
-                .help("Delete pattern")
+            // Always laid out (toggle opacity, not presence) so hovering never
+            // changes the row's height.
+            Button(action: onDelete) {
+                Image(systemName: "trash")
+                    .imageScale(.small)
+                    .foregroundStyle(.secondary)
             }
+            .buttonStyle(.borderless)
+            .help("Delete pattern")
+            .opacity(hovering && canDelete ? 1 : 0)
+            .disabled(!(hovering && canDelete))
         }
         .contentShape(Rectangle())
         .onTapGesture(count: 2, perform: onActivate)
