@@ -50,16 +50,8 @@ struct MacRootView: View {
         // toolbar buttons stay in the detail's toolbar region and don't overflow
         // as the inspector column animates open from zero width.
         .inspector(isPresented: inspectorPresented) {
-            Group {
-                if let session = activeSession {
-                    if inspectorPanel == .wifi {
-                        WiFiView(session: session)
-                    } else {
-                        DeviceInfoView(session: session)
-                    }
-                }
-            }
-            .inspectorColumnWidth(min: 260, ideal: 300, max: 380)
+            inspectorPanelView
+                .inspectorColumnWidth(300)   // fixed: a flexible width mis-lays-out on first show
         }
         .frame(minWidth: 680, minHeight: 440)
         .onAppear { ble.startScan() }
@@ -151,6 +143,16 @@ struct MacRootView: View {
             get: { inspectorPanel != nil && activeSession != nil },
             set: { if !$0 { inspectorPanel = nil } }
         )
+    }
+
+    @ViewBuilder
+    private var inspectorPanelView: some View {
+        if let session = activeSession {
+            switch inspectorPanel {
+            case .wifi: WiFiView(session: session)
+            default: DeviceInfoView(session: session)
+            }
+        }
     }
 
     private func connect(to id: String?) {
