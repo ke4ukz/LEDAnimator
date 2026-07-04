@@ -132,7 +132,6 @@ struct HomeView: View {
                     AnimationRow(
                         animation: a,
                         onOpen: { editingTitle = a.name; showEditor = true },
-                        onDetails: { detailAnimation = a },
                         onSend: { sendAnimation = a }
                     )
                     .contextMenu {
@@ -262,11 +261,10 @@ struct HomeView: View {
 private struct AnimationRow: View {
     let animation: MockAnimation
     let onOpen: () -> Void
-    let onDetails: () -> Void
     let onSend: () -> Void
 
     var body: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 10) {
             // Tapping the thumbnail/name opens the editor.
             HStack(spacing: 10) {
                 AnimationThumbnail(tracks: animation.tracks)
@@ -282,10 +280,11 @@ private struct AnimationRow: View {
             .contentShape(Rectangle())
             .onTapGesture(perform: onOpen)
 
-            Button(action: onDetails) { Image(systemName: "info.circle") }
-                .buttonStyle(.borderless).help("Details")
-            Button(action: onSend) { Image(systemName: "arrow.up.circle") }
-                .buttonStyle(.borderless).help("Send to device")
+            Button(action: onSend) {
+                Image(systemName: "arrow.up.circle").imageScale(.large)
+            }
+            .buttonStyle(.borderless)
+            .help("Send to device")
         }
         .padding(.vertical, 2)
     }
