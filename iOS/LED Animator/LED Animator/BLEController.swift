@@ -54,7 +54,7 @@ final class BLEController: NSObject {
     var session: DeviceSession?          // the live control session, once connected
 
     // MARK: CoreBluetooth internals (not observed)
-    @ObservationIgnored private var central: CBCentralManager!
+    @ObservationIgnored private var central: CBCentralManager?
     @ObservationIgnored private var peripherals: [UUID: CBPeripheral] = [:]
     @ObservationIgnored private var connected: CBPeripheral?
     @ObservationIgnored private var rxChar: CBCharacteristic?
@@ -62,7 +62,18 @@ final class BLEController: NSObject {
 
     override init() {
         super.init()
-        central = CBCentralManager(delegate: self, queue: .main)
+        // Core Bluetooth is created LAZILY (on first scan/connect), NOT here.
+        // Spinning up CBCentralManager during app launch prompts for Bluetooth
+        // permission immediately and can trip a launch-time abort on newer iOS.
+    }
+
+    /// Lazily create the central manager on first real use.
+    @discardableResult
+    private func ensureCentral() -> CBCentralManager {
+        if let central { return central }
+        let c = CBCentralManager(delegate: self, queue: .main)
+        central = c
+        return c
     }
 
     // MARK: Scanning
@@ -70,17 +81,17 @@ final class BLEController: NSObject {
     func startScan() {
         wantScan = true
         devices.removeAll()
-        if central.state == .poweredOn { beginScan() }
+        if ensureCentral().state == .poweredOn { beginScan() }
     }
 
     func stopScan() {
         wantScan = false
         isScanning = false
-        central.stopScan()
+        central?.stopScan()
     }
 
     private func beginScan() {
-        guard central.state == .poweredOn else { return }
+        guard let central, central.state == .poweredOn else { return }
         isScanning = true
         central.scanForPeripherals(
             withServices: [LEDGATT.service],
@@ -98,12 +109,12 @@ final class BLEController: NSObject {
         session = nil
         connected = peripheral
         peripheral.delegate = self
-        central.connect(peripheral)
+        central?.connect(peripheral)
     }
 
     func disconnect() {
         if let peripheral = connected {
-            central.cancelPeripheralConnection(peripheral)
+            central?.cancelPeripheralConnection(peripheral)
         }
         connected = nil
         rxChar = nil
@@ -185,7 +196,7 @@ extension BLEController: CBPeripheralDelegate {
     func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
         guard let service = peripheral.services?.first(where: { $0.uuid == LEDGATT.service }) else {
             connectionState = .failed("This isn't an LED Animator device.")
-            central.cancelPeripheralConnection(peripheral)
+            central?.cancelPeripheralConnection(peripheral)
             return
         }
         peripheral.discoverCharacteristics([LEDGATT.rx, LEDGATT.tx], for: service)
@@ -202,7 +213,7 @@ extension BLEController: CBPeripheralDelegate {
         }
         guard rxChar != nil else {
             connectionState = .failed("The device is missing its control characteristic.")
-            central.cancelPeripheralConnection(peripheral)
+            central?.cancelPeripheralConnection(peripheral)
             return
         }
         let session = DeviceSession(name: connectingName)
