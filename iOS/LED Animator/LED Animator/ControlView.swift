@@ -21,7 +21,6 @@ struct ControlView: View {
     @State private var showInfo = false
     @State private var showWifi = false
     @State private var showImporter = false      // macOS pattern upload
-    @State private var selectedPattern: String?  // macOS list selection (single-click)
     @State private var playback: PlaybackMode = .play
     @State private var solidColor: Color = .white
     @Environment(\.self) private var environment
@@ -140,10 +139,26 @@ struct ControlView: View {
                     }
                 }
             } header: {
-                Text("Patterns")
+                HStack {
+                    Text("Patterns")
+                    #if os(macOS)
+                    Spacer()
+                    if uploader?.uploadInProgress == true {
+                        ProgressView().controlSize(.mini)
+                    }
+                    Button { showImporter = true } label: {
+                        Image(systemName: "plus")
+                    }
+                    .buttonStyle(.borderless)
+                    .disabled(uploader == nil || uploader?.uploadInProgress == true)
+                    .help(uploader == nil ? "Connect over Wi-Fi to upload a pattern" : "Upload a pattern")
+                    #endif
+                }
             } footer: {
                 #if os(macOS)
-                fileBar
+                if let err = uploader?.uploadError {
+                    Text(err).font(.caption).foregroundStyle(.red)
+                }
                 #endif
             }
 
@@ -208,35 +223,26 @@ struct ControlView: View {
                 }
             }
         }
-        .onChange(of: session.patterns) { _, list in
-            if let sel = selectedPattern, !list.contains(sel) { selectedPattern = nil }
-        }
         #endif
     }
 
     // MARK: Patterns
 
-    /// A pattern row. iOS: tap plays it. macOS: single-click selects (Xcode-style),
-    /// double-click activates; the +/- bar acts on the selection.
+    /// A pattern row. iOS: tap plays it. macOS: double-click plays it, a leading
+    /// checkmark marks the loaded pattern, and a hover trash deletes it.
     @ViewBuilder
     private func patternRow(_ name: String) -> some View {
         #if os(macOS)
-        HStack {
-            Text(displayName(name))
-            Spacer()
-            if session.currentPattern == name && playback == .play {
-                Image(systemName: "checkmark").foregroundStyle(.tint)
-            }
-        }
-        .contentShape(Rectangle())
-        .onTapGesture(count: 2) {
-            session.select(name)
-            playback = .play
-        }
-        .onTapGesture {
-            selectedPattern = name
-        }
-        .listRowBackground(selectedPattern == name ? Color.accentColor.opacity(0.18) : nil)
+        MacPatternRow(
+            title: displayName(name),
+            isCurrent: session.currentPattern == name,
+            canDelete: session.currentPattern != name,   // can't delete the loaded one
+            onActivate: {
+                session.select(name)
+                playback = .play
+            },
+            onDelete: { session.delete(name) }
+        )
         #else
         Button {
             session.select(name)
@@ -256,35 +262,6 @@ struct ControlView: View {
     }
 
     #if os(macOS)
-    /// Xcode-style +/- bar under the pattern list: add (upload) / remove (delete).
-    private var fileBar: some View {
-        HStack(spacing: 2) {
-            Button { showImporter = true } label: {
-                Image(systemName: "plus").frame(width: 22)
-            }
-            .disabled(uploader == nil || uploader?.uploadInProgress == true)
-            .help(uploader == nil ? "Connect over Wi-Fi to upload a pattern" : "Upload a pattern")
-
-            Button {
-                if let sel = selectedPattern { session.delete(sel) }
-            } label: {
-                Image(systemName: "minus").frame(width: 22)
-            }
-            .disabled(selectedPattern == nil || selectedPattern == session.currentPattern)
-            .help("Delete the selected pattern")
-
-            if uploader?.uploadInProgress == true {
-                ProgressView().controlSize(.small)
-                Text("Uploading…").font(.caption).foregroundStyle(.secondary)
-            } else if let err = uploader?.uploadError {
-                Text(err).font(.caption).foregroundStyle(.red)
-            }
-            Spacer()
-        }
-        .buttonStyle(.borderless)
-        .padding(.top, 4)
-    }
-
     private var ledaType: UTType { UTType(filenameExtension: "leda") ?? .data }
     #endif
 
@@ -346,3 +323,37 @@ struct ControlView: View {
         file.hasSuffix(".leda") ? String(file.dropLast(5)) : file
     }
 }
+
+#if os(macOS)
+/// A macOS pattern row: leading checkmark (space reserved when absent so the
+/// title never shifts), double-click to play, and a trash button that appears
+/// only while the row is hovered.
+private struct MacPatternRow: View {
+    let title: String
+    let isCurrent: Bool
+    let canDelete: Bool
+    let onActivate: () -> Void
+    let onDelete: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "checkmark")
+                .foregroundStyle(.tint)
+                .opacity(isCurrent ? 1 : 0)   // reserve the space so text doesn't jump
+            Text(title)
+            Spacer()
+            if hovering && canDelete {
+                Button(action: onDelete) {
+                    Image(systemName: "trash").foregroundStyle(.secondary)
+                }
+                .buttonStyle(.borderless)
+                .help("Delete pattern")
+            }
+        }
+        .contentShape(Rectangle())
+        .onTapGesture(count: 2, perform: onActivate)
+        .onHover { hovering = $0 }
+    }
+}
+#endif
