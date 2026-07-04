@@ -9,11 +9,25 @@ export function TrackInspector() {
   const updateTrack = useStore((s) => s.updateTrack)
   const setAutomation = useStore((s) => s.setAutomation)
   const assignments = useStore((s) => s.project.assignments)
+  const leds = useStore((s) => s.leds)
 
   const track = project.tracks.find((t) => t.id === selected)
   if (!track) return <p className="placeholder">Select a track to edit it.</p>
 
-  const memberCount = assignments.filter((id) => id === track.id).length
+  // "Even" spreads one full pass across the ANIMATION-index range, not the raw
+  // LED count — so grouped LEDs (shared index) count once and gaps are honored.
+  // = max effective animIndex + 1 over this track's in-chain (wired) members.
+  const evenSteps = (() => {
+    let rank = 0
+    let max = -1
+    assignments.forEach((id, i) => {
+      if (id !== track.id || leds[i]?.unassigned) return
+      const idx = leds[i]?.animIndex ?? rank
+      if (idx > max) max = idx
+      rank++
+    })
+    return max + 1
+  })()
   const set = (patch: Partial<Track>) => updateTrack(track.id, patch)
   const setPath = (path: PathDef) => set({ path })
 
@@ -133,8 +147,8 @@ export function TrackInspector() {
         />
         <button
           className="btn"
-          title="Spread one full pass across this track's LEDs"
-          onClick={() => set({ chase: memberCount > 0 ? 1 / memberCount : 0 })}
+          title="Spread one full pass across this track's animation positions"
+          onClick={() => set({ chase: evenSteps > 0 ? 1 / evenSteps : 0 })}
         >
           Even
         </button>
