@@ -422,7 +422,8 @@ export const useStore = create<AppState>((set, get) => {
     setSelection: (indices) => set({ selection: indices }),
     clearSelection: () => set({ selection: [] }),
 
-    startRenumber: (start) => set({ tool: 'renumber', renumberNext: Math.max(0, Math.floor(start) || 0) }),
+    // Turn on number labels so you can see what you're assigning.
+    startRenumber: (start) => set({ tool: 'renumber', renumberNext: Math.max(0, Math.floor(start) || 0), showLabels: true }),
     endRenumber: () => set({ tool: 'select' }),
     renumberAt: (index) => {
       const { leds, renumberNext } = get()
