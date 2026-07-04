@@ -34,7 +34,9 @@ struct RGB: Equatable {
     var b = 0
 }
 
-enum ConnectionState: Equatable {
+// nonisolated so `==` can be used from nonisolated contexts (e.g. the TCP
+// receive handler), independent of the project's default main-actor isolation.
+nonisolated enum ConnectionState: Equatable {
     case disconnected
     case connecting
     case connected

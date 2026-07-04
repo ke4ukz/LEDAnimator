@@ -7,6 +7,10 @@
 
 import SwiftUI
 
+#if os(iOS)
+// The push-navigation device list is the iOS layout; macOS uses MacRootView's
+// sidebar instead (see ContentView.swift). Shared helpers/types below are not
+// gated, so both platforms use them.
 struct DeviceListView: View {
     let ble: BLEController
     let wifi: TCPController
@@ -121,6 +125,7 @@ struct DeviceListView: View {
         else { "" }
     }
 }
+#endif
 
 /// One row per physical device: a Wi-Fi discovery and a BLE discovery with the
 /// same device id (the advert MAC / hostname suffix) collapse together, Wi-Fi
@@ -186,6 +191,7 @@ struct UnifiedDevice: Identifiable {
     var isBTOnly: Bool { wifi == nil }
 }
 
+#if os(iOS)
 private struct UnifiedDeviceRow: View {
     let device: UnifiedDevice
     let connecting: Bool
@@ -218,3 +224,4 @@ private struct UnifiedDeviceRow: View {
         .contentShape(Rectangle())
     }
 }
+#endif
