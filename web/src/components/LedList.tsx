@@ -97,8 +97,10 @@ export function LedList() {
   const startRenumber = useStore((s) => s.startRenumber)
   const endRenumber = useStore((s) => s.endRenumber)
   const animAssignValue = useStore((s) => s.animAssignValue)
+  const animAssignAuto = useStore((s) => s.animAssignAuto)
   const startAnimAssign = useStore((s) => s.startAnimAssign)
   const nextAnimAssign = useStore((s) => s.nextAnimAssign)
+  const setAnimAssignAuto = useStore((s) => s.setAnimAssignAuto)
   const endAnimAssign = useStore((s) => s.endAnimAssign)
   const [start, setStart] = useState(0)
   const [animStart, setAnimStart] = useState(0)
@@ -158,9 +160,13 @@ export function LedList() {
           <button className="btn" onClick={endRenumber}>Done</button>
         </div>
       ) : tool === 'animassign' ? (
-        <div className="renumber-bar active">
+        <div className="renumber-bar active anim">
           <span>Click LEDs — anim <strong>#{animAssignValue}</strong></span>
-          <button className="btn" onClick={nextAnimAssign}>Next #</button>
+          <label className="muted anim-auto" title="Each click bumps the number (sequential) instead of sharing it (grouping).">
+            <input type="checkbox" checked={animAssignAuto} onChange={(e) => setAnimAssignAuto(e.target.checked)} />
+            auto +1
+          </label>
+          <button className="btn" onClick={nextAnimAssign} disabled={animAssignAuto} title="Start the next group">Next #</button>
           <button className="btn" onClick={endAnimAssign}>Done</button>
         </div>
       ) : (

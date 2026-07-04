@@ -1054,6 +1054,24 @@ input[type='color'] {
   background: color-mix(in srgb, var(--accent) 14%, transparent);
 }
 
+.renumber-bar.active.anim {
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.anim-auto {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+}
+
+.anim-auto input[type='checkbox'] {
+  width: auto;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
 .display-panel {
   display: flex;
   flex-direction: column;

@@ -48,6 +48,9 @@ interface AppState {
   renumberNext: number
   /** The animation index the anim-assign tool stamps onto clicked LEDs. */
   animAssignValue: number
+  /** When true, each anim-assign click auto-advances the index (sequential);
+   *  when false, clicks share the current index (grouping). */
+  animAssignAuto: boolean
   // Display settings.
   ledScale: number
   ledShape: 'sphere' | 'cube'
@@ -98,6 +101,8 @@ interface AppState {
   animAssignAt: (index: number) => void
   /** Advance the stamped animation index (start a new group). */
   nextAnimAssign: () => void
+  /** Toggle auto-advance (sequential vs. grouping) for the anim-assign tool. */
+  setAnimAssignAuto: (value: boolean) => void
   /** Leave the anim-assign tool. */
   endAnimAssign: () => void
   setSelection: (indices: number[]) => void
@@ -246,6 +251,7 @@ export const useStore = create<AppState>((set, get) => {
     tool: 'select',
     renumberNext: 0,
     animAssignValue: 0,
+    animAssignAuto: false,
     ledScale: init.ledScale,
     ledShape: init.ledShape,
     showLabels: init.showLabels,
@@ -464,10 +470,13 @@ export const useStore = create<AppState>((set, get) => {
     startAnimAssign: (start) => set({ tool: 'animassign', animAssignValue: Math.max(0, Math.floor(start) || 0), showLabels: true }),
     endAnimAssign: () => set({ tool: 'select' }),
     nextAnimAssign: () => set((s) => ({ animAssignValue: s.animAssignValue + 1 })),
+    setAnimAssignAuto: (value) => set({ animAssignAuto: value }),
     animAssignAt: (index) => {
       // Stamp the current value; repeats are allowed (that's how you group).
-      get().setLedAnimIndex([index], get().animAssignValue)
-      set({ selection: [index] })
+      // With auto-advance on, bump the index so the next click is sequential.
+      const { animAssignValue, animAssignAuto } = get()
+      get().setLedAnimIndex([index], animAssignValue)
+      set({ selection: [index], ...(animAssignAuto ? { animAssignValue: animAssignValue + 1 } : {}) })
     },
 
     getProjectFile: () => {
