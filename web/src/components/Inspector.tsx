@@ -11,11 +11,16 @@ export function Inspector() {
   const project = useStore((s) => s.project)
   const updateLeds = useStore((s) => s.updateLeds)
   const assignLeds = useStore((s) => s.assignLeds)
+  const setLedDisabled = useStore((s) => s.setLedDisabled)
+  const setLedUnassigned = useStore((s) => s.setLedUnassigned)
 
   const sel = selection.filter((i) => leds[i])
   if (sel.length === 0) {
     return <p className="placeholder">Select one or more LEDs.</p>
   }
+
+  const allUnassigned = sel.every((i) => leds[i].unassigned)
+  const allDisabled = sel.every((i) => leds[i].disabled)
 
   // Common value for an axis, or null if the selection differs.
   const axis = (k: 'x' | 'y' | 'z'): number | null => {
@@ -48,6 +53,14 @@ export function Inspector() {
           ))}
         </select>
       </div>
+      <label className="insp-row insp-check">
+        <span className="muted" title="Part of the physical chain. Off = excluded from the exported strip.">In chain</span>
+        <input type="checkbox" checked={!allUnassigned} onChange={(e) => setLedUnassigned(sel, !e.target.checked)} />
+      </label>
+      <label className="insp-row insp-check">
+        <span className="muted" title="Force this LED off (kept in the chain, so the pattern doesn't shift).">Blackout</span>
+        <input type="checkbox" checked={allDisabled} disabled={allUnassigned} onChange={(e) => setLedDisabled(sel, e.target.checked)} />
+      </label>
       {color && (
         <div className="insp-row">
           <span className="muted">Color @ {frame}</span>

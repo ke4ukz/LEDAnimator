@@ -966,6 +966,17 @@ input[type='color'] {
   gap: 10px;
 }
 
+.insp-check {
+  align-items: center;
+  cursor: pointer;
+}
+
+.inspector-body .insp-check input[type='checkbox'] {
+  width: auto;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
 .swatch-inline {
   display: inline-flex;
   align-items: center;

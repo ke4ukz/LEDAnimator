@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react'
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { GizmoHelper, GizmoViewport, OrbitControls } from '@react-three/drei'
 import { Vector3 } from 'three'
-import { GhostLeds, LedLabels, Leds, SelectionMarker } from './Leds'
+import { GhostLeds, LedLabels, Leds, SelectionMarker, UnassignedMarkers } from './Leds'
 import { HOME_DISTANCE, goHome, viewportRefs } from '../viewportControls'
 import { useStore } from '../store'
 
@@ -82,6 +82,7 @@ export function Viewport() {
         <gridHelper args={[20, 20, '#252b3b', '#161a24']} rotation={[Math.PI / 2, 0, 0]} />
         <Leds />
         <GhostLeds />
+        <UnassignedMarkers />
         <SelectionMarker />
         <LedLabels />
         <OrbitControls makeDefault enableDamping />

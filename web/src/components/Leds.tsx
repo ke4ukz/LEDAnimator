@@ -38,14 +38,19 @@ export function Leds() {
     mesh.computeBoundingSphere()
   }, [leds, ledScale, ledShape])
 
-  // Repaint colors from the current frame every render tick.
+  // Repaint colors from the current frame every render tick. Disabled LEDs show
+  // a dim grey (so "off on purpose" reads differently from a black gradient spot).
   useFrame(() => {
     const mesh = ref.current
     const { raster, frame } = useStore.getState()
     const count = Math.min(leds.length, raster.numLeds)
     for (let i = 0; i < count; i++) {
-      const [r, g, b] = sampleRaster(raster, frame, i)
-      tmpColor.setRGB(r / 255, g / 255, b / 255, SRGBColorSpace)
+      if (leds[i]?.disabled) {
+        tmpColor.setRGB(0.14, 0.14, 0.16, SRGBColorSpace)
+      } else {
+        const [r, g, b] = sampleRaster(raster, frame, i)
+        tmpColor.setRGB(r / 255, g / 255, b / 255, SRGBColorSpace)
+      }
       mesh.setColorAt(i, tmpColor)
     }
     if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true
@@ -116,18 +121,44 @@ export function SelectionMarker() {
   )
 }
 
-/** Optional index labels: small DOM billboards centered on each LED, drawn on top. */
+/** Red wireframe rings around unassigned LEDs (not in the chain). Not pickable. */
+export function UnassignedMarkers() {
+  const leds = useStore((s) => s.leds)
+  const ledScale = useStore((s) => s.ledScale)
+  return (
+    <>
+      {leds.map((p, i) =>
+        p.unassigned ? (
+          <mesh key={i} position={[p.x, p.y, p.z]} scale={ledScale} raycast={() => null}>
+            <sphereGeometry args={[0.5, 16, 16]} />
+            <meshBasicMaterial color="#e0586b" wireframe toneMapped={false} />
+          </mesh>
+        ) : null,
+      )}
+    </>
+  )
+}
+
+/**
+ * Optional number labels: small DOM billboards on each LED. Shows the LED's
+ * CHAIN number (position among assigned LEDs); unassigned LEDs are skipped.
+ */
 export function LedLabels() {
   const leds = useStore((s) => s.leds)
   const show = useStore((s) => s.showLabels)
   if (!show) return null
+  let n = -1
   return (
     <>
-      {leds.map((p, i) => (
-        <Html key={i} position={[p.x, p.y, p.z]} center zIndexRange={[20, 0]} style={{ pointerEvents: 'none' }}>
-          <div className="led-label">{i}</div>
-        </Html>
-      ))}
+      {leds.map((p, i) => {
+        if (p.unassigned) return null
+        n += 1
+        return (
+          <Html key={i} position={[p.x, p.y, p.z]} center zIndexRange={[20, 0]} style={{ pointerEvents: 'none' }}>
+            <div className="led-label">{n}</div>
+          </Html>
+        )
+      })}
     </>
   )
 }
