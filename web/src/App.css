@@ -541,6 +541,58 @@
   min-height: 0;
 }
 
+/* Transparent view-settings toolbar floating across the top of the viewport. */
+.viewport-toolbar {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  right: 8px;
+  z-index: 5;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none; /* clicks pass through to the canvas… */
+  font-size: 12px;
+}
+
+.vt-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  pointer-events: auto; /* …except on the controls themselves */
+  background: rgba(11, 13, 18, 0.55);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 3px 8px;
+  backdrop-filter: blur(4px);
+}
+
+label.vt-group {
+  cursor: pointer;
+}
+
+.vt-group input[type='range'] {
+  width: 90px;
+  accent-color: var(--accent);
+}
+
+.vt-group input[type='checkbox'] {
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.vt-group select {
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 2px 4px;
+  font: inherit;
+  font-size: 12px;
+}
+
 .inspector {
   grid-area: inspector;
   background: var(--panel);

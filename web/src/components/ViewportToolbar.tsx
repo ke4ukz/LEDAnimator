@@ -1,7 +1,12 @@
 import { useStore } from '../store'
 
-/** View settings for the LEDs: size, shape, and index labels. */
-export function DisplayPanel() {
+/**
+ * View settings as a transparent toolbar floating across the top of the
+ * viewport (size / shape / numbers / sample markers). These are how the scene
+ * is displayed, not properties of the LEDs — so they live over the viewport
+ * rather than in the LED panels.
+ */
+export function ViewportToolbar() {
   const ledScale = useStore((s) => s.ledScale)
   const ledShape = useStore((s) => s.ledShape)
   const showLabels = useStore((s) => s.showLabels)
@@ -12,26 +17,33 @@ export function DisplayPanel() {
   const setShowSamples = useStore((s) => s.setShowSamples)
 
   return (
-    <div className="display-panel">
-      <label className="field-row">
-        <span>Size</span>
-        <input type="range" min={0.2} max={3} step={0.1} value={ledScale} onChange={(e) => setLedScale(Number(e.target.value))} />
+    <div className="viewport-toolbar">
+      <div className="vt-group">
+        <span className="muted">Size</span>
+        <input
+          type="range"
+          min={0.2}
+          max={3}
+          step={0.1}
+          value={ledScale}
+          onChange={(e) => setLedScale(Number(e.target.value))}
+        />
         <span className="muted num">{ledScale.toFixed(1)}×</span>
-      </label>
-      <label className="field-row">
-        <span>Shape</span>
+      </div>
+      <div className="vt-group">
+        <span className="muted">Shape</span>
         <select value={ledShape} onChange={(e) => setLedShape(e.target.value as 'sphere' | 'cube')}>
           <option value="sphere">Sphere</option>
           <option value="cube">Cube</option>
         </select>
-      </label>
-      <label className="field-row">
-        <span>Numbers</span>
+      </div>
+      <label className="vt-group">
         <input type="checkbox" checked={showLabels} onChange={(e) => setShowLabels(e.target.checked)} />
+        <span className="muted">Numbers</span>
       </label>
-      <label className="field-row" title="Ghost markers on the path preview showing where each LED samples right now">
-        <span>Sample markers</span>
+      <label className="vt-group">
         <input type="checkbox" checked={showSamples} onChange={(e) => setShowSamples(e.target.checked)} />
+        <span className="muted">Sample markers</span>
       </label>
     </div>
   )
