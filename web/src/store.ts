@@ -66,6 +66,8 @@ interface AppState {
   setLedDisabled: (indices: number[], value: boolean) => void
   /** Exclude/include these LEDs from the physical chain + export stream. */
   setLedUnassigned: (indices: number[], value: boolean) => void
+  /** Override the animation index for these LEDs (null clears → wiring default). */
+  setLedAnimIndex: (indices: number[], value: number | null) => void
   /** Append LEDs to the arrangement (assigned to the first track; re-bakes). */
   addLeds: (leds: LedPosition[]) => void
   /** Remove LEDs by index (compacts assignments, remaps selection; re-bakes). */
@@ -338,6 +340,19 @@ export const useStore = create<AppState>((set, get) => {
       const { leds, project, raster } = get()
       const set2 = new Set(indices)
       const newLeds = leds.map((p, i) => (set2.has(i) ? { ...p, unassigned: value } : p))
+      set({ leds: newLeds, raster: bakeProject(project, newLeds.length, raster.numFrames, raster.fps, newLeds) })
+    },
+
+    setLedAnimIndex: (indices, value) => {
+      const { leds, project, raster } = get()
+      const set2 = new Set(indices)
+      const newLeds = leds.map((p, i) => {
+        if (!set2.has(i)) return p
+        const next = { ...p }
+        if (value == null) delete next.animIndex // clear override → default (wiring rank)
+        else next.animIndex = Math.max(0, Math.floor(value))
+        return next
+      })
       set({ leds: newLeds, raster: bakeProject(project, newLeds.length, raster.numFrames, raster.fps, newLeds) })
     },
 

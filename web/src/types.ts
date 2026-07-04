@@ -13,14 +13,18 @@ export interface LedPosition {
   x: number
   y: number
   z: number
-  /** Blackout: stays in the chain and in the `order` sequence (so the pattern
-   *  doesn't shift), but its output is forced to black. For dead/intentionally
-   *  dark pixels. */
+  /** "Off" for the animation: output forced to black. Kept in the chain and in
+   *  the sequence (holds its slot, so other LEDs don't shift). For dead or
+   *  intentionally-dark pixels. */
   disabled?: boolean
-  /** Not part of the physical chain at all: skipped in every track's `order`
-   *  sequence AND dropped from the exported stream (reduces numLeds). For
-   *  layout/reference LEDs that aren't wired. */
+  /** Not part of the physical chain at all: dropped from the exported stream
+   *  (reduces numLeds). For layout/reference LEDs that aren't wired. Separate
+   *  from the animation — this is about wiring/export. */
   unassigned?: boolean
+  /** Animation-sequence position, decoupled from the wiring order. The chase
+   *  walks THIS. Shareable — LEDs with the same value animate identically (e.g.
+   *  columns). Defaults to the LED's wiring rank when unset. */
+  animIndex?: number
 }
 
 /**

@@ -13,6 +13,7 @@ export function Inspector() {
   const assignLeds = useStore((s) => s.assignLeds)
   const setLedDisabled = useStore((s) => s.setLedDisabled)
   const setLedUnassigned = useStore((s) => s.setLedUnassigned)
+  const setLedAnimIndex = useStore((s) => s.setLedAnimIndex)
 
   const sel = selection.filter((i) => leds[i])
   if (sel.length === 0) {
@@ -21,6 +22,8 @@ export function Inspector() {
 
   const allUnassigned = sel.every((i) => leds[i].unassigned)
   const allDisabled = sel.every((i) => leds[i].disabled)
+  const a0 = leds[sel[0]].animIndex
+  const commonAnim = sel.every((i) => leds[i].animIndex === a0) ? a0 : undefined
 
   // Common value for an axis, or null if the selection differs.
   const axis = (k: 'x' | 'y' | 'z'): number | null => {
@@ -57,8 +60,19 @@ export function Inspector() {
         <span className="muted" title="Part of the physical chain. Off = excluded from the exported strip.">In chain</span>
         <input type="checkbox" checked={!allUnassigned} onChange={(e) => setLedUnassigned(sel, !e.target.checked)} />
       </label>
+      <div className="insp-row">
+        <span className="muted" title="Position in the animation sequence (separate from wiring). LEDs sharing a number animate together. Blank = default (wiring order).">Anim #</span>
+        <input
+          type="number"
+          min={0}
+          placeholder="auto"
+          disabled={allUnassigned || allDisabled}
+          value={commonAnim ?? ''}
+          onChange={(e) => setLedAnimIndex(sel, e.target.value === '' ? null : Number(e.target.value))}
+        />
+      </div>
       <label className="insp-row insp-check">
-        <span className="muted" title="Force this LED off (kept in the chain, so the pattern doesn't shift).">Blackout</span>
+        <span className="muted" title="Turn this LED off in the animation (black), keeping its chain slot so the pattern doesn't shift.">Off (not animated)</span>
         <input type="checkbox" checked={allDisabled} disabled={allUnassigned} onChange={(e) => setLedDisabled(sel, e.target.checked)} />
       </label>
       {color && (

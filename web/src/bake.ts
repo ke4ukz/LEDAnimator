@@ -55,16 +55,19 @@ export function bakeProject(
       chaseAt[f] = trackParamAt(track, 'chase', t)
     }
 
-    members.forEach((led, order) => {
-      // Disabled LEDs keep their order slot but emit black.
+    members.forEach((led, rank) => {
+      // Disabled LEDs keep their rank slot (no shift) but emit black.
       const black = leds?.[led]?.disabled ?? false
+      // The chase walks the animation index (default = wiring rank); shared
+      // values make LEDs animate together.
+      const ord = leds?.[led]?.animIndex ?? rank
       for (let f = 0; f < numFrames; f++) {
         const base = (f * numLeds + led) * 3
         if (black) {
           data[base] = data[base + 1] = data[base + 2] = 0
           continue
         }
-        const s = frac(offsetAt[f] + order * chaseAt[f] + phase[f])
+        const s = frac(offsetAt[f] + ord * chaseAt[f] + phase[f])
         const [u, v] = pathPoint(track.path, s)
         const [r, g, b] = evalSource(source, u, v)
         data[base] = r

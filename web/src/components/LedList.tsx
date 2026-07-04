@@ -46,8 +46,41 @@ function OrderInput({ index, max, onCommit }: { index: number; max: number; onCo
   )
 }
 
+/** Animation-index field: commits on Enter/blur (uncontrolled so a keystroke
+ *  doesn't re-bake). Blank clears the override (back to the wiring default). */
+function AnimInput({ value, onCommit }: { value: number | undefined; onCommit: (n: number | null) => void }) {
+  const ref = useRef<HTMLInputElement>(null)
+  useEffect(() => {
+    const el = ref.current
+    if (el && document.activeElement !== el) el.value = value == null ? '' : String(value)
+  }, [value])
+  const commit = () => {
+    const raw = ref.current?.value ?? ''
+    onCommit(raw === '' ? null : Math.max(0, parseInt(raw, 10) || 0))
+  }
+  return (
+    <input
+      ref={ref}
+      className="order"
+      type="number"
+      min={0}
+      placeholder="auto"
+      defaultValue={value == null ? '' : String(value)}
+      onClick={(e) => e.stopPropagation()}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault()
+          ref.current?.blur()
+        }
+      }}
+    />
+  )
+}
+
 /** LED list: live color swatch, click to select (Shift = range, Cmd/Ctrl =
- *  toggle), editable order number, track assignment, and add/delete. */
+ *  toggle), editable wiring order (#) + animation index (A), track assignment,
+ *  and add/delete. */
 export function LedList() {
   const leds = useStore((s) => s.leds)
   const tracks = useStore((s) => s.project.tracks)
@@ -58,6 +91,7 @@ export function LedList() {
   const addLeds = useStore((s) => s.addLeds)
   const deleteLeds = useStore((s) => s.deleteLeds)
   const moveLedTo = useStore((s) => s.moveLedTo)
+  const setLedAnimIndex = useStore((s) => s.setLedAnimIndex)
   const tool = useStore((s) => s.tool)
   const renumberNext = useStore((s) => s.renumberNext)
   const startRenumber = useStore((s) => s.startRenumber)
@@ -85,8 +119,10 @@ export function LedList() {
             }
           >
             <LedSwatch index={i} />
-            <span className="hash muted">#</span>
+            <span className="hash muted" title="Wiring order (export)">#</span>
             <OrderInput index={i} max={leds.length - 1} onCommit={(n) => moveLedTo(i, n)} />
+            <span className="hash muted" title="Animation index (shared = animate together)">A</span>
+            <AnimInput value={leds[i].animIndex} onCommit={(n) => setLedAnimIndex([i], n)} />
             <select
               className="led-track"
               value={assignments[i]}
