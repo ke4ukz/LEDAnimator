@@ -7,11 +7,22 @@ import { defaultGradient } from './presets'
 // a source over time) → per-LED assignment. Each LED belongs to exactly one
 // track (partition), matching hardware where every LED has a single color source.
 
+/** Per-source color adjustments applied after the source is evaluated, without
+ *  touching the gradient's own stops/params. brightness/contrast/saturation are
+ *  -1..1 (0 = no change). */
+export interface PostFx {
+  invert?: boolean
+  brightness?: number
+  contrast?: number
+  saturation?: number
+}
+
 export interface GradientSource {
   id: string
   name: string
   kind: 'gradient'
   gradient: Gradient
+  post?: PostFx
 }
 
 // Images will join this union later.
@@ -100,8 +111,43 @@ export function pathPoint(path: PathDef, s: number): [number, number] {
   }
 }
 
+/** Apply post-processing (invert / brightness / contrast / saturation) to a
+ *  color. A no-op when `fx` is undefined or all-neutral. Order: brightness →
+ *  contrast → saturation → invert, clamped to 0–255. */
+export function applyPost(rgb: RGB, fx?: PostFx): RGB {
+  if (!fx) return rgb
+  let r = rgb[0] / 255
+  let g = rgb[1] / 255
+  let b = rgb[2] / 255
+
+  const br = fx.brightness ?? 0
+  if (br) { r += br; g += br; b += br }
+
+  const k = fx.contrast ?? 0
+  if (k) {
+    const f = 1 + k // -1..1 → 0..2
+    r = (r - 0.5) * f + 0.5
+    g = (g - 0.5) * f + 0.5
+    b = (b - 0.5) * f + 0.5
+  }
+
+  const s = fx.saturation ?? 0
+  if (s) {
+    const f = 1 + s
+    const gray = 0.299 * r + 0.587 * g + 0.114 * b // Rec.601 luma
+    r = gray + (r - gray) * f
+    g = gray + (g - gray) * f
+    b = gray + (b - gray) * f
+  }
+
+  if (fx.invert) { r = 1 - r; g = 1 - g; b = 1 - b }
+
+  const to255 = (x: number) => Math.round(Math.min(1, Math.max(0, x)) * 255)
+  return [to255(r), to255(g), to255(b)]
+}
+
 export function evalSource(source: Source, u: number, v: number): RGB {
-  return evalGradient(source.gradient, u, v)
+  return applyPost(evalGradient(source.gradient, u, v), source.post)
 }
 
 function applyEase(ease: EaseType, x: number): number {

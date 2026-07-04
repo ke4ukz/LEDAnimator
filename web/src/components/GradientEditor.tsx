@@ -50,6 +50,7 @@ export function GradientEditor() {
   const project = useStore((s) => s.project)
   const selectedTrack = useStore((s) => s.selectedTrack)
   const setGradient = useStore((s) => s.updateGradient)
+  const updatePost = useStore((s) => s.updatePost)
 
   const track = project.tracks.find((t) => t.id === selectedTrack)
   const source = project.sources.find((s) => s.id === track?.sourceId)
@@ -57,13 +58,14 @@ export function GradientEditor() {
 
   if (!track || !gradient) return <p className="placeholder">Select a track to edit its source.</p>
 
+  const post = source?.post ?? {}
   // Spread-and-cast patch: the discriminated union keeps the active variant.
   const patch = (p: Partial<Gradient>) => setGradient({ ...gradient, ...p } as Gradient)
 
   return (
     <div className="grad-editor">
       <div className="preview-wrap">
-        <GradientPreview gradient={gradient} />
+        <GradientPreview gradient={gradient} post={post} />
         <PathOverlay track={track} />
       </div>
       <span className="muted preview-hint">Drag the handles to edit this track's sampling path.</span>
@@ -173,7 +175,35 @@ export function GradientEditor() {
       ) : (
         <RampEditor stops={gradient.stops} interp={gradient.interp} onChange={(stops) => patch({ stops })} />
       )}
+
+      <hr className="sep" />
+      <div className="field-row">
+        <span>Adjustments</span>
+        <button
+          className="btn"
+          title="Reset all adjustments"
+          onClick={() => updatePost({ invert: false, brightness: 0, contrast: 0, saturation: 0 })}
+        >
+          Reset
+        </button>
+      </div>
+      <Row label="Invert">
+        <input type="checkbox" checked={!!post.invert} onChange={(e) => updatePost({ invert: e.target.checked })} />
+      </Row>
+      <Adj label="Brightness" value={post.brightness ?? 0} onChange={(brightness) => updatePost({ brightness })} />
+      <Adj label="Contrast" value={post.contrast ?? 0} onChange={(contrast) => updatePost({ contrast })} />
+      <Adj label="Saturation" value={post.saturation ?? 0} onChange={(saturation) => updatePost({ saturation })} />
     </div>
+  )
+}
+
+/** A bipolar adjustment slider (−100…+100, 0 = neutral). */
+function Adj({ label, value, onChange }: { label: string; value: number; onChange: (v: number) => void }) {
+  return (
+    <Row label={label}>
+      <input type="range" min={-1} max={1} step={0.05} value={value} onChange={(e) => onChange(Number(e.target.value))} />
+      <span className="muted num">{value > 0 ? '+' : ''}{Math.round(value * 100)}</span>
+    </Row>
   )
 }
 

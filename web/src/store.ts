@@ -6,6 +6,7 @@ import { defaultGradient } from './presets'
 import {
   type Automation,
   type AutoParam,
+  type PostFx,
   type Project,
   type Source,
   type Track,
@@ -58,6 +59,8 @@ interface AppState {
 
   // Track / source editing (all re-bake the raster).
   updateGradient: (g: Gradient) => void
+  /** Merge a patch into the selected track's source post-processing (adjustments). */
+  updatePost: (patch: Partial<PostFx>) => void
   addTrack: () => void
   deleteTrack: (id: string) => void
   updateTrack: (id: string, patch: Partial<Track>) => void
@@ -262,6 +265,16 @@ export const useStore = create<AppState>((set, get) => {
       if (!track) return
       const sources = project.sources.map((s) =>
         s.id === track.sourceId ? { ...s, gradient: g } : s,
+      )
+      commit({ ...project, sources })
+    },
+
+    updatePost: (patch) => {
+      const { project, selectedTrack } = get()
+      const track = project.tracks.find((t) => t.id === selectedTrack)
+      if (!track) return
+      const sources = project.sources.map((s) =>
+        s.id === track.sourceId ? { ...s, post: { ...s.post, ...patch } } : s,
       )
       commit({ ...project, sources })
     },
