@@ -2,12 +2,76 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>LED Animator</title>
+    <title>LED Animator — design LED animations, export to your microcontroller</title>
+    <meta
+      name="description"
+      content="Design LED strip animations in your browser and export a ready-to-run program for your Raspberry Pi Pico W and WS2812 strips. Free, private, no account."
+    />
+    <link rel="stylesheet" href="/src/site/site.css" />
   </head>
   <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
+    <header class="site-header">
+      <div class="wrap">
+        <a class="brand" href="./">
+          <img src="./favicon.svg" alt="" />
+          <span>LED Animator</span>
+        </a>
+        <nav class="site-nav">
+          <a href="app/">Designer</a>
+          <a href="https://github.com/ke4ukz/LEDAnimator" target="_blank" rel="noopener noreferrer">GitHub</a>
+        </nav>
+      </div>
+    </header>
+
+    <main>
+      <section class="hero wrap">
+        <h1>Design LED animations in your browser.</h1>
+        <p class="lede">
+          Lay out your LEDs, animate them on a timeline, and export a ready-to-run program for your
+          microcontroller — no firmware coding required. Then tune it live from your phone or Mac.
+        </p>
+        <div class="cta">
+          <a class="btn btn-primary" href="app/">Open the web designer</a>
+          <a class="btn disabled" aria-disabled="true">iOS &amp; macOS apps — coming soon</a>
+          <span class="note">Runs entirely in your browser. Nothing to install, no account.</span>
+        </div>
+      </section>
+
+      <section class="features wrap">
+        <div class="card">
+          <h3>Visual editor</h3>
+          <p>Place LEDs to match your build, then paint animations across them on a timeline.</p>
+        </div>
+        <div class="card">
+          <h3>One-drag flashing</h3>
+          <p>
+            Export a single <code>.uf2</code> and drop it onto a blank Raspberry Pi Pico W — MicroPython
+            firmware, your pattern, and settings, all in one image.
+          </p>
+        </div>
+        <div class="card">
+          <h3>Live control</h3>
+          <p>
+            Companion iOS and macOS apps connect over Bluetooth or Wi-Fi to change brightness, speed,
+            colors, and patterns on the fly.
+          </p>
+        </div>
+        <div class="card">
+          <h3>Yours, privately</h3>
+          <p>Projects stay in your browser. No accounts, no tracking, nothing uploaded.</p>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="wrap">
+        <a href="privacy/">Privacy</a>
+        <a href="https://github.com/ke4ukz/LEDAnimator" target="_blank" rel="noopener noreferrer">GitHub</a>
+        <a href="https://github.com/ke4ukz/LEDAnimator/issues" target="_blank" rel="noopener noreferrer">Support</a>
+        <span>© LED Animator</span>
+      </div>
+    </footer>
   </body>
 </html>

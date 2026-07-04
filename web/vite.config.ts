@@ -81,6 +81,13 @@ export default defineConfig({
   plugins: [react(), buildInfo()],
   build: {
     rollupOptions: {
+      // Multi-page: marketing landing at /, the designer SPA at /app/, and the
+      // App-Store-linkable privacy page at /privacy/.
+      input: {
+        landing: fileURLToPath(new URL('index.html', import.meta.url)),
+        app: fileURLToPath(new URL('app/index.html', import.meta.url)),
+        privacy: fileURLToPath(new URL('privacy/index.html', import.meta.url)),
+      },
       // Emit a third-party license notices file covering exactly what ends up
       // in the bundle (transitive deps included). Linked from the app footer to
       // satisfy the MIT/BSD/ISC attribution requirements of our dependencies.
