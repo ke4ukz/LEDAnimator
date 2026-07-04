@@ -63,6 +63,11 @@ PATTERN_EXT = ".leda"
 DEVICE_NAME = "LED Animator"   # default; devicename.txt / NAME command override
 FW_VERSION = ${JSON.stringify(build)}   # build identifier (no real release yet)
 CONTROL_PORT = 4550            # TCP port for the (same) text control protocol over Wi-Fi
+# The CYW43's first connect after boot can return a spurious BADAUTH
+# ("wrong-password") even with correct credentials, so retry a few times (with a
+# short backoff) before reporting failure.
+WIFI_MAX_RETRIES = 4
+WIFI_RETRY_MS = 800
 
 
 @rp2.asm_pio(sideset_init=rp2.PIO.OUT_LOW, out_shiftdir=rp2.PIO.SHIFT_LEFT,
@@ -120,6 +125,8 @@ class S:
     wifi_pass = ""
     wifi_connect_req = False  # player loop should (re)start a connection
     wifi_last_status = None   # last wlan.status() reported (change detection)
+    wifi_retries = 0          # auto-retries used for the current connect attempt
+    wifi_retry_at = 0         # time.ticks_ms() to fire a scheduled retry (0 = none)
     scan_queue = None        # networks left to stream for a WIFISCAN (None = idle)
     scan_at = 0              # time.ticks_ms() of the last streamed WIFINET
     scan_total = 0
@@ -462,7 +469,9 @@ def _load_networks():
     ssid = lines[0].strip() if lines else ""
     if ssid:
         S.wifi_ssid = ssid
-        S.wifi_pass = lines[1] if len(lines) > 1 else ""
+        # Strip trailing CR/LF only (not spaces), in case the file picked up
+        # Windows line endings; a real password won't end in a control character.
+        S.wifi_pass = (lines[1] if len(lines) > 1 else "").rstrip("\\r\\n")
         S.wifi_connect_req = True
 
 
@@ -511,18 +520,26 @@ def _poll_wifi():
     try:
         import network
         if st == network.STAT_GOT_IP:
+            S.wifi_retries = 0
             S.wifi_state = "connected"
             S.wifi_ip = S.wlan.ifconfig()[0]
             _start_tcp()   # the control port is only reachable once we have an IP
             _start_udp()   # ...and start answering discovery probes
             _notify(_wifi_status_str())
         elif st < 0:   # negative status codes are the error states
-            reasons = {network.STAT_WRONG_PASSWORD: "wrong-password",
-                       network.STAT_NO_AP_FOUND: "no-ap",
-                       network.STAT_CONNECT_FAIL: "failed"}
-            S.wifi_state = "failed"
-            S.wifi_ip = reasons.get(st, "failed")
-            _notify(_wifi_status_str())
+            if S.wifi_retries < WIFI_MAX_RETRIES:
+                # Likely the spurious first-attempt BADAUTH: schedule a retry and
+                # stay "connecting" (don't report failure to the app yet). Leave
+                # wifi_last_status = st so we don't re-count until the retry runs.
+                S.wifi_retries += 1
+                S.wifi_retry_at = time.ticks_ms() + WIFI_RETRY_MS
+            else:
+                reasons = {network.STAT_WRONG_PASSWORD: "wrong-password",
+                           network.STAT_NO_AP_FOUND: "no-ap",
+                           network.STAT_CONNECT_FAIL: "failed"}
+                S.wifi_state = "failed"
+                S.wifi_ip = reasons.get(st, "failed")
+                _notify(_wifi_status_str())
     except Exception:
         pass
 
@@ -580,7 +597,14 @@ def _wifi_step():
         S.scan_req = False
         _do_scan()
     if S.wifi_connect_req:
+        # A fresh connect (boot auto-join or a WIFICONNECT command): reset the
+        # retry budget so this attempt gets its own set of retries.
         S.wifi_connect_req = False
+        S.wifi_retries = 0
+        S.wifi_retry_at = 0
+        _begin_connect()
+    elif S.wifi_retry_at and time.ticks_diff(time.ticks_ms(), S.wifi_retry_at) >= 0:
+        S.wifi_retry_at = 0
         _begin_connect()
     _poll_wifi()
 
