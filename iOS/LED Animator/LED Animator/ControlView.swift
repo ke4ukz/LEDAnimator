@@ -162,6 +162,8 @@ struct ControlView: View {
         .navigationTitle(session.connectedName)
         .inlineNavTitle()
         .toolbar {
+            #if os(macOS)
+            // macOS has no pull-to-refresh; iOS uses .refreshable instead.
             ToolbarItem(placement: .primaryAction) {
                 Button {
                     session.refreshPatterns()
@@ -169,6 +171,7 @@ struct ControlView: View {
                     Image(systemName: "arrow.clockwise")
                 }
             }
+            #endif
             ToolbarItem(placement: .primaryAction) {
                 Button {
                     showWifi = true

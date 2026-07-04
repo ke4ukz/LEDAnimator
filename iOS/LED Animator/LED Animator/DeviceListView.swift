@@ -15,6 +15,18 @@ struct DeviceListView: View {
     var body: some View {
         content
             .navigationTitle("Devices")
+            #if os(macOS)
+            .toolbar {
+                ToolbarItem(placement: .primaryAction) {
+                    Button {
+                        ble.startScan()
+                        discovery.scan()
+                    } label: {
+                        Image(systemName: "arrow.clockwise")
+                    }
+                }
+            }
+            #endif
             .navigationDestination(isPresented: connectedBinding) {
                 if let session = activeSession {
                     ControlView(session: session)
