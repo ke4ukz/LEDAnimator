@@ -4,9 +4,9 @@
 //
 //  The app's home shell for the unified authoring + control app. A sidebar with
 //  two collapsible sections — your Animations (a mock library for now) and
-//  discovered Devices — with the real device control reused from ControlView.
-//  Opening the editor takes over the whole window; the editor + file-push flows
-//  are placeholders/mocks until the native editor exists.
+//  discovered Devices. Tapping an animation opens the editor; its info/upload
+//  buttons (and a context menu) reach Details / Send. Devices reuse the real
+//  ControlView. The editor + file-push flows are placeholders/mocks for now.
 //
 
 import SwiftUI
@@ -21,6 +21,9 @@ struct MockAnimation: Identifiable, Hashable {
     let frameCount: Int
     let fps: Int
     var duration: Double { fps > 0 ? Double(frameCount) / Double(fps) : 0 }
+    var subtitle: String {
+        tracks.count == 1 ? "\(ledCount) LEDs" : "\(ledCount) LEDs · \(tracks.count) tracks"
+    }
 }
 
 let sampleAnimations: [MockAnimation] = [
@@ -52,11 +55,6 @@ struct AnimationThumbnail: View {
     }
 }
 
-private enum HomeSelection: Hashable {
-    case animation(String)
-    case device(String)
-}
-
 // MARK: - Home
 
 struct HomeView: View {
@@ -64,9 +62,11 @@ struct HomeView: View {
     let wifi: TCPController
     let discovery: WiFiDiscovery
 
-    @State private var selection: HomeSelection?
-    @State private var showEditor = false          // full-screen editor takeover
+    @State private var selection: String?              // selected DEVICE id (animations aren't selected)
+    @State private var showEditor = false              // full-screen editor takeover
     @State private var editingTitle = "Untitled Animation"
+    @State private var detailAnimation: MockAnimation? // Details sheet
+    @State private var sendAnimation: MockAnimation?   // Send-to-device sheet
     @State private var animationsExpanded = true
     @State private var devicesExpanded = true
     @State private var animations = sampleAnimations
@@ -79,9 +79,6 @@ struct HomeView: View {
     var body: some View {
         ZStack {
             if showEditor {
-                // The editor REPLACES home (not an overlay) so the split view and
-                // its window toolbar — the sidebar toggle, the Wi-Fi/Info buttons —
-                // are gone entirely. A true full-window authoring surface.
                 EditorView(title: editingTitle, onClose: { showEditor = false })
                     .transition(.move(edge: .bottom))
             } else {
@@ -106,13 +103,23 @@ struct HomeView: View {
                 try? await Task.sleep(for: .seconds(4))
             }
         }
-        .onChange(of: selection) { _, sel in
-            if case .device(let id) = sel { connect(to: id) }
+        .onChange(of: selection) { _, id in
+            if let id { connect(to: id) }
         }
         .alert("Couldn't Connect", isPresented: failedBinding) {
             Button("OK", role: .cancel) { ble.clearFailure(); wifi.clearFailure() }
         } message: {
             Text(failureMessage)
+        }
+        .sheet(item: $detailAnimation) { a in
+            AnimationDetailSheet(animation: a) {
+                detailAnimation = nil
+                editingTitle = a.name
+                showEditor = true
+            }
+        }
+        .sheet(item: $sendAnimation) { a in
+            SendToDeviceView(animation: a, devices: devices)
         }
     }
 
@@ -122,15 +129,20 @@ struct HomeView: View {
         List(selection: $selection) {
             Section(isExpanded: $animationsExpanded) {
                 ForEach(animations) { a in
-                    AnimationRow(animation: a)
-                        .tag(HomeSelection.animation(a.id))
-                        .contextMenu {   // right-click (Mac) / long-press (iOS)
-                            Button(role: .destructive) { delete(a) } label: {
-                                Label("Delete", systemImage: "trash")
-                            }
-                        }
+                    AnimationRow(
+                        animation: a,
+                        onOpen: { editingTitle = a.name; showEditor = true },
+                        onDetails: { detailAnimation = a },
+                        onSend: { sendAnimation = a }
+                    )
+                    .contextMenu {
+                        Button { detailAnimation = a } label: { Label("Details", systemImage: "info.circle") }
+                        Button { sendAnimation = a } label: { Label("Send to Device", systemImage: "arrow.up.circle") }
+                        Divider()
+                        Button(role: .destructive) { delete(a) } label: { Label("Delete", systemImage: "trash") }
+                    }
                 }
-                .onDelete { deleteAnimations(at: $0) }   // swipe-to-delete
+                .onDelete { deleteAnimations(at: $0) }
             } header: {
                 sectionHeader("Animations") {
                     Button { editingTitle = "Untitled Animation"; showEditor = true } label: { Image(systemName: "plus") }
@@ -147,7 +159,7 @@ struct HomeView: View {
                     }
                 } else {
                     ForEach(devices) { d in
-                        HomeDeviceRow(device: d, connecting: connecting(d)).tag(HomeSelection.device(d.id))
+                        HomeDeviceRow(device: d, connecting: connecting(d)).tag(d.id)
                     }
                 }
             } header: {
@@ -170,35 +182,20 @@ struct HomeView: View {
         }
     }
 
-    // MARK: Animation deletion
-
     private func deleteAnimations(at offsets: IndexSet) {
-        let ids = offsets.map { animations[$0].id }
         animations.remove(atOffsets: offsets)
-        clearSelectionIfDeleted(ids)
     }
 
     private func delete(_ animation: MockAnimation) {
         animations.removeAll { $0.id == animation.id }
-        clearSelectionIfDeleted([animation.id])
+        if detailAnimation?.id == animation.id { detailAnimation = nil }
     }
 
-    /// Drop the detail pane if the selected animation was just deleted.
-    private func clearSelectionIfDeleted(_ ids: [String]) {
-        if case .animation(let id) = selection, ids.contains(id) { selection = nil }
-    }
-
-    // MARK: Detail
+    // MARK: Detail (devices only — animations open the editor / sheets)
 
     @ViewBuilder
     private var detail: some View {
-        switch selection {
-        case .animation(let id):
-            if let a = animations.first(where: { $0.id == id }) {
-                AnimationDetailView(animation: a, devices: devices,
-                                    onEdit: { editingTitle = a.name; showEditor = true })
-            }
-        case .device:
+        if selection != nil {
             if let session = activeSession {
                 ControlView(session: session)
             } else if isConnecting {
@@ -210,11 +207,11 @@ struct HomeView: View {
                 ContentUnavailableView("Not Connected", systemImage: "wifi.slash",
                                        description: Text("Select the device again to reconnect."))
             }
-        case nil:
+        } else {
             ContentUnavailableView {
                 Label("LED Animator", systemImage: "sparkles")
             } description: {
-                Text("Pick an animation to edit or send, or a device to control.")
+                Text("Tap an animation to edit it, or pick a device to control.")
             }
         }
     }
@@ -238,7 +235,7 @@ struct HomeView: View {
 
     private func connecting(_ device: UnifiedDevice) -> Bool {
         if let b = device.ble, ble.connectionState == .connecting, ble.connectingName == b.name { return true }
-        if device.wifi != nil, wifi.connectionState == .connecting, selection == .device(device.id) { return true }
+        if device.wifi != nil, wifi.connectionState == .connecting, selection == device.id { return true }
         return false
     }
 
@@ -264,18 +261,31 @@ struct HomeView: View {
 
 private struct AnimationRow: View {
     let animation: MockAnimation
+    let onOpen: () -> Void
+    let onDetails: () -> Void
+    let onSend: () -> Void
+
     var body: some View {
-        HStack(spacing: 10) {
-            AnimationThumbnail(tracks: animation.tracks)
-                .frame(width: 34, height: 24)
-                .clipShape(RoundedRectangle(cornerRadius: 5))
-                .overlay(RoundedRectangle(cornerRadius: 5).strokeBorder(.white.opacity(0.15)))
-            VStack(alignment: .leading, spacing: 1) {
-                Text(animation.name)
-                Text(animation.tracks.count == 1 ? "\(animation.ledCount) LEDs"
-                                                  : "\(animation.ledCount) LEDs · \(animation.tracks.count) tracks")
-                    .font(.caption2).foregroundStyle(.secondary)
+        HStack(spacing: 6) {
+            // Tapping the thumbnail/name opens the editor.
+            HStack(spacing: 10) {
+                AnimationThumbnail(tracks: animation.tracks)
+                    .frame(width: 34, height: 24)
+                    .clipShape(RoundedRectangle(cornerRadius: 5))
+                    .overlay(RoundedRectangle(cornerRadius: 5).strokeBorder(.white.opacity(0.15)))
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(animation.name)
+                    Text(animation.subtitle).font(.caption2).foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 0)
             }
+            .contentShape(Rectangle())
+            .onTapGesture(perform: onOpen)
+
+            Button(action: onDetails) { Image(systemName: "info.circle") }
+                .buttonStyle(.borderless).help("Details")
+            Button(action: onSend) { Image(systemName: "arrow.up.circle") }
+                .buttonStyle(.borderless).help("Send to device")
         }
         .padding(.vertical, 2)
     }
@@ -304,23 +314,22 @@ private struct HomeDeviceRow: View {
     }
 }
 
-// MARK: - Animation detail
+// MARK: - Animation details (sheet)
 
-private struct AnimationDetailView: View {
+private struct AnimationDetailSheet: View {
     let animation: MockAnimation
-    let devices: [UnifiedDevice]
     let onEdit: () -> Void
-    @State private var showSend = false
+    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        ScrollView {
-            VStack(spacing: 22) {
-                AnimationThumbnail(tracks: animation.tracks)
-                    .frame(height: 150)
-                    .frame(maxWidth: 520)
-                    .clipShape(RoundedRectangle(cornerRadius: 16))
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: 22) {
+                    AnimationThumbnail(tracks: animation.tracks)
+                        .frame(height: 150)
+                        .frame(maxWidth: 520)
+                        .clipShape(RoundedRectangle(cornerRadius: 16))
 
-                VStack(spacing: 14) {
                     HStack(spacing: 28) {
                         metric("\(animation.ledCount)", "LEDs")
                         metric("\(animation.tracks.count)", animation.tracks.count == 1 ? "Track" : "Tracks")
@@ -328,32 +337,21 @@ private struct AnimationDetailView: View {
                         metric(String(format: "%.1fs", animation.duration), "Length")
                     }
 
-                    HStack(spacing: 12) {
-                        Button { onEdit() } label: {
-                            Label("Edit", systemImage: "slider.horizontal.3")
-                        }
-                        .buttonStyle(.borderedProminent)
-
-                        Button { showSend = true } label: {
-                            Label("Send to Device", systemImage: "arrow.up.circle")
-                        }
-                        .buttonStyle(.bordered)
-                        .disabled(devices.isEmpty)
+                    Button { onEdit() } label: {
+                        Label("Open in Editor", systemImage: "slider.horizontal.3")
                     }
-                    if devices.isEmpty {
-                        Text("No devices found yet — connect one to send this.")
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
+                    .buttonStyle(.borderedProminent)
                 }
+                .padding()
+                .frame(maxWidth: .infinity)
             }
-            .padding()
-            .frame(maxWidth: .infinity)
+            .navigationTitle(animation.name)
+            .inlineNavTitle()
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
+            }
         }
-        .navigationTitle(animation.name)
-        .inlineNavTitle()
-        .sheet(isPresented: $showSend) {
-            SendToDeviceView(animation: animation, devices: devices)
-        }
+        .macSheetFrame()
     }
 
     private func metric(_ value: String, _ label: String) -> some View {
