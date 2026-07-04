@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { useStore } from '../store'
-import { type Source, type Track, evalSource, pathPoint, trackPhaseAt } from '../project'
+import { type Source, type Track, evalSource, pathPoint, trackParamAt, trackPhaseAt } from '../project'
 import { SpeedLane } from './SpeedLane'
 
 const STRIP_W = 600
@@ -40,6 +40,9 @@ function Lane({
 }) {
   const frame = useStore((s) => s.frame)
   const raster = useStore((s) => s.raster)
+  const showSamples = useStore((s) => s.showSamples)
+  const leds = useStore((s) => s.leds)
+  const assignments = useStore((s) => s.project.assignments)
   const canvasRef = useRef<HTMLCanvasElement>(null)
 
   // Repaint the strip: the source sampled along the path over s ∈ [0,1).
@@ -66,6 +69,22 @@ function Lane({
   // Playhead = where the lead LED (order 0) reads right now (integrate speed).
   const s0 = frac(track.offset + trackPhaseAt(track, frame, raster.numFrames))
 
+  // Optional ghost markers: where each in-chain member LED reads right now.
+  const sampleS: number[] = []
+  if (showSamples) {
+    const t = frame / raster.numFrames
+    const phase = trackPhaseAt(track, frame, raster.numFrames)
+    const offset = trackParamAt(track, 'offset', t)
+    const chase = trackParamAt(track, 'chase', t)
+    let rank = 0
+    assignments.forEach((id, i) => {
+      if (id !== track.id || leds[i]?.unassigned) return
+      const idx = leds[i]?.animIndex ?? rank
+      rank++
+      sampleS.push(frac(offset + idx * chase + phase))
+    })
+  }
+
   return (
     <div className={`lane-group${selected ? ' sel' : ''}`}>
       <div className="lane" onClick={onSelect}>
@@ -75,6 +94,9 @@ function Lane({
         </div>
         <div className="lane-strip">
           <canvas ref={canvasRef} width={STRIP_W} height={STRIP_H} className="lane-canvas" />
+          {sampleS.map((s, i) => (
+            <div key={i} className="playhead ghost" style={{ left: `${s * 100}%` }} />
+          ))}
           <div className="playhead" style={{ left: `${s0 * 100}%` }} />
         </div>
       </div>

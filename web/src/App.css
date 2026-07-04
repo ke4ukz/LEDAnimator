@@ -1229,6 +1229,17 @@ input[type='color'] {
   pointer-events: none;
 }
 
+/* Per-LED sample markers: a dimmer, thinner playhead (one per LED). */
+.playhead.ghost {
+  top: 0;
+  bottom: 0;
+  width: 0;
+  background: none;
+  border-left: 1px solid rgba(255, 255, 255, 0.45);
+  border-right: none;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35);
+}
+
 .add-lane {
   font-size: 12px;
   font-style: italic;
