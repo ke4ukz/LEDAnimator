@@ -64,9 +64,10 @@ export function Leds() {
       onClick={(e) => {
         e.stopPropagation()
         if (e.instanceId == null) return
-        // In the renumber tool a click reassigns chain order instead of selecting.
-        const { tool, renumberAt } = useStore.getState()
+        // The active tool decides what a click does.
+        const { tool, renumberAt, animAssignAt } = useStore.getState()
         if (tool === 'renumber') renumberAt(e.instanceId)
+        else if (tool === 'animassign') animAssignAt(e.instanceId)
         else selectLed(e.instanceId, e.shiftKey ? 'toggle' : 'replace')
       }}
     >
@@ -150,16 +151,21 @@ export function UnassignedMarkers() {
 export function LedLabels() {
   const leds = useStore((s) => s.leds)
   const show = useStore((s) => s.showLabels)
+  const tool = useStore((s) => s.tool)
   if (!show) return null
+  const showAnim = tool === 'animassign'
   let n = -1
   return (
     <>
       {leds.map((p, i) => {
         if (p.unassigned) return null
         n += 1
+        // Anim-assign mode labels by animation index (so groups are visible);
+        // otherwise by chain/wiring number.
+        const label = showAnim ? p.animIndex ?? n : n
         return (
           <Html key={i} position={[p.x, p.y, p.z]} center zIndexRange={[20, 0]} style={{ pointerEvents: 'none' }}>
-            <div className="led-label">{n}</div>
+            <div className="led-label">{label}</div>
           </Html>
         )
       })}

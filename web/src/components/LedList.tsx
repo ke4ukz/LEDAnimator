@@ -96,15 +96,24 @@ export function LedList() {
   const renumberNext = useStore((s) => s.renumberNext)
   const startRenumber = useStore((s) => s.startRenumber)
   const endRenumber = useStore((s) => s.endRenumber)
+  const animAssignValue = useStore((s) => s.animAssignValue)
+  const startAnimAssign = useStore((s) => s.startAnimAssign)
+  const nextAnimAssign = useStore((s) => s.nextAnimAssign)
+  const endAnimAssign = useStore((s) => s.endAnimAssign)
   const [start, setStart] = useState(0)
+  const [animStart, setAnimStart] = useState(0)
 
-  // Escape leaves the renumber tool.
+  // Escape leaves whichever click tool is active.
   useEffect(() => {
-    if (tool !== 'renumber') return
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') endRenumber() }
+    if (tool === 'select') return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return
+      if (tool === 'renumber') endRenumber()
+      else if (tool === 'animassign') endAnimAssign()
+    }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [tool, endRenumber])
+  }, [tool, endRenumber, endAnimAssign])
 
   return (
     <div className="led-list">
@@ -148,19 +157,38 @@ export function LedList() {
           <span>Click LEDs in order — next <strong>#{renumberNext}</strong></span>
           <button className="btn" onClick={endRenumber}>Done</button>
         </div>
-      ) : (
-        <div className="renumber-bar">
-          <label className="muted">Renumber from</label>
-          <input
-            className="order"
-            type="number"
-            min={0}
-            max={Math.max(0, leds.length - 1)}
-            value={start}
-            onChange={(e) => setStart(Math.max(0, parseInt(e.target.value, 10) || 0))}
-          />
-          <button className="btn" disabled={leds.length === 0} onClick={() => startRenumber(start)}>Start</button>
+      ) : tool === 'animassign' ? (
+        <div className="renumber-bar active">
+          <span>Click LEDs — anim <strong>#{animAssignValue}</strong></span>
+          <button className="btn" onClick={nextAnimAssign}>Next #</button>
+          <button className="btn" onClick={endAnimAssign}>Done</button>
         </div>
+      ) : (
+        <>
+          <div className="renumber-bar">
+            <label className="muted">Renumber (wiring) from</label>
+            <input
+              className="order"
+              type="number"
+              min={0}
+              max={Math.max(0, leds.length - 1)}
+              value={start}
+              onChange={(e) => setStart(Math.max(0, parseInt(e.target.value, 10) || 0))}
+            />
+            <button className="btn" disabled={leds.length === 0} onClick={() => startRenumber(start)}>Start</button>
+          </div>
+          <div className="renumber-bar">
+            <label className="muted">Assign anim # from</label>
+            <input
+              className="order"
+              type="number"
+              min={0}
+              value={animStart}
+              onChange={(e) => setAnimStart(Math.max(0, parseInt(e.target.value, 10) || 0))}
+            />
+            <button className="btn" disabled={leds.length === 0} onClick={() => startAnimAssign(animStart)}>Start</button>
+          </div>
+        </>
       )}
     </div>
   )

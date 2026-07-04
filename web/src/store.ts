@@ -41,10 +41,13 @@ interface AppState {
   selectedTrack: string | null
   /** Preview LEDs for a pending "add shape" (rendered as ghosts). */
   ghost: LedPosition[] | null
-  /** Active viewport tool. In 'renumber', a click reassigns chain order. */
-  tool: 'select' | 'renumber'
+  /** Active viewport tool. 'renumber' = clicks reassign wiring order;
+   *  'animassign' = clicks assign the current animation index. */
+  tool: 'select' | 'renumber' | 'animassign'
   /** The chain number the renumber tool assigns on the next click. */
   renumberNext: number
+  /** The animation index the anim-assign tool stamps onto clicked LEDs. */
+  animAssignValue: number
   // Display settings.
   ledScale: number
   ledShape: 'sphere' | 'cube'
@@ -89,6 +92,14 @@ interface AppState {
   renumberAt: (index: number) => void
   /** Leave the renumber tool. */
   endRenumber: () => void
+  /** Enter the anim-assign tool, stamping animation index `start` on clicks. */
+  startAnimAssign: (start: number) => void
+  /** Stamp the current animation index onto the LED at `index` (no auto-advance). */
+  animAssignAt: (index: number) => void
+  /** Advance the stamped animation index (start a new group). */
+  nextAnimAssign: () => void
+  /** Leave the anim-assign tool. */
+  endAnimAssign: () => void
   setSelection: (indices: number[]) => void
   clearSelection: () => void
 
@@ -234,6 +245,7 @@ export const useStore = create<AppState>((set, get) => {
     ghost: null,
     tool: 'select',
     renumberNext: 0,
+    animAssignValue: 0,
     ledScale: init.ledScale,
     ledShape: init.ledShape,
     showLabels: init.showLabels,
@@ -447,6 +459,15 @@ export const useStore = create<AppState>((set, get) => {
       // re-bakes, and remaps selection; then advance to the next number.
       get().moveLedTo(index, to)
       set({ renumberNext: Math.min(to + 1, leds.length - 1), selection: [to] })
+    },
+
+    startAnimAssign: (start) => set({ tool: 'animassign', animAssignValue: Math.max(0, Math.floor(start) || 0), showLabels: true }),
+    endAnimAssign: () => set({ tool: 'select' }),
+    nextAnimAssign: () => set((s) => ({ animAssignValue: s.animAssignValue + 1 })),
+    animAssignAt: (index) => {
+      // Stamp the current value; repeats are allowed (that's how you group).
+      get().setLedAnimIndex([index], get().animAssignValue)
+      set({ selection: [index] })
     },
 
     getProjectFile: () => {
