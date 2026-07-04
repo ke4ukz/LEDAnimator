@@ -3,7 +3,7 @@ import { Viewport } from './components/Viewport'
 import { Transport } from './components/Transport'
 import { GradientEditor } from './components/GradientEditor'
 import { TrackInspector } from './components/TrackInspector'
-import { ArrangementPanel } from './components/ArrangementPanel'
+import { ArrangementDialog } from './components/ArrangementDialog'
 import { ViewportToolbar } from './components/ViewportToolbar'
 import { LedList } from './components/LedList'
 import { Inspector } from './components/Inspector'
@@ -36,6 +36,7 @@ export default function App() {
   const [exportOpen, setExportOpen] = useState(false)
   const [aboutOpen, setAboutOpen] = useState(false)
   const [projectsOpen, setProjectsOpen] = useState(false)
+  const [arrangeOpen, setArrangeOpen] = useState(false)
   const [saveConfirm, setSaveConfirm] = useState<{ savedName: string; newName: string } | null>(null)
   const [dragging, setDragging] = useState(false)
   const loadProject = useStore((s) => s.loadProject)
@@ -202,6 +203,7 @@ export default function App() {
       {exportOpen && <ExportDialog onClose={() => setExportOpen(false)} />}
       {aboutOpen && <AboutDialog onClose={() => setAboutOpen(false)} />}
       {projectsOpen && <ProjectsDialog onClose={() => setProjectsOpen(false)} />}
+      {arrangeOpen && <ArrangementDialog onClose={() => setArrangeOpen(false)} />}
       {saveConfirm && (
         <SaveConfirmDialog
           savedName={saveConfirm.savedName}
@@ -228,11 +230,8 @@ export default function App() {
       </main>
 
       <aside className="inspector">
-        <Panel title="Arrangement">
-          <ArrangementPanel />
-        </Panel>
         <Panel title="LEDs">
-          <LedList />
+          <LedList onAddShape={() => setArrangeOpen(true)} />
         </Panel>
         <Panel title="LED properties">
           <Inspector />

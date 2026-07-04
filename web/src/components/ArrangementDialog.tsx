@@ -2,38 +2,49 @@ import { useEffect, useState } from 'react'
 import { useStore } from '../store'
 import { ARRANGEMENTS, defaultParams } from '../arrangements'
 
-/** Generate LED positions from a shape preset, with a ghost-preview confirm step. */
-export function ArrangementPanel() {
+/**
+ * Generate LED positions from a shape preset. A floating card (no dimming
+ * backdrop) so the ghost preview stays visible in the viewport — adjust, then
+ * Add or Cancel. The ghost is cleared when the dialog closes (unmounts).
+ */
+export function ArrangementDialog({ onClose }: { onClose: () => void }) {
   const addLeds = useStore((s) => s.addLeds)
   const setGhost = useStore((s) => s.setGhost)
   const [idx, setIdx] = useState(0)
   const preset = ARRANGEMENTS[idx]
   const [params, setParams] = useState<Record<string, number>>(() => defaultParams(preset))
-  const [pending, setPending] = useState(false)
 
   const built = preset.build(params)
 
-  // While previewing, keep the ghost in sync with the params.
+  // Ghost preview follows the current shape/params; cleared on close (unmount).
   useEffect(() => {
-    setGhost(pending ? ARRANGEMENTS[idx].build(params) : null)
-  }, [pending, idx, params, setGhost])
-  // Clear the ghost if the panel unmounts.
+    setGhost(preset.build(params))
+  }, [preset, params, setGhost])
   useEffect(() => () => setGhost(null), [setGhost])
+
+  // Escape cancels.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
 
   const choose = (i: number) => {
     setIdx(i)
     setParams(defaultParams(ARRANGEMENTS[i]))
   }
-
-  const confirm = () => {
+  const add = () => {
     addLeds(preset.build(params))
-    setPending(false)
+    onClose()
   }
 
-  const summary = `${built.length} LEDs in a ${preset.name.toLowerCase()}`
-
   return (
-    <div className="arrange">
+    <div className="arrange-dialog">
+      <div className="modal-head">
+        <h2>Add shape</h2>
+        <button className="x" onClick={onClose} title="Close">×</button>
+      </div>
+
       <label className="field-row">
         <span>Shape</span>
         <select value={idx} onChange={(e) => choose(Number(e.target.value))}>
@@ -58,20 +69,11 @@ export function ArrangementPanel() {
         </label>
       ))}
 
-      {pending ? (
-        <>
-          <div className="arrange-actions">
-            <button className="btn" onClick={() => setPending(false)}>Cancel</button>
-            <button className="btn btn-primary" onClick={confirm}>Confirm</button>
-          </div>
-          <p className="placeholder">Preview shown — confirm to add {summary}.</p>
-        </>
-      ) : (
-        <>
-          <button className="btn btn-primary add-shape" onClick={() => setPending(true)}>Add shape</button>
-          <p className="placeholder">Adds {summary}.</p>
-        </>
-      )}
+      <p className="muted arrange-hint">Preview shown in the viewport.</p>
+      <div className="arrange-actions">
+        <button className="btn" onClick={onClose}>Cancel</button>
+        <button className="btn btn-primary" onClick={add}>Add {built.length} LEDs</button>
+      </div>
     </div>
   )
 }

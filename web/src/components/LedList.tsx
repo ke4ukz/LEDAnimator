@@ -80,8 +80,8 @@ function AnimInput({ value, onCommit }: { value: number | undefined; onCommit: (
 
 /** LED list: live color swatch, click to select (Shift = range, Cmd/Ctrl =
  *  toggle), editable wiring order (#) + animation index (A), track assignment,
- *  and add/delete. */
-export function LedList() {
+ *  and add/delete. `onAddShape` opens the arrangement (add-shape) dialog. */
+export function LedList({ onAddShape }: { onAddShape: () => void }) {
   const leds = useStore((s) => s.leds)
   const tracks = useStore((s) => s.project.tracks)
   const assignments = useStore((s) => s.project.assignments)
@@ -148,7 +148,8 @@ export function LedList() {
         ))}
       </ul>
       <div className="led-list-actions">
-        <button className="btn" onClick={() => addLeds([{ x: 0, y: 0, z: 0 }])}>+ Add LED</button>
+        <button className="btn" onClick={onAddShape}>Add shape…</button>
+        <button className="btn" onClick={() => addLeds([{ x: 0, y: 0, z: 0 }])}>+ LED</button>
         <button className="btn" disabled={selection.length === 0} onClick={() => deleteLeds(selection)}>
           Delete{selection.length > 1 ? ` (${selection.length})` : ''}
         </button>
