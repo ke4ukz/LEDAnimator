@@ -27,8 +27,17 @@ const PICO_W_FS_BYTES = 212 * 4096
 export function ExportDialog({ onClose }: { onClose: () => void }) {
   const raster = useStore((s) => s.raster)
   const getProjectFile = useStore((s) => s.getProjectFile)
-  const [deviceId, setDeviceId] = useState('rp2040')
-  const [format, setFormat] = useState<ExportFormat>('uf2')
+  // Remember the last target device + format across sessions.
+  const [deviceId, setDeviceId] = useState(() => {
+    const saved = localStorage.getItem('leda.export.device')
+    return DEVICES.some((d) => d.id === saved) ? saved! : 'rp2040'
+  })
+  const [format, setFormat] = useState<ExportFormat>(() => {
+    const saved = localStorage.getItem('leda.export.format')
+    return saved === 'uf2' || saved === 'zip' || saved === 'leda' ? saved : 'uf2'
+  })
+  useEffect(() => { localStorage.setItem('leda.export.device', deviceId) }, [deviceId])
+  useEffect(() => { localStorage.setItem('leda.export.format', format) }, [format])
   const [pin, setPin] = useState(0)
   const [brightness, setBrightness] = useState(1)
   const [deviceName, setDeviceName] = useState('LED Animator')
