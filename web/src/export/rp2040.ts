@@ -89,6 +89,7 @@ class S:
     solid = (0, 0, 0)        # current solid color, also restored from state.txt
     file = None              # selected pattern filename; None = nothing to play
     reload = True
+    uploading = False        # a TCP client is streaming a pattern file -> pause playback
     n = 0                    # LED count of the loaded pattern
     name = DEVICE_NAME       # advertised BLE name (overridable at runtime)
     device_id = b""          # last 3 bytes of the Wi-Fi MAC (= hostname suffix),
@@ -645,9 +646,110 @@ def _stop_tcp():
     S.tcp_srv = None
 
 
+def _valid_pattern_name(name):
+    # Whitelist basic chars (NO path separators), force a .leda extension, cap
+    # length, reject the device's own config files. The app sanitizes too.
+    keep = ""
+    for ch in name:
+        if ("a" <= ch <= "z") or ("A" <= ch <= "Z") or ("0" <= ch <= "9") or ch in " _-.":
+            keep += ch
+    keep = keep.strip()
+    if not keep or keep.startswith(".") or ".." in keep:
+        return None
+    if not keep.endswith(".leda"):
+        keep = keep + ".leda"
+    if len(keep) > 40:
+        return None
+    if keep in ("main.py", "datapin.txt", "bright.txt", "devicename.txt",
+                "selected.txt", "state.txt", "networks.txt", "upload.tmp",
+                "project.json"):
+        return None
+    return keep
+
+
+# UPLOAD is TCP-only (bulk binary). "UPLOAD <len> <name...>" -> "OK UPLOAD",
+# then the client streams exactly <len> raw bytes; the device writes them to a
+# temp file, checks the LEDA magic, renames to <name>, and replies OK UPLOADED.
+# Playback clears + pauses (S.uploading) during the transfer.
+
+def _upload_begin(cl, entry, text):
+    try:
+        parts = text.split(None, 2)     # ["UPLOAD", "<len>", "<name...>"]
+        length = int(parts[1])
+        name = _valid_pattern_name(parts[2])
+    except Exception:
+        _tcp_send_one(cl, "ERR args\\n")
+        return
+    if not name:
+        _tcp_send_one(cl, "ERR name\\n")
+        return
+    if length <= 0 or length > _free_bytes() - 8192:   # keep some slack free
+        _tcp_send_one(cl, "ERR size\\n")
+        return
+    try:
+        fh = open("upload.tmp", "wb")
+    except Exception:
+        _tcp_send_one(cl, "ERR open\\n")
+        return
+    entry[2] = [length, fh, name]
+    S.uploading = True
+    _tcp_send_one(cl, "OK UPLOAD\\n")
+
+
+def _upload_finish(cl, fh, name):
+    try:
+        fh.close()
+    except Exception:
+        pass
+    S.uploading = False
+    S.reload = True                     # resume playback afterwards
+    ok = False
+    try:
+        with open("upload.tmp", "rb") as f:
+            ok = f.read(4) == b"LEDA"
+    except Exception:
+        pass
+    if not ok:
+        try:
+            os.remove("upload.tmp")
+        except Exception:
+            pass
+        _tcp_send_one(cl, "ERR badfile\\n")
+        return
+    try:
+        try:
+            os.remove(name)             # overwrite same-named pattern
+        except OSError:
+            pass
+        os.rename("upload.tmp", name)
+        _tcp_send_one(cl, "OK UPLOADED " + name + "\\n")
+    except Exception:
+        try:
+            os.remove("upload.tmp")
+        except Exception:
+            pass
+        _tcp_send_one(cl, "ERR save\\n")
+
+
+def _upload_abort(entry):
+    up = entry[2]
+    entry[2] = None
+    if up:
+        try:
+            up[1].close()
+        except Exception:
+            pass
+    try:
+        os.remove("upload.tmp")
+    except Exception:
+        pass
+    S.uploading = False
+    S.reload = True
+
+
 def _tcp_step():
-    # Non-blocking: accept any waiting client, then drain each connected client
-    # and dispatch its complete (newline-terminated) commands.
+    # Non-blocking: accept any waiting client, then drain each - parsing
+    # newline-framed commands, or (during UPLOAD) writing raw bytes to a file.
     if S.tcp_srv is None:
         return
     try:
@@ -656,40 +758,73 @@ def _tcp_step():
             cl.close()
         else:
             cl.setblocking(False)
-            S.tcp_clients.append([cl, b""])
+            S.tcp_clients.append([cl, b"", None])   # [sock, buf, upload or None]
     except OSError:
-        pass   # nothing waiting to accept
+        pass
     for entry in list(S.tcp_clients):
         cl = entry[0]
         try:
-            data = cl.recv(256)
+            data = cl.recv(1024)
         except OSError as e:
-            if e.args[0] in (11, 35):   # EAGAIN / EWOULDBLOCK - no data right now
+            if e.args[0] in (11, 35):   # EAGAIN - no data right now
                 continue
             _tcp_drop(cl)
             continue
-        if not data:                    # empty recv = peer closed
+        if not data:                    # peer closed
+            if entry[2] is not None:
+                _upload_abort(entry)
             _tcp_drop(cl)
             continue
-        buf = entry[1] + data
-        if b"\\n" not in buf and len(buf) > 512:
-            entry[1] = b""              # runaway line with no terminator - drop it
-            continue
-        while b"\\n" in buf:
-            line, buf = buf.split(b"\\n", 1)
+        entry[1] += data
+        _tcp_drain(entry)
+
+
+def _tcp_drain(entry):
+    cl = entry[0]
+    while True:
+        if entry[2] is not None:
+            # Upload mode: pour buffered bytes into the temp file.
+            if not entry[1]:
+                return
+            remaining, fh, name = entry[2]
+            take = remaining if remaining < len(entry[1]) else len(entry[1])
             try:
-                text = line.decode().strip()
+                fh.write(entry[1][:take])
             except Exception:
+                entry[1] = entry[1][take:]
+                _upload_abort(entry)
+                _tcp_send_one(cl, "ERR write\\n")
                 continue
-            if not text:
-                continue
-            try:
-                reply = dispatch(text, ("tcp", cl))
-            except Exception as e:
-                reply = "ERR " + str(e)
-            if reply:
-                _tcp_send_one(cl, reply + "\\n")
-        entry[1] = buf
+            entry[1] = entry[1][take:]
+            remaining -= take
+            if remaining > 0:
+                entry[2] = [remaining, fh, name]
+                return
+            entry[2] = None
+            _upload_finish(cl, fh, name)
+            continue   # any trailing bytes are the next command(s)
+        nl = entry[1].find(b"\\n")
+        if nl < 0:
+            if len(entry[1]) > 512:
+                entry[1] = b""          # runaway line with no terminator
+            return
+        line = entry[1][:nl]
+        entry[1] = entry[1][nl + 1:]
+        try:
+            text = line.decode().strip()
+        except Exception:
+            continue
+        if not text:
+            continue
+        if text[:7].upper() == "UPLOAD ":
+            _upload_begin(cl, entry, text)
+            continue
+        try:
+            reply = dispatch(text, ("tcp", cl))
+        except Exception as e:
+            reply = "ERR " + str(e)
+        if reply:
+            _tcp_send_one(cl, reply + "\\n")
 
 
 # ---- UDP discovery ---------------------------------------------------------
@@ -1019,6 +1154,16 @@ def main():
     frames = 0
     base_delay = 0.03
     while True:
+        if S.uploading:
+            # A pattern file is streaming in over TCP: close our handle (it may be
+            # the file being overwritten), go dark, and keep servicing the socket.
+            if f:
+                f.close()
+                f = None
+            _tick()
+            _show_solid((0, 0, 0), S.n)
+            time.sleep_ms(5)
+            continue
         if S.mode != "play":
             # solid or off - hold the solid color (off is solid black).
             _tick()
@@ -1060,7 +1205,7 @@ def main():
         fb = S.n * 3
         f.seek(16)
         for _ in range(frames):
-            if S.reload or S.mode != "play":
+            if S.reload or S.mode != "play" or S.uploading:
                 break
             _tick()
             _show_grb(f.read(fb), S.n)
@@ -1122,6 +1267,7 @@ Bluetooth control (Pico W only):
     OFF                  -> blank the strip (mode "off"; remembered on reboot)
     PLAY                 -> resume the selected pattern
     DELETE <name>        -> remove a pattern file (not the active one)
+    UPLOAD <len> <name>  -> (TCP only) OK UPLOAD, then stream <len> bytes; OK UPLOADED <name>
     NAME                 -> report the current advertised name
     NAME <new name>      -> rename the device (saved to devicename.txt, survives reboot)
     WIFISCAN             -> streams "WIFISCANLEN <n>", one "WIFINET <rssi> <ssid>" each, then WIFISCANEND
@@ -1144,6 +1290,11 @@ Wi-Fi control (Pico W, once provisioned):
   ENDLIST / WIFISCANEND / ENDINFO, same as over BLE.
   Discovery (mDNS is unreliable on stock Pico W): broadcast "LEDADISCOVER" as a
   UDP datagram to port 4550 and each device answers "LEDA <hostname> <name>".
+  Upload a pattern (TCP only): send "UPLOAD <len> <name>" and wait for
+  "OK UPLOAD", then stream exactly <len> raw bytes of a LEDA file; the device
+  writes it, verifies the magic, and replies "OK UPLOADED <name>". Playback goes
+  dark and pauses during the transfer. Several clients (phone + Mac ...) can be
+  connected at once; replies to a request go only to the client that asked.
 
 LEDA v1 binary format (little-endian):
   off size field
