@@ -126,8 +126,7 @@ class S:
     out_queue = None         # generic labeled replies to stream paced (MOREINFO)
     out_at = 0               # time.ticks_ms() of the last streamed out_queue line
     tcp_srv = None           # listening socket (once Wi-Fi is up); None = no server
-    tcp_client = None        # the one connected TCP control client (single client)
-    tcp_buf = b""            # inbound byte buffer, split on newline into commands
+    tcp_clients = []         # list of [sock, buf] - one per connected TCP client
     udp_sock = None          # UDP discovery socket (replies to LEDADISCOVER probes)
 
 
@@ -256,7 +255,7 @@ def _send_to(origin, msg):
         return
     kind, ref = origin
     if kind == "tcp":
-        _tcp_send(msg + "\\n")
+        _tcp_send_one(ref, msg + "\\n")
     elif S.ble is not None:
         try:
             S.ble.gatts_notify(ref, S.tx, msg.encode())
@@ -266,7 +265,7 @@ def _send_to(origin, msg):
 
 def _notify(msg):
     # BROADCAST an unsolicited line to every connected control transport - BLE
-    # notify (message-framed, no newline) and the TCP client (newline-terminated).
+    # notifies (message-framed, no newline) and every TCP client (newline-added).
     # For genuine shared-state changes (BRIGHT / SPEED echoes, WIFI status) that
     # every client should see. Called from the player loop (not the IRQ).
     if S.ble and S.conns:
@@ -279,7 +278,10 @@ def _notify(msg):
                     pass
         except Exception:
             pass
-    _tcp_send(msg + "\\n")
+    if S.tcp_clients:
+        line = msg + "\\n"
+        for entry in list(S.tcp_clients):
+            _tcp_send_one(entry[0], line)
 
 
 def _stream_list():
@@ -586,29 +588,27 @@ def _stream_out():
 
 
 # ---- TCP control transport (Wi-Fi) -----------------------------------------
-# The SAME text protocol as BLE, over a plain TCP socket on CONTROL_PORT. TCP is
+# The SAME text protocol as BLE, over plain TCP sockets on CONTROL_PORT. TCP is
 # a byte stream (no message boundaries like BLE), so commands are newline-framed
-# and buffered until a full line arrives; replies are newline-terminated too. No
-# HTTP - the client is a native app, so the raw line protocol is all we need.
-# Runs non-blocking from the player loop; a single client at a time.
+# and buffered per client until a full line arrives; replies are newline-added.
+# No HTTP. Several clients at once (phone + Mac ...), each with its own buffer;
+# request-responses route back to the requester, shared state broadcasts to all.
 
-def _tcp_send(s):
-    if S.tcp_client is None:
-        return
+MAX_TCP_CLIENTS = 4
+
+def _tcp_send_one(cl, s):
     try:
-        S.tcp_client.send(s.encode())
+        cl.send(s.encode())
     except Exception:
-        _tcp_close_client()
+        _tcp_drop(cl)
 
 
-def _tcp_close_client():
-    if S.tcp_client is not None:
-        try:
-            S.tcp_client.close()
-        except Exception:
-            pass
-    S.tcp_client = None
-    S.tcp_buf = b""
+def _tcp_drop(cl):
+    try:
+        cl.close()
+    except Exception:
+        pass
+    S.tcp_clients = [e for e in S.tcp_clients if e[0] is not cl]
 
 
 def _start_tcp():
@@ -620,9 +620,10 @@ def _start_tcp():
         srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         srv.bind(("0.0.0.0", CONTROL_PORT))
-        srv.listen(1)
+        srv.listen(MAX_TCP_CLIENTS)
         srv.setblocking(False)
         S.tcp_srv = srv
+        S.tcp_clients = []
         print("TCP control on port", CONTROL_PORT)
     except Exception as e:
         print("TCP server unavailable:", e)
@@ -630,7 +631,12 @@ def _start_tcp():
 
 
 def _stop_tcp():
-    _tcp_close_client()
+    for entry in list(S.tcp_clients):
+        try:
+            entry[0].close()
+        except Exception:
+            pass
+    S.tcp_clients = []
     if S.tcp_srv is not None:
         try:
             S.tcp_srv.close()
@@ -640,46 +646,50 @@ def _stop_tcp():
 
 
 def _tcp_step():
-    # Non-blocking: accept one client, then drain whatever bytes are ready and
-    # dispatch any complete (newline-terminated) commands.
+    # Non-blocking: accept any waiting client, then drain each connected client
+    # and dispatch its complete (newline-terminated) commands.
     if S.tcp_srv is None:
         return
-    if S.tcp_client is None:
-        try:
-            cl, _ = S.tcp_srv.accept()
-            cl.setblocking(False)
-            S.tcp_client = cl
-            S.tcp_buf = b""
-        except OSError:
-            return   # nothing waiting to be accepted
     try:
-        data = S.tcp_client.recv(256)
-    except OSError as e:
-        if e.args[0] in (11, 35):   # EAGAIN / EWOULDBLOCK - no data right now
-            return
-        _tcp_close_client()
-        return
-    if not data:                    # empty recv = peer closed
-        _tcp_close_client()
-        return
-    S.tcp_buf += data
-    if b"\\n" not in S.tcp_buf and len(S.tcp_buf) > 512:
-        S.tcp_buf = b""             # runaway line with no terminator - drop it
-        return
-    while b"\\n" in S.tcp_buf:
-        line, S.tcp_buf = S.tcp_buf.split(b"\\n", 1)
+        cl, _ = S.tcp_srv.accept()
+        if len(S.tcp_clients) >= MAX_TCP_CLIENTS:
+            cl.close()
+        else:
+            cl.setblocking(False)
+            S.tcp_clients.append([cl, b""])
+    except OSError:
+        pass   # nothing waiting to accept
+    for entry in list(S.tcp_clients):
+        cl = entry[0]
         try:
-            text = line.decode().strip()
-        except Exception:
+            data = cl.recv(256)
+        except OSError as e:
+            if e.args[0] in (11, 35):   # EAGAIN / EWOULDBLOCK - no data right now
+                continue
+            _tcp_drop(cl)
             continue
-        if not text:
+        if not data:                    # empty recv = peer closed
+            _tcp_drop(cl)
             continue
-        try:
-            reply = dispatch(text, ("tcp", None))
-        except Exception as e:
-            reply = "ERR " + str(e)
-        if reply:
-            _tcp_send(reply + "\\n")
+        buf = entry[1] + data
+        if b"\\n" not in buf and len(buf) > 512:
+            entry[1] = b""              # runaway line with no terminator - drop it
+            continue
+        while b"\\n" in buf:
+            line, buf = buf.split(b"\\n", 1)
+            try:
+                text = line.decode().strip()
+            except Exception:
+                continue
+            if not text:
+                continue
+            try:
+                reply = dispatch(text, ("tcp", cl))
+            except Exception as e:
+                reply = "ERR " + str(e)
+            if reply:
+                _tcp_send_one(cl, reply + "\\n")
+        entry[1] = buf
 
 
 # ---- UDP discovery ---------------------------------------------------------
