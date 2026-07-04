@@ -1250,6 +1250,65 @@ input[type='color'] {
   height: 8px;
   border-radius: 50%;
   background: var(--accent);
+  flex: 0 0 auto;
+}
+
+.track-bar {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 2px;
+}
+
+.track-bar .btn {
+  padding: 2px 12px;
+  font-size: 12px;
+}
+
+.lane-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lane-name-input {
+  flex: 1;
+  min-width: 0;
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  padding: 1px 4px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.lane-del {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: none;
+  color: var(--muted);
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 15px;
+  line-height: 1;
+}
+
+.lane-del:hover:not(:disabled) {
+  color: #e0586b;
+  background: rgba(224, 88, 107, 0.12);
+}
+
+.lane-del:disabled {
+  opacity: 0.3;
+  cursor: default;
 }
 
 .lane-strip {

@@ -2,7 +2,6 @@ import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react'
 import { Viewport } from './components/Viewport'
 import { Transport } from './components/Transport'
 import { GradientEditor } from './components/GradientEditor'
-import { TrackPanel } from './components/TrackPanel'
 import { TrackInspector } from './components/TrackInspector'
 import { ArrangementPanel } from './components/ArrangementPanel'
 import { ViewportToolbar } from './components/ViewportToolbar'
@@ -215,9 +214,6 @@ export default function App() {
       {dragging && <div className="drop-overlay">Drop a project (.json or .zip) to import</div>}
 
       <aside className="sidebar">
-        <Panel title="Tracks">
-          <TrackPanel />
-        </Panel>
         <Panel title="Source · Gradient">
           <GradientEditor />
         </Panel>
