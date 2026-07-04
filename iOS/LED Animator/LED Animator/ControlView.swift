@@ -161,16 +161,16 @@ struct ControlView: View {
         }
         .refreshable { session.refreshPatterns() }
         .navigationTitle(session.connectedName)
-        .navigationBarTitleDisplayMode(.inline)
+        .inlineNavTitle()
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
+            ToolbarItem(placement: .primaryAction) {
                 Button {
                     showWifi = true
                 } label: {
                     Image(systemName: "wifi")
                 }
             }
-            ToolbarItem(placement: .topBarTrailing) {
+            ToolbarItem(placement: .primaryAction) {
                 Button {
                     showInfo = true
                 } label: {

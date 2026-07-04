@@ -35,7 +35,7 @@ struct WiFiView: View {
 
                 Section {
                     TextField("Network name (SSID)", text: $ssid)
-                        .textInputAutocapitalization(.never)
+                        .autocap(.never)
                         .autocorrectionDisabled()
                     SecureField("Password", text: $password)
                     Button("Connect", action: connect)
@@ -84,7 +84,7 @@ struct WiFiView: View {
                 }
             }
             .navigationTitle("Wi-Fi")
-            .navigationBarTitleDisplayMode(.inline)
+            .inlineNavTitle()
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }

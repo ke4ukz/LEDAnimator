@@ -46,7 +46,7 @@ struct DeviceInfoView: View {
                 }
             }
             .navigationTitle("Device Info")
-            .navigationBarTitleDisplayMode(.inline)
+            .inlineNavTitle()
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }
@@ -54,7 +54,7 @@ struct DeviceInfoView: View {
             }
             .alert("Rename Device", isPresented: $showRename) {
                 TextField("Name", text: $editingName)
-                    .textInputAutocapitalization(.words)
+                    .autocap(.words)
                 Button("Cancel", role: .cancel) { }
                 Button("OK", action: commitRename)
             } message: {
