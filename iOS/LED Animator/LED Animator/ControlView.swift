@@ -17,8 +17,10 @@ private enum PlaybackMode: Hashable {
 }
 
 #if os(macOS)
-/// Which inspector panel is open on macOS (nil = none).
-private enum InspectorPanel { case info, wifi }
+/// Which inspector panel is open on macOS (nil = none). Owned by MacRootView so
+/// the inspector attaches to the split view (not this detail's toolbar region),
+/// which keeps the Info/Wi-Fi buttons from overflowing during the open animation.
+enum InspectorPanel { case info, wifi }
 #endif
 
 struct ControlView: View {
@@ -30,7 +32,7 @@ struct ControlView: View {
     @State private var showImporter = false      // macOS pattern upload
     @State private var dropTargeted = false      // Finder drag-and-drop highlight
     #if os(macOS)
-    @State private var inspectorPanel: InspectorPanel?   // Info/Wi-Fi inspector
+    @Binding var inspectorPanel: InspectorPanel?   // Info/Wi-Fi inspector (owned by MacRootView)
     #endif
     @State private var playback: PlaybackMode = .play
     @State private var solidColor: Color = .white
@@ -157,6 +159,11 @@ struct ControlView: View {
                     if uploader?.uploadInProgress == true {
                         ProgressView().controlSize(.mini)
                     }
+                    Button { session.refreshPatterns() } label: {
+                        Image(systemName: "arrow.clockwise")
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Reload patterns")
                     Button { showImporter = true } label: {
                         Image(systemName: "plus")
                     }
@@ -198,16 +205,6 @@ struct ControlView: View {
         .inlineNavTitle()
         .toolbar {
             #if os(macOS)
-            // macOS has no pull-to-refresh; iOS uses .refreshable instead.
-            ToolbarItem(placement: .primaryAction) {
-                Button {
-                    session.refreshPatterns()
-                } label: {
-                    Image(systemName: "arrow.clockwise")
-                }
-            }
-            #endif
-            #if os(macOS)
             ToolbarItem(placement: .primaryAction) {
                 Button { toggleInspector(.wifi) } label: { Image(systemName: "wifi") }
                     .help("Wi-Fi settings")
@@ -225,18 +222,9 @@ struct ControlView: View {
             }
             #endif
         }
-        #if os(macOS)
-        .inspector(isPresented: inspectorPresented) {
-            Group {
-                if inspectorPanel == .wifi {
-                    WiFiView(session: session)
-                } else {
-                    DeviceInfoView(session: session)
-                }
-            }
-            .inspectorColumnWidth(min: 260, ideal: 300, max: 380)
-        }
-        #else
+        // macOS: the inspector itself is attached by MacRootView (to the split
+        // view), so its toolbar region doesn't animate the buttons.
+        #if os(iOS)
         .sheet(isPresented: $showInfo) {
             DeviceInfoView(session: session)
         }
@@ -318,13 +306,6 @@ struct ControlView: View {
     /// Toggle an inspector panel: clicking its toolbar button again closes it.
     private func toggleInspector(_ panel: InspectorPanel) {
         inspectorPanel = (inspectorPanel == panel) ? nil : panel
-    }
-
-    private var inspectorPresented: Binding<Bool> {
-        Binding(
-            get: { inspectorPanel != nil },
-            set: { if !$0 { inspectorPanel = nil } }
-        )
     }
     #endif
 
