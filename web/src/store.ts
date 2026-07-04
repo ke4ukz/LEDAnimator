@@ -293,9 +293,13 @@ export const useStore = create<AppState>((set, get) => {
         kind: 'gradient',
         gradient: defaultGradient(),
       }
+      // Smallest unused "Track N" (so a rename/duplicate doesn't leave a gap).
+      const used = new Set(project.tracks.map((t) => t.name))
+      let n = 1
+      while (used.has(`Track ${n}`)) n++
       const track: Track = {
         id: newId('trk'),
-        name: `Track ${project.tracks.length + 1}`,
+        name: `Track ${n}`,
         sourceId: source.id,
         path: defaultLinePath(),
         speed: 1,
