@@ -3,7 +3,8 @@
 //  LED Animator
 //
 //  Provision the device's Wi-Fi over BLE: scan or type a network, join, and see
-//  the connection status. (Provisioning only — no HTTP transport yet.)
+//  the connection status. On iOS it's a sheet; on macOS it's the content of an
+//  inspector panel (no sheet chrome).
 //
 
 import SwiftUI
@@ -15,85 +16,93 @@ struct WiFiView: View {
     @State private var password = ""
 
     var body: some View {
+        #if os(macOS)
+        wifiList   // rendered as an inspector panel
+        #else
         NavigationStack {
-            List {
-                Section("Status") {
-                    HStack(spacing: 12) {
-                        Image(systemName: statusIcon)
-                            .foregroundStyle(statusTint)
-                            .imageScale(.large)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(statusText)
-                            if !statusDetail.isEmpty {
-                                Text(statusDetail)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
+            wifiList
+                .navigationTitle("Wi-Fi")
+                .inlineNavTitle()
+                .toolbar {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Done") { dismiss() }
                     }
                 }
-
-                Section {
-                    TextField("Network name (SSID)", text: $ssid)
-                        .autocap(.never)
-                        .autocorrectionDisabled()
-                    SecureField("Password", text: $password)
-                    Button("Connect", action: connect)
-                        .disabled(ssid.trimmingCharacters(in: .whitespaces).isEmpty)
-                } header: {
-                    Text("Join a network")
-                } footer: {
-                    Text("Leave the password blank for an open network. Credentials are saved on the device and re-joined on boot.")
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-
-                Section("Nearby networks") {
-                    if session.isScanningWifi {
-                        HStack(spacing: 12) {
-                            ProgressView()
-                            Text("Scanning…").foregroundStyle(.secondary)
-                        }
-                    } else {
-                        Button {
-                            session.scanWifi()
-                        } label: {
-                            Label("Scan for networks", systemImage: "arrow.clockwise")
-                        }
-                    }
-                    ForEach(session.wifiNetworks) { net in
-                        Button {
-                            ssid = net.ssid
-                        } label: {
-                            HStack {
-                                Text(net.ssid).foregroundStyle(.primary)
-                                Spacer()
-                                Image(systemName: "wifi", variableValue: signalFraction(net.rssi))
-                                    .foregroundStyle(.secondary)
-                            }
-                            .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-
-                if session.wifiState == "connected" || session.wifiState == "connecting" {
-                    Section {
-                        Button("Forget network", role: .destructive) {
-                            session.forgetWifi()
-                        }
-                    }
-                }
-            }
-            .navigationTitle("Wi-Fi")
-            .inlineNavTitle()
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { dismiss() }
-                }
-            }
-            .onAppear { session.requestWifiStatus() }
         }
         .macSheetFrame()
+        #endif
+    }
+
+    private var wifiList: some View {
+        List {
+            Section("Status") {
+                HStack(spacing: 12) {
+                    Image(systemName: statusIcon)
+                        .foregroundStyle(statusTint)
+                        .imageScale(.large)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(statusText)
+                        if !statusDetail.isEmpty {
+                            Text(statusDetail)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            }
+
+            Section {
+                TextField("Network name (SSID)", text: $ssid)
+                    .autocap(.never)
+                    .autocorrectionDisabled()
+                SecureField("Password", text: $password)
+                Button("Connect", action: connect)
+                    .disabled(ssid.trimmingCharacters(in: .whitespaces).isEmpty)
+            } header: {
+                Text("Join a network")
+            } footer: {
+                Text("Leave the password blank for an open network. Credentials are saved on the device and re-joined on boot.")
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Section("Nearby networks") {
+                if session.isScanningWifi {
+                    HStack(spacing: 12) {
+                        ProgressView()
+                        Text("Scanning…").foregroundStyle(.secondary)
+                    }
+                } else {
+                    Button {
+                        session.scanWifi()
+                    } label: {
+                        Label("Scan for networks", systemImage: "arrow.clockwise")
+                    }
+                }
+                ForEach(session.wifiNetworks) { net in
+                    Button {
+                        ssid = net.ssid
+                    } label: {
+                        HStack {
+                            Text(net.ssid).foregroundStyle(.primary)
+                            Spacer()
+                            Image(systemName: "wifi", variableValue: signalFraction(net.rssi))
+                                .foregroundStyle(.secondary)
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+
+            if session.wifiState == "connected" || session.wifiState == "connecting" {
+                Section {
+                    Button("Forget network", role: .destructive) {
+                        session.forgetWifi()
+                    }
+                }
+            }
+        }
+        .onAppear { session.requestWifiStatus() }
     }
 
     private func connect() {

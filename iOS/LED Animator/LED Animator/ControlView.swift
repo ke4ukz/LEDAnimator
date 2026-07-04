@@ -16,12 +16,22 @@ private enum PlaybackMode: Hashable {
     case off    // blank the strip
 }
 
+#if os(macOS)
+/// Which inspector panel is open on macOS (nil = none).
+private enum InspectorPanel { case info, wifi }
+#endif
+
 struct ControlView: View {
     let session: DeviceSession
+    #if os(iOS)
     @State private var showInfo = false
     @State private var showWifi = false
+    #endif
     @State private var showImporter = false      // macOS pattern upload
     @State private var dropTargeted = false      // Finder drag-and-drop highlight
+    #if os(macOS)
+    @State private var inspectorPanel: InspectorPanel?   // Info/Wi-Fi inspector
+    #endif
     @State private var playback: PlaybackMode = .play
     @State private var solidColor: Color = .white
     @Environment(\.self) private var environment
@@ -197,27 +207,43 @@ struct ControlView: View {
                 }
             }
             #endif
+            #if os(macOS)
             ToolbarItem(placement: .primaryAction) {
-                Button {
-                    showWifi = true
-                } label: {
-                    Image(systemName: "wifi")
-                }
+                Button { toggleInspector(.wifi) } label: { Image(systemName: "wifi") }
+                    .help("Wi-Fi settings")
             }
             ToolbarItem(placement: .primaryAction) {
-                Button {
-                    showInfo = true
-                } label: {
-                    Image(systemName: "info.circle")
-                }
+                Button { toggleInspector(.info) } label: { Image(systemName: "info.circle") }
+                    .help("Device info")
             }
+            #else
+            ToolbarItem(placement: .primaryAction) {
+                Button { showWifi = true } label: { Image(systemName: "wifi") }
+            }
+            ToolbarItem(placement: .primaryAction) {
+                Button { showInfo = true } label: { Image(systemName: "info.circle") }
+            }
+            #endif
         }
+        #if os(macOS)
+        .inspector(isPresented: inspectorPresented) {
+            Group {
+                if inspectorPanel == .wifi {
+                    WiFiView(session: session)
+                } else {
+                    DeviceInfoView(session: session)
+                }
+            }
+            .inspectorColumnWidth(min: 260, ideal: 300, max: 380)
+        }
+        #else
         .sheet(isPresented: $showInfo) {
             DeviceInfoView(session: session)
         }
         .sheet(isPresented: $showWifi) {
             WiFiView(session: session)
         }
+        #endif
         // Seed the controls from what the device reports (INFO on connect, and
         // command echoes). These set @State directly, so they don't send anything.
         .onAppear {
@@ -287,6 +313,18 @@ struct ControlView: View {
         guard let data = try? Data(contentsOf: url) else { return false }
         uploader.upload(name: url.lastPathComponent, data: data)
         return true
+    }
+
+    /// Toggle an inspector panel: clicking its toolbar button again closes it.
+    private func toggleInspector(_ panel: InspectorPanel) {
+        inspectorPanel = (inspectorPanel == panel) ? nil : panel
+    }
+
+    private var inspectorPresented: Binding<Bool> {
+        Binding(
+            get: { inspectorPanel != nil },
+            set: { if !$0 { inspectorPanel = nil } }
+        )
     }
     #endif
 
