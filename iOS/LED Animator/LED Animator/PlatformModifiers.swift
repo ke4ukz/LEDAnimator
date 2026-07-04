@@ -33,4 +33,15 @@ extension View {
         self
         #endif
     }
+
+    /// Give a sheet a usable size on macOS (iOS sheets auto-size; a macOS sheet
+    /// around a List otherwise collapses to an empty window).
+    @ViewBuilder
+    func macSheetFrame() -> some View {
+        #if os(macOS)
+        frame(minWidth: 380, minHeight: 460)
+        #else
+        self
+        #endif
+    }
 }

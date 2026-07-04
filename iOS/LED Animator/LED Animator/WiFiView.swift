@@ -92,6 +92,7 @@ struct WiFiView: View {
             }
             .onAppear { session.requestWifiStatus() }
         }
+        .macSheetFrame()
     }
 
     private func connect() {

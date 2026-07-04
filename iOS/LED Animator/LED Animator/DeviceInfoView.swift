@@ -62,6 +62,7 @@ struct DeviceInfoView: View {
             }
             .onAppear { session.requestMoreInfo() }
         }
+        .macSheetFrame()
     }
 
     /// A value if we have one; otherwise "Loading" until the MOREINFO batch
