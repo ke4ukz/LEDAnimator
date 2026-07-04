@@ -1,9 +1,10 @@
 import { useRef } from 'react'
 import { useStore } from '../store'
-import { type PathDef, type Track, pathPoint } from '../project'
+import { type PathDef, type Track, pathPoint, trackParamAt, trackPhaseAt } from '../project'
 
 const clamp01 = (x: number) => (x < 0 ? 0 : x > 1 ? 1 : x)
 const clamp = (x: number, lo: number, hi: number) => (x < lo ? lo : x > hi ? hi : x)
+const frac = (x: number) => x - Math.floor(x)
 const DEG = Math.PI / 180
 
 interface Handle {
@@ -20,9 +21,34 @@ interface Handle {
  */
 export function PathOverlay({ track }: { track: Track }) {
   const updateTrack = useStore((s) => s.updateTrack)
+  const showSamples = useStore((s) => s.showSamples)
+  // Only track `frame` when markers are on, so playback doesn't re-render this
+  // (and re-walk the curve) every frame when they're off.
+  const frame = useStore((s) => (s.showSamples ? s.frame : 0))
+  const numFrames = useStore((s) => s.raster.numFrames)
+  const leds = useStore((s) => s.leds)
+  const assignments = useStore((s) => s.project.assignments)
   const ref = useRef<HTMLDivElement>(null)
   const drag = useRef<string | null>(null)
   const path = track.path
+
+  // Where each in-chain member LED samples the path at the current frame — dim
+  // "ghost" dots showing the chase spread. Shared animation indices overlap.
+  const samplePts: [number, number][] = []
+  if (showSamples && numFrames > 0) {
+    const t = frame / numFrames
+    const phase = trackPhaseAt(track, frame, numFrames)
+    const offset = trackParamAt(track, 'offset', t)
+    const chase = trackParamAt(track, 'chase', t)
+    let rank = 0
+    assignments.forEach((id, i) => {
+      if (id !== track.id || leds[i]?.unassigned) return
+      const idx = leds[i]?.animIndex ?? rank
+      rank++
+      const [u, v] = pathPoint(path, frac(offset + idx * chase + phase))
+      samplePts.push([u * 100, v * 100])
+    })
+  }
 
   const setPath = (p: PathDef) => updateTrack(track.id, { path: p })
 
@@ -129,6 +155,9 @@ export function PathOverlay({ track }: { track: Track }) {
       <svg className="path-svg" viewBox="0 0 100 100" preserveAspectRatio="none">
         <polyline points={curve} className="path-curve" />
         <polygon points={arrow} className="path-arrow" />
+        {samplePts.map((p, i) => (
+          <circle key={i} cx={p[0]} cy={p[1]} r={1.6} className="path-sample" />
+        ))}
       </svg>
       {handles.map((h) => (
         <button

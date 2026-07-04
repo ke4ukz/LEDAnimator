@@ -56,6 +56,8 @@ interface AppState {
   ledScale: number
   ledShape: 'sphere' | 'cube'
   showLabels: boolean
+  /** Show a dim ghost marker on the path where each LED currently samples. */
+  showSamples: boolean
 
   // Track / source editing (all re-bake the raster).
   updateGradient: (g: Gradient) => void
@@ -88,6 +90,7 @@ interface AppState {
   setLedScale: (v: number) => void
   setLedShape: (s: 'sphere' | 'cube') => void
   setShowLabels: (b: boolean) => void
+  setShowSamples: (b: boolean) => void
 
   selectTrack: (id: string | null) => void
   /** replace = set to [i]; toggle = add/remove i; range = i…anchor inclusive. */
@@ -258,6 +261,7 @@ export const useStore = create<AppState>((set, get) => {
     ledScale: init.ledScale,
     ledShape: init.ledShape,
     showLabels: init.showLabels,
+    showSamples: false,
 
     updateGradient: (g) => {
       const { project, selectedTrack } = get()
@@ -444,6 +448,7 @@ export const useStore = create<AppState>((set, get) => {
     setLedScale: (v) => set({ ledScale: v }),
     setLedShape: (s) => set({ ledShape: s }),
     setShowLabels: (b) => set({ showLabels: b }),
+    setShowSamples: (b) => set({ showSamples: b }),
 
     selectTrack: (id) => set({ selectedTrack: id }),
     selectLed: (i, mode = 'replace') =>

@@ -1146,6 +1146,13 @@ input[type='color'] {
   fill: #fff;
 }
 
+/* Dim ghost markers showing where each LED samples the path (chase spread). */
+.path-sample {
+  fill: #fff;
+  opacity: 0.4;
+  pointer-events: none;
+}
+
 .path-handle.start {
   background: #7bd06a;
 }

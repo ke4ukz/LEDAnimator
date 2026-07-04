@@ -5,9 +5,11 @@ export function DisplayPanel() {
   const ledScale = useStore((s) => s.ledScale)
   const ledShape = useStore((s) => s.ledShape)
   const showLabels = useStore((s) => s.showLabels)
+  const showSamples = useStore((s) => s.showSamples)
   const setLedScale = useStore((s) => s.setLedScale)
   const setLedShape = useStore((s) => s.setLedShape)
   const setShowLabels = useStore((s) => s.setShowLabels)
+  const setShowSamples = useStore((s) => s.setShowSamples)
 
   return (
     <div className="display-panel">
@@ -26,6 +28,10 @@ export function DisplayPanel() {
       <label className="field-row">
         <span>Numbers</span>
         <input type="checkbox" checked={showLabels} onChange={(e) => setShowLabels(e.target.checked)} />
+      </label>
+      <label className="field-row" title="Ghost markers on the path preview showing where each LED samples right now">
+        <span>Sample markers</span>
+        <input type="checkbox" checked={showSamples} onChange={(e) => setShowSamples(e.target.checked)} />
       </label>
     </div>
   )
