@@ -285,10 +285,20 @@ def _notify(msg):
             _tcp_send_one(entry[0], line)
 
 
+def _broadcast_list():
+    # Push a fresh pattern list to ALL clients (after an upload/delete changes the
+    # files), so every connected app stays current. dest=None -> _send_to
+    # broadcasts; the app resets its list when it sees LISTLEN.
+    S.list_queue = list_patterns()
+    S.list_total = len(S.list_queue)
+    S.list_header_sent = False
+    S.list_dest = None
+
+
 def _stream_list():
     # Emit one queued filename per call, paced (~30ms) so we don't outrun the
     # BLE link and drop notifications; finish with ENDLIST. Routed to the client
-    # that asked (S.list_dest), so other clients don't get an unsolicited list.
+    # that asked (S.list_dest), or broadcast when dest is None (after a change).
     if S.list_queue is None:
         return
     if time.ticks_diff(time.ticks_ms(), S.list_at) < 30:
@@ -723,6 +733,7 @@ def _upload_finish(cl, fh, name):
             pass
         os.rename("upload.tmp", name)
         _tcp_send_one(cl, "OK UPLOADED " + name + "\\n")
+        _broadcast_list()   # tell every client about the new pattern
     except Exception:
         try:
             os.remove("upload.tmp")
@@ -1017,6 +1028,7 @@ def dispatch(line, origin=None):
                 return "ERR in-use"
             try:
                 os.remove(name)
+                _broadcast_list()   # tell every client the pattern is gone
                 return "OK DELETE " + name
             except OSError:
                 return "ERR no-file"
