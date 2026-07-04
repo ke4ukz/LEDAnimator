@@ -120,8 +120,15 @@ struct HomeView: View {
         List(selection: $selection) {
             Section(isExpanded: $animationsExpanded) {
                 ForEach(animations) { a in
-                    AnimationRow(animation: a).tag(HomeSelection.animation(a.id))
+                    AnimationRow(animation: a)
+                        .tag(HomeSelection.animation(a.id))
+                        .contextMenu {   // right-click (Mac) / long-press (iOS)
+                            Button(role: .destructive) { delete(a) } label: {
+                                Label("Delete", systemImage: "trash")
+                            }
+                        }
                 }
+                .onDelete { deleteAnimations(at: $0) }   // swipe-to-delete
             } header: {
                 sectionHeader("Animations") {
                     Button { showEditor = true } label: { Image(systemName: "plus") }
@@ -159,6 +166,24 @@ struct HomeView: View {
             Spacer()
             trailing()
         }
+    }
+
+    // MARK: Animation deletion
+
+    private func deleteAnimations(at offsets: IndexSet) {
+        let ids = offsets.map { animations[$0].id }
+        animations.remove(atOffsets: offsets)
+        clearSelectionIfDeleted(ids)
+    }
+
+    private func delete(_ animation: MockAnimation) {
+        animations.removeAll { $0.id == animation.id }
+        clearSelectionIfDeleted([animation.id])
+    }
+
+    /// Drop the detail pane if the selected animation was just deleted.
+    private func clearSelectionIfDeleted(_ ids: [String]) {
+        if case .animation(let id) = selection, ids.contains(id) { selection = nil }
     }
 
     // MARK: Detail
