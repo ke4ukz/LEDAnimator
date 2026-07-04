@@ -13,5 +13,8 @@ struct LED_AnimatorApp: App {
         WindowGroup {
             ContentView()
         }
+        #if os(macOS)
+        .defaultSize(width: 760, height: 520)
+        #endif
     }
 }

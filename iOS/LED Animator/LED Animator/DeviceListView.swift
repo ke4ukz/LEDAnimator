@@ -78,30 +78,8 @@ struct DeviceListView: View {
         .refreshable { ble.startScan(); discovery.scan() }
     }
 
-    /// One row per physical device: a Wi-Fi discovery and a BLE discovery with
-    /// the same device id (the advert MAC / hostname suffix) collapse together,
-    /// Wi-Fi preferred.
     private var unifiedDevices: [UnifiedDevice] {
-        var map: [String: UnifiedDevice] = [:]
-        var order: [String] = []
-        func slot(_ key: String, _ name: String) -> Int {
-            if map[key] == nil { map[key] = UnifiedDevice(id: key, name: name); order.append(key) }
-            return 0
-        }
-        for w in discovery.devices {   // Wi-Fi first (preferred)
-            let key = w.deviceID ?? "wifi:" + w.hostname
-            _ = slot(key, w.displayName)
-            map[key]?.wifi = w
-            map[key]?.name = w.displayName
-        }
-        for b in ble.devices {
-            let key = b.deviceID ?? "ble:" + b.id.uuidString
-            _ = slot(key, b.name)
-            map[key]?.ble = b
-            if map[key]?.wifi == nil { map[key]?.name = b.name }
-        }
-        return order.compactMap { map[$0] }
-            .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        mergeUnifiedDevices(ble: ble.devices, wifi: discovery.devices)
     }
 
     private func connect(_ device: UnifiedDevice) {
@@ -144,6 +122,31 @@ struct DeviceListView: View {
     }
 }
 
+/// One row per physical device: a Wi-Fi discovery and a BLE discovery with the
+/// same device id (the advert MAC / hostname suffix) collapse together, Wi-Fi
+/// preferred. Shared by the iOS list and the macOS sidebar.
+func mergeUnifiedDevices(ble: [DiscoveredDevice], wifi: [DiscoveredWiFiDevice]) -> [UnifiedDevice] {
+    var map: [String: UnifiedDevice] = [:]
+    var order: [String] = []
+    func slot(_ key: String, _ name: String) {
+        if map[key] == nil { map[key] = UnifiedDevice(id: key, name: name); order.append(key) }
+    }
+    for w in wifi {   // Wi-Fi first (preferred)
+        let key = w.deviceID ?? "wifi:" + w.hostname
+        slot(key, w.displayName)
+        map[key]?.wifi = w
+        map[key]?.name = w.displayName
+    }
+    for b in ble {
+        let key = b.deviceID ?? "ble:" + b.id.uuidString
+        slot(key, b.name)
+        map[key]?.ble = b
+        if map[key]?.wifi == nil { map[key]?.name = b.name }
+    }
+    return order.compactMap { map[$0] }
+        .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+}
+
 /// The Bluetooth "ᛒ" bind-rune, drawn as a vector (no SF Symbol / asset exists).
 /// A single stroke: two crossing diagonals + the mast + the two right-flag edges.
 private struct BluetoothLogo: Shape {
@@ -163,7 +166,7 @@ private struct BluetoothLogo: Shape {
 }
 
 /// White Bluetooth rune on the brand-blue rounded badge.
-private struct BluetoothBadge: View {
+struct BluetoothBadge: View {
     var body: some View {
         BluetoothLogo()
             .stroke(.white, style: StrokeStyle(lineWidth: 1.3, lineCap: .round, lineJoin: .round))
