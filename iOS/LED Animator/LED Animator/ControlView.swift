@@ -7,6 +7,7 @@
 //
 
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// The three device playback states, mapped to firmware commands.
 private enum PlaybackMode: Hashable {
@@ -19,9 +20,14 @@ struct ControlView: View {
     let session: DeviceSession
     @State private var showInfo = false
     @State private var showWifi = false
+    @State private var showImporter = false      // macOS pattern upload
+    @State private var selectedPattern: String?  // macOS list selection (single-click)
     @State private var playback: PlaybackMode = .play
     @State private var solidColor: Color = .white
     @Environment(\.self) private var environment
+
+    /// The Wi-Fi transport, when this session is over Wi-Fi (upload is TCP-only).
+    private var uploader: TCPController? { session.transport as? TCPController }
 
     var body: some View {
         List {
@@ -98,7 +104,7 @@ struct ControlView: View {
                 }
             }
 
-            Section("Patterns") {
+            Section {
                 if session.isLoadingPatterns {
                     VStack(alignment: .leading, spacing: 8) {
                         if session.listTotal > 0 {
@@ -130,45 +136,15 @@ struct ControlView: View {
                         .foregroundStyle(.secondary)
                 } else {
                     ForEach(session.patterns, id: \.self) { name in
-                        Button {
-                            session.select(name)
-                            playback = .play   // selecting a pattern resumes playback
-                        } label: {
-                            HStack {
-                                Text(displayName(name))
-                                    .foregroundStyle(.primary)
-                                Spacer()
-                                if session.currentPattern == name && playback == .play {
-                                    Image(systemName: "checkmark")
-                                        .foregroundStyle(.tint)
-                                }
-                            }
-                            .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        #if os(macOS)
-                        // File management (delete/upload) lives on the Mac; the
-                        // phone stays a control-only companion.
-                        .swipeActions(edge: .trailing) {
-                            if session.currentPattern != name {   // can't delete the active one
-                                Button(role: .destructive) {
-                                    session.delete(name)
-                                } label: {
-                                    Label("Delete", systemImage: "trash")
-                                }
-                            }
-                        }
-                        .contextMenu {
-                            Button(role: .destructive) {
-                                session.delete(name)
-                            } label: {
-                                Label("Delete", systemImage: "trash")
-                            }
-                            .disabled(session.currentPattern == name)
-                        }
-                        #endif
+                        patternRow(name)
                     }
                 }
+            } header: {
+                Text("Patterns")
+            } footer: {
+                #if os(macOS)
+                fileBar
+                #endif
             }
 
             if let error = session.lastError {
@@ -222,7 +198,95 @@ struct ControlView: View {
         }
         .onChange(of: session.mode) { _, m in playback = mapMode(m) }
         .onChange(of: session.solid) { _, s in solidColor = color(from: s) }
+        #if os(macOS)
+        .fileImporter(isPresented: $showImporter, allowedContentTypes: [ledaType]) { result in
+            if case .success(let url) = result {
+                let access = url.startAccessingSecurityScopedResource()
+                defer { if access { url.stopAccessingSecurityScopedResource() } }
+                if let data = try? Data(contentsOf: url) {
+                    uploader?.upload(name: url.lastPathComponent, data: data)
+                }
+            }
+        }
+        .onChange(of: session.patterns) { _, list in
+            if let sel = selectedPattern, !list.contains(sel) { selectedPattern = nil }
+        }
+        #endif
     }
+
+    // MARK: Patterns
+
+    /// A pattern row. iOS: tap plays it. macOS: single-click selects (Xcode-style),
+    /// double-click activates; the +/- bar acts on the selection.
+    @ViewBuilder
+    private func patternRow(_ name: String) -> some View {
+        #if os(macOS)
+        HStack {
+            Text(displayName(name))
+            Spacer()
+            if session.currentPattern == name && playback == .play {
+                Image(systemName: "checkmark").foregroundStyle(.tint)
+            }
+        }
+        .contentShape(Rectangle())
+        .onTapGesture(count: 2) {
+            session.select(name)
+            playback = .play
+        }
+        .onTapGesture {
+            selectedPattern = name
+        }
+        .listRowBackground(selectedPattern == name ? Color.accentColor.opacity(0.18) : nil)
+        #else
+        Button {
+            session.select(name)
+            playback = .play   // selecting a pattern resumes playback
+        } label: {
+            HStack {
+                Text(displayName(name)).foregroundStyle(.primary)
+                Spacer()
+                if session.currentPattern == name && playback == .play {
+                    Image(systemName: "checkmark").foregroundStyle(.tint)
+                }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        #endif
+    }
+
+    #if os(macOS)
+    /// Xcode-style +/- bar under the pattern list: add (upload) / remove (delete).
+    private var fileBar: some View {
+        HStack(spacing: 2) {
+            Button { showImporter = true } label: {
+                Image(systemName: "plus").frame(width: 22)
+            }
+            .disabled(uploader == nil || uploader?.uploadInProgress == true)
+            .help(uploader == nil ? "Connect over Wi-Fi to upload a pattern" : "Upload a pattern")
+
+            Button {
+                if let sel = selectedPattern { session.delete(sel) }
+            } label: {
+                Image(systemName: "minus").frame(width: 22)
+            }
+            .disabled(selectedPattern == nil || selectedPattern == session.currentPattern)
+            .help("Delete the selected pattern")
+
+            if uploader?.uploadInProgress == true {
+                ProgressView().controlSize(.small)
+                Text("Uploading…").font(.caption).foregroundStyle(.secondary)
+            } else if let err = uploader?.uploadError {
+                Text(err).font(.caption).foregroundStyle(.red)
+            }
+            Spacer()
+        }
+        .buttonStyle(.borderless)
+        .padding(.top, 4)
+    }
+
+    private var ledaType: UTType { UTType(filenameExtension: "leda") ?? .data }
+    #endif
 
     /// A tappable slider end-cap icon that nudges the value by a 5% step.
     private func bumpButton(_ systemName: String, action: @escaping () -> Void) -> some View {
