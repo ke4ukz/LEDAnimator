@@ -34,6 +34,7 @@ final class DeviceSession {
     var hostname: String?
     var powerSource: String?     // "usb", "batt", or "unknown" (nil until first POWER)
     var vsysMillivolts: Int?     // VSYS in mV; nil when the board can't measure it
+    var dataPin: Int?            // GP pin the strip data line is on (from MOREINFO / PIN)
     var moreInfoLoaded = false   // true once the MOREINFO batch (ENDINFO) has arrived
     var lastError: String?
     // Wi-Fi provisioning
@@ -106,6 +107,14 @@ final class DeviceSession {
     /// Poll live power status; the device replies "POWER usb|batt|unknown <mv>".
     /// Called by the Info panel on open and periodically while it stays visible.
     func requestPower() { send(.power) }
+
+    /// Re-point the strip's data GP pin. The device re-inits its output on the
+    /// new pin and persists it; we update the UI optimistically (echoed by OK PIN).
+    func setDataPin(_ n: Int) {
+        let clamped = max(0, min(29, n))
+        dataPin = clamped
+        send(.setPin(clamped))
+    }
 
     /// If the LIST stream goes quiet (a dropped FILE/ENDLIST, or the device
     /// stops), stop showing "loading" after a few seconds and keep whatever
@@ -282,6 +291,8 @@ final class DeviceSession {
             bluetoothMac = String(reply.dropFirst("BTMAC ".count))
         } else if reply.hasPrefix("HOSTNAME ") {
             hostname = String(reply.dropFirst("HOSTNAME ".count))
+        } else if reply.hasPrefix("PIN ") {
+            dataPin = Int(reply.dropFirst("PIN ".count))
         } else if reply.hasPrefix("POWER ") {
             // "POWER <usb|batt|unknown> <mv>" (mv 0 = voltage unavailable).
             let parts = reply.split(separator: " ")
@@ -317,6 +328,8 @@ final class DeviceSession {
         } else if reply.hasPrefix("OK DELETE ") {
             let name = String(reply.dropFirst("OK DELETE ".count))
             patterns.removeAll { $0 == name }
+        } else if reply.hasPrefix("OK PIN ") {
+            if let n = Int(reply.dropFirst("OK PIN ".count)) { dataPin = n }
         } else if reply.hasPrefix("WIFISCANLEN ") {
             incomingNetworks = []
             armWifiScanTimeout()

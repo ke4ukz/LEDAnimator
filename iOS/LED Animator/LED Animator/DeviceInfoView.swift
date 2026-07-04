@@ -56,6 +56,27 @@ struct DeviceInfoView: View {
                 LabeledContent("Free space", value: display(session.freeBytes.map(formatBytes)))
             }
 
+            Section {
+                if let pin = session.dataPin {
+                    Picker("Data pin", selection: Binding(
+                        get: { pin },
+                        set: { session.setDataPin($0) }
+                    )) {
+                        ForEach(0..<30, id: \.self) { n in
+                            Text("GP\(n)").tag(n)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                } else {
+                    LabeledContent("Data pin", value: display(nil))
+                }
+            } header: {
+                Text("Output")
+            } footer: {
+                Text("The GP pin your LED strip's data line is wired to. Changing it takes effect immediately and is saved on the device.")
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
             Section("Power") {
                 HStack(spacing: 12) {
                     Image(systemName: powerIcon.name)
