@@ -11,7 +11,6 @@ import { Inspector } from './components/Inspector'
 import { Timeline } from './components/Timeline'
 import { ExportDialog } from './components/ExportDialog'
 import { AboutDialog } from './components/AboutDialog'
-import { PrivacyDialog } from './components/PrivacyDialog'
 import { ProjectsDialog } from './components/ProjectsDialog'
 import { SaveConfirmDialog } from './components/SaveConfirmDialog'
 import { KebabMenu } from './components/KebabMenu'
@@ -37,7 +36,6 @@ export default function App() {
   const [timelineH, setTimelineH] = useState(220)
   const [exportOpen, setExportOpen] = useState(false)
   const [aboutOpen, setAboutOpen] = useState(false)
-  const [privacyOpen, setPrivacyOpen] = useState(false)
   const [projectsOpen, setProjectsOpen] = useState(false)
   const [saveConfirm, setSaveConfirm] = useState<{ savedName: string; newName: string } | null>(null)
   const [dragging, setDragging] = useState(false)
@@ -204,7 +202,6 @@ export default function App() {
 
       {exportOpen && <ExportDialog onClose={() => setExportOpen(false)} />}
       {aboutOpen && <AboutDialog onClose={() => setAboutOpen(false)} />}
-      {privacyOpen && <PrivacyDialog onClose={() => setPrivacyOpen(false)} />}
       {projectsOpen && <ProjectsDialog onClose={() => setProjectsOpen(false)} />}
       {saveConfirm && (
         <SaveConfirmDialog
@@ -263,8 +260,8 @@ export default function App() {
         <nav className="foot-links">
           <a href="https://github.com/ke4ukz/LEDAnimator" target="_blank" rel="noopener noreferrer">GitHub</a>
           <a href="https://github.com/ke4ukz/LEDAnimator/issues/new" target="_blank" rel="noopener noreferrer">Report an issue</a>
-          <a href="third-party-notices.txt" target="_blank" rel="noopener noreferrer">Licenses</a>
-          <button type="button" className="linkbtn" onClick={() => setPrivacyOpen(true)}>Privacy</button>
+          <a href="../third-party-notices.txt" target="_blank" rel="noopener noreferrer">Licenses</a>
+          <a href="../privacy/" target="_blank" rel="noopener noreferrer">Privacy</a>
         </nav>
       </footer>
 
