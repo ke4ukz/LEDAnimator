@@ -18,7 +18,7 @@ import {
 import { reserveStopIds } from './gradient'
 import { bakeProject } from './bake'
 import type { ProjectFile } from './export/projectFile'
-import { loadSavedProjectFile, loadSavedDirty, saveProjectFile, clearSavedProject } from './persistence'
+import { loadSavedProjectFile, loadSavedDirty, loadSavedName, saveProjectFile, clearSavedProject } from './persistence'
 import { saveProjectToLibrary, listLibrary } from './export/library'
 
 interface AppState {
@@ -237,9 +237,9 @@ export const useStore = create<AppState>((set, get) => {
     project: init.project,
     projectId: init.projectId,
     projectName: init.projectName,
-    // A recovered project is treated as saved-under-its-current-name; a truly
-    // empty start isn't in the library yet.
-    savedName: wasEmptyStart ? null : init.projectName,
+    // Restore the library name the recovered project was saved under (null if
+    // it was never saved to the library, so a rename+Save won't falsely warn).
+    savedName: wasEmptyStart ? null : loadSavedName(),
     dirty: init.dirty,
     raster: init.raster,
     frame: 0,
@@ -589,7 +589,7 @@ export const useStore = create<AppState>((set, get) => {
       saveProjectToLibrary(file)
       // This project now lives in the library under its current name.
       set({ dirty: false, savedName: file.name })
-      saveProjectFile(file, false) // keep the recovery copy in sync (now clean)
+      saveProjectFile(file, false, file.name) // keep the recovery copy in sync (now clean)
     },
 
     saveProjectAs: (name) => {
@@ -599,7 +599,7 @@ export const useStore = create<AppState>((set, get) => {
       setP({ projectId: crypto.randomUUID(), projectName: finalName, savedName: finalName, dirty: false })
       const file = get().getProjectFile()
       saveProjectToLibrary(file)
-      saveProjectFile(file, false)
+      saveProjectFile(file, false, finalName)
     },
 
     setFps: (fps) => {
@@ -659,7 +659,7 @@ useStore.subscribe((state, prev) => {
   clearTimeout(saveTimer)
   saveTimer = setTimeout(() => {
     const s = useStore.getState()
-    saveProjectFile(s.getProjectFile(), s.dirty)
+    saveProjectFile(s.getProjectFile(), s.dirty, s.savedName)
   }, 800)
 })
 

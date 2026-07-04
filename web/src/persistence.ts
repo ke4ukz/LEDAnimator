@@ -8,6 +8,10 @@ import { parseProjectFile, serializeProjectFile } from './export/projectFile'
 
 const KEY = 'led-animator:project'
 const DIRTY_KEY = 'led-animator:dirty'
+// The library name this project is saved under (absent = never saved to the
+// library). Lets the rename-Save overwrite check survive a reload without
+// falsely warning for a recovered-but-never-saved project.
+const SAVED_NAME_KEY = 'led-animator:savedName'
 
 export function loadSavedProjectFile(): ProjectFile | null {
   try {
@@ -26,10 +30,22 @@ export function loadSavedDirty(): boolean {
   }
 }
 
-export function saveProjectFile(file: ProjectFile, dirty: boolean) {
+/** The library name the recovered project was saved under, or null if it was
+ *  never saved to the library. */
+export function loadSavedName(): string | null {
+  try {
+    return localStorage.getItem(SAVED_NAME_KEY)
+  } catch {
+    return null
+  }
+}
+
+export function saveProjectFile(file: ProjectFile, dirty: boolean, savedName: string | null) {
   try {
     localStorage.setItem(KEY, serializeProjectFile(file))
     localStorage.setItem(DIRTY_KEY, dirty ? '1' : '0')
+    if (savedName == null) localStorage.removeItem(SAVED_NAME_KEY)
+    else localStorage.setItem(SAVED_NAME_KEY, savedName)
   } catch {
     // storage unavailable or over quota — ignore
   }
@@ -39,6 +55,7 @@ export function clearSavedProject() {
   try {
     localStorage.removeItem(KEY)
     localStorage.removeItem(DIRTY_KEY)
+    localStorage.removeItem(SAVED_NAME_KEY)
   } catch {
     // ignore
   }
