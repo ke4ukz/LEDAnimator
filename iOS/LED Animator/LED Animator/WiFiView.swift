@@ -44,6 +44,7 @@ struct WiFiView: View {
                     Text("Join a network")
                 } footer: {
                     Text("Leave the password blank for an open network. Credentials are saved on the device and re-joined on boot.")
+                        .fixedSize(horizontal: false, vertical: true)
                 }
 
                 Section("Nearby networks") {

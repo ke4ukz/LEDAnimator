@@ -116,15 +116,14 @@ struct ControlView: View {
                     }
                     .padding(.vertical, 4)
                 } else if session.listFailed {
-                    HStack(spacing: 12) {
-                        Image(systemName: "exclamationmark.triangle")
-                            .foregroundStyle(.orange)
-                        VStack(alignment: .leading, spacing: 2) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(spacing: 12) {
+                            Image(systemName: "exclamationmark.triangle")
+                                .foregroundStyle(.orange)
                             Text("Couldn't load patterns")
-                            Text("Pull down to try again.")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
                         }
+                        Button("Retry") { session.refreshPatterns() }
+                            .font(.callout)
                     }
                 } else if session.patterns.isEmpty {
                     Text("No patterns on this device.")
@@ -163,6 +162,13 @@ struct ControlView: View {
         .navigationTitle(session.connectedName)
         .inlineNavTitle()
         .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    session.refreshPatterns()
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                }
+            }
             ToolbarItem(placement: .primaryAction) {
                 Button {
                     showWifi = true
