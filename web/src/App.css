@@ -217,6 +217,21 @@
   align-items: center;
 }
 
+.modal-confirm {
+  width: 400px;
+}
+
+.confirm-text {
+  margin: 0;
+  line-height: 1.5;
+  color: var(--text-dim, #b9c0cc);
+}
+
+.confirm-actions {
+  margin-top: 4px;
+  justify-content: flex-end;
+}
+
 /* Inline "ⓘ" details popover used in the export dialog */
 .info {
   display: inline-flex;

@@ -26,6 +26,9 @@ interface AppState {
   project: Project
   projectId: string
   projectName: string
+  /** The name this project has in the library (null = not saved there yet).
+   * Lets Save detect an in-place rename and confirm overwrite vs. Save As. */
+  savedName: string | null
   /** Unsaved changes since the last Save / Open / New. */
   dirty: boolean
   raster: Raster
@@ -202,6 +205,9 @@ export const useStore = create<AppState>((set, get) => {
     project: init.project,
     projectId: init.projectId,
     projectName: init.projectName,
+    // A recovered project is treated as saved-under-its-current-name; a truly
+    // empty start isn't in the library yet.
+    savedName: wasEmptyStart ? null : init.projectName,
     dirty: init.dirty,
     raster: init.raster,
     frame: 0,
@@ -429,6 +435,7 @@ export const useStore = create<AppState>((set, get) => {
         project,
         projectId: f.id,
         projectName: f.name,
+        savedName: f.name,
         dirty: opts?.dirty ?? false,
         ledScale: f.display?.ledScale ?? 1,
         ledShape: f.display?.ledShape ?? 'cube',
@@ -449,6 +456,7 @@ export const useStore = create<AppState>((set, get) => {
         project,
         projectId: crypto.randomUUID(),
         projectName: 'Untitled',
+        savedName: null,
         dirty: false,
         raster: bakeProject(project, 0),
         frame: 0,
@@ -473,6 +481,7 @@ export const useStore = create<AppState>((set, get) => {
         project,
         projectId: crypto.randomUUID(),
         projectName: 'Untitled',
+        savedName: null,
         dirty: false,
         raster: bakeProject(project, 0),
         frame: 0,
@@ -491,14 +500,16 @@ export const useStore = create<AppState>((set, get) => {
     saveProject: () => {
       const file = get().getProjectFile()
       saveProjectToLibrary(file)
-      set({ dirty: false })
+      // This project now lives in the library under its current name.
+      set({ dirty: false, savedName: file.name })
       saveProjectFile(file, false) // keep the recovery copy in sync (now clean)
     },
 
     saveProjectAs: (name) => {
       // Branch the current work off as a new library project, leaving the
       // original's saved copy untouched.
-      setP({ projectId: crypto.randomUUID(), projectName: name.trim() || 'Untitled', dirty: false })
+      const finalName = name.trim() || 'Untitled'
+      setP({ projectId: crypto.randomUUID(), projectName: finalName, savedName: finalName, dirty: false })
       const file = get().getProjectFile()
       saveProjectToLibrary(file)
       saveProjectFile(file, false)

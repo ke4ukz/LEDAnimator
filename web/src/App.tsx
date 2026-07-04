@@ -13,6 +13,7 @@ import { ExportDialog } from './components/ExportDialog'
 import { AboutDialog } from './components/AboutDialog'
 import { PrivacyDialog } from './components/PrivacyDialog'
 import { ProjectsDialog } from './components/ProjectsDialog'
+import { SaveConfirmDialog } from './components/SaveConfirmDialog'
 import { KebabMenu } from './components/KebabMenu'
 import { readProjectFromFile } from './export/projectFile'
 import { deleteProjectFromLibrary } from './export/library'
@@ -38,6 +39,7 @@ export default function App() {
   const [aboutOpen, setAboutOpen] = useState(false)
   const [privacyOpen, setPrivacyOpen] = useState(false)
   const [projectsOpen, setProjectsOpen] = useState(false)
+  const [saveConfirm, setSaveConfirm] = useState<{ savedName: string; newName: string } | null>(null)
   const [dragging, setDragging] = useState(false)
   const loadProject = useStore((s) => s.loadProject)
   const newProject = useStore((s) => s.newProject)
@@ -59,7 +61,17 @@ export default function App() {
     if (confirmDiscard()) newProject()
   }
 
-  const onSave = () => saveProject()
+  // Save, but if the project was renamed in place (its edited name differs from
+  // the name it's saved under), confirm overwrite vs. Save As first.
+  const onSave = useCallback(() => {
+    const s = useStore.getState()
+    const name = s.projectName.trim()
+    if (s.savedName !== null && name && name !== s.savedName) {
+      setSaveConfirm({ savedName: s.savedName, newName: name })
+    } else {
+      saveProject()
+    }
+  }, [saveProject])
 
   const onSaveAs = () => {
     const name = window.prompt('Save as — project name:', useStore.getState().projectName || 'Untitled')
@@ -96,12 +108,12 @@ export default function App() {
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') {
         e.preventDefault()
-        saveProject()
+        onSave()
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [saveProject])
+  }, [onSave])
 
   // Drag-and-drop a .json / .zip anywhere onto the window to import.
   useEffect(() => {
@@ -194,6 +206,15 @@ export default function App() {
       {aboutOpen && <AboutDialog onClose={() => setAboutOpen(false)} />}
       {privacyOpen && <PrivacyDialog onClose={() => setPrivacyOpen(false)} />}
       {projectsOpen && <ProjectsDialog onClose={() => setProjectsOpen(false)} />}
+      {saveConfirm && (
+        <SaveConfirmDialog
+          savedName={saveConfirm.savedName}
+          newName={saveConfirm.newName}
+          onOverwrite={() => { saveProject(); setSaveConfirm(null) }}
+          onSaveAs={() => { saveProjectAs(saveConfirm.newName); setSaveConfirm(null) }}
+          onCancel={() => setSaveConfirm(null)}
+        />
+      )}
       {dragging && <div className="drop-overlay">Drop a project (.json or .zip) to import</div>}
 
       <aside className="sidebar">
