@@ -17,10 +17,8 @@ private enum PlaybackMode: Hashable {
 }
 
 #if os(macOS)
-/// Which inspector panel is open on macOS (nil = none). Owned by MacRootView so
-/// the inspector attaches to the split view (not this detail's toolbar region),
-/// which keeps the Info/Wi-Fi buttons from overflowing during the open animation.
-enum InspectorPanel { case info, wifi }
+/// Which side panel is open on macOS (nil = none).
+private enum InspectorPanel { case info, wifi }
 #endif
 
 struct ControlView: View {
@@ -32,7 +30,7 @@ struct ControlView: View {
     @State private var showImporter = false      // macOS pattern upload
     @State private var dropTargeted = false      // Finder drag-and-drop highlight
     #if os(macOS)
-    @Binding var inspectorPanel: InspectorPanel?   // Info/Wi-Fi inspector (owned by MacRootView)
+    @State private var inspectorPanel: InspectorPanel?   // open Info/Wi-Fi panel (nil = none)
     #endif
     @State private var playback: PlaybackMode = .play
     @State private var solidColor: Color = .white
@@ -41,7 +39,7 @@ struct ControlView: View {
     /// The Wi-Fi transport, when this session is over Wi-Fi (upload is TCP-only).
     private var uploader: TCPController? { session.transport as? TCPController }
 
-    var body: some View {
+    private var patternList: some View {
         List {
             Section("Playback") {
                 // Custom bindings: the `set` closures (user interaction) send
@@ -201,6 +199,10 @@ struct ControlView: View {
             }
         }
         #endif
+    }
+
+    var body: some View {
+        layout
         .navigationTitle(session.connectedName)
         .inlineNavTitle()
         .toolbar {
@@ -222,8 +224,6 @@ struct ControlView: View {
             }
             #endif
         }
-        // macOS: the inspector itself is attached by MacRootView (to the split
-        // view), so its toolbar region doesn't animate the buttons.
         #if os(iOS)
         .sheet(isPresented: $showInfo) {
             DeviceInfoView(session: session)
@@ -252,6 +252,37 @@ struct ControlView: View {
         }
         #endif
     }
+
+    // MARK: Layout
+
+    #if os(macOS)
+    /// The control list, plus a hand-built trailing inspector column when a panel
+    /// is open. Rolled by hand (fixed width, explicit Divider) because SwiftUI's
+    /// native .inspector mis-sized its content on first open and clipped it.
+    @ViewBuilder
+    private var layout: some View {
+        HStack(spacing: 0) {
+            patternList
+            if let panel = inspectorPanel {
+                Divider()
+                panelView(panel)
+                    .frame(width: 320)
+                    .transition(.move(edge: .trailing))
+            }
+        }
+        .animation(.snappy(duration: 0.22), value: inspectorPanel)
+    }
+
+    @ViewBuilder
+    private func panelView(_ panel: InspectorPanel) -> some View {
+        switch panel {
+        case .info: DeviceInfoView(session: session)
+        case .wifi: WiFiView(session: session)
+        }
+    }
+    #else
+    private var layout: some View { patternList }
+    #endif
 
     // MARK: Patterns
 

@@ -33,7 +33,6 @@ struct MacRootView: View {
     let discovery: WiFiDiscovery
 
     @State private var selection: String?   // UnifiedDevice.id
-    @State private var inspectorPanel: InspectorPanel?   // Info/Wi-Fi inspector
 
     private var devices: [UnifiedDevice] {
         mergeUnifiedDevices(ble: ble.devices, wifi: discovery.devices)
@@ -45,13 +44,6 @@ struct MacRootView: View {
                 .navigationSplitViewColumnWidth(min: 200, ideal: 230, max: 320)
         } detail: {
             detail
-        }
-        // Attach the inspector here (not on the detail's List) so the Info/Wi-Fi
-        // toolbar buttons stay in the detail's toolbar region and don't overflow
-        // as the inspector column animates open from zero width.
-        .inspector(isPresented: inspectorPresented) {
-            inspectorPanelView
-                .inspectorColumnWidth(300)   // fixed: a flexible width mis-lays-out on first show
         }
         .frame(minWidth: 680, minHeight: 440)
         .onAppear { ble.startScan() }
@@ -115,7 +107,7 @@ struct MacRootView: View {
     @ViewBuilder
     private var detail: some View {
         if let session = activeSession {
-            ControlView(session: session, inspectorPanel: $inspectorPanel)
+            ControlView(session: session)
         } else if isConnecting {
             VStack(spacing: 12) {
                 ProgressView()
@@ -138,26 +130,8 @@ struct MacRootView: View {
         ble.connectionState == .connecting || wifi.connectionState == .connecting
     }
 
-    private var inspectorPresented: Binding<Bool> {
-        Binding(
-            get: { inspectorPanel != nil && activeSession != nil },
-            set: { if !$0 { inspectorPanel = nil } }
-        )
-    }
-
-    @ViewBuilder
-    private var inspectorPanelView: some View {
-        if let session = activeSession {
-            switch inspectorPanel {
-            case .wifi: WiFiView(session: session)
-            default: DeviceInfoView(session: session)
-            }
-        }
-    }
-
     private func connect(to id: String?) {
         // Tear down any current connection before opening a new one.
-        inspectorPanel = nil   // don't carry an open panel across devices
         ble.disconnect()
         wifi.disconnect()
         guard let id, let device = devices.first(where: { $0.id == id }) else { return }
