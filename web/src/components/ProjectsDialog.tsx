@@ -18,8 +18,10 @@ export function ProjectsDialog({ onClose }: { onClose: () => void }) {
   }, [])
 
   const open = (entry: LibraryEntry) => {
-    if (entry.id === currentId) return onClose()
     const s = useStore.getState()
+    // Re-opening the already-open project with no edits is a no-op. With edits,
+    // reloading reverts to the saved version (after confirming the discard).
+    if (entry.id === currentId && !s.dirty) return onClose()
     if (s.dirty && !window.confirm(`Discard unsaved changes to “${s.projectName || 'Untitled'}”?`)) return
     loadProject(entry.file)
     onClose()

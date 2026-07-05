@@ -957,10 +957,23 @@ label.vt-group {
   gap: 8px;
   font-size: 12px;
   color: var(--muted);
+  /* Wrap controls to a new line in a narrow panel instead of overflowing it. */
+  flex-wrap: wrap;
 }
 
 .field-row > span {
   flex: 0 0 auto;
+}
+
+/* Let a dropdown shrink rather than push a trailing button off the edge. */
+.field-row select {
+  min-width: 0;
+  flex: 0 1 auto;
+}
+
+/* Keep button labels on one line (they wrap as a whole instead). */
+.field-row .btn {
+  white-space: nowrap;
 }
 
 .field-row input[type='range'] {

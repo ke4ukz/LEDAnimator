@@ -293,11 +293,11 @@ export function GradientEditor({ place = 'panel' }: { place?: 'panel' | 'focus' 
           </Row>
           <Row label="Transparency">
             <select value={source.kind === 'image' ? source.bg ?? 'white' : 'white'} onChange={(e) => setImageBg(e.target.value as 'white' | 'black')}>
-              <option value="white">Flatten over white</option>
-              <option value="black">Flatten over black (off)</option>
+              <option value="white">Over white</option>
+              <option value="black">Over black</option>
             </select>
           </Row>
-          <span className="muted">Keeps its aspect ratio; the path samples it.</span>
+          <span className="muted">Transparent areas flatten over the chosen color (black = off). Keeps aspect ratio; the path samples it.</span>
         </>
       )}
 
