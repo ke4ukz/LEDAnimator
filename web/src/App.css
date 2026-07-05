@@ -242,6 +242,61 @@
   width: 400px;
 }
 
+/* Select-range dialog */
+.range-dialog {
+  width: 340px;
+}
+
+.range-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.range-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.range-row input {
+  flex: 1;
+  min-width: 0;
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 3px 6px;
+  font: inherit;
+  font-size: 13px;
+}
+
+.range-x {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--panel-2);
+  color: var(--text-dim, #b9c0cc);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.range-x:hover:not(:disabled) {
+  color: var(--text);
+}
+
+.range-x:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.range-add {
+  align-self: flex-start;
+}
+
 .confirm-text {
   margin: 0;
   line-height: 1.5;

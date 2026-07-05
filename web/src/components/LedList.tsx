@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useStore } from '../store'
 import { sampleRaster } from '../types'
+import { RangeSelectDialog } from './RangeSelectDialog'
 
 /** Live current-color swatch for one LED. Isolated so the whole list doesn't
  *  re-render every frame. */
@@ -107,8 +108,7 @@ export function LedList({ onAddShape }: { onAddShape: () => void }) {
   const endAnimAssign = useStore((s) => s.endAnimAssign)
   const [start, setStart] = useState(0)
   const [animStart, setAnimStart] = useState(0)
-  const [rangeFrom, setRangeFrom] = useState(0)
-  const [rangeTo, setRangeTo] = useState(0)
+  const [showRange, setShowRange] = useState(false)
   // Show the list as individual LEDs or grouped by device. Remembered across sessions.
   const [listMode, setListMode] = useState<'leds' | 'devices'>(
     () => (localStorage.getItem('leda.ledlist.mode') === 'devices' ? 'devices' : 'leds'),
@@ -127,17 +127,6 @@ export function LedList({ onAddShape }: { onAddShape: () => void }) {
     else idxs.forEach((i) => sel.add(i))
     setSelection([...sel])
   }
-
-  // Inclusive index range → LED indices, clamped to the chain.
-  const rangeIndices = () => {
-    const lo = Math.max(0, Math.min(rangeFrom, rangeTo))
-    const hi = Math.min(leds.length - 1, Math.max(rangeFrom, rangeTo))
-    const out: number[] = []
-    for (let i = lo; i <= hi; i++) out.push(i)
-    return out
-  }
-  const selectRange = (additive: boolean) =>
-    setSelection(additive ? [...new Set([...selection, ...rangeIndices()])] : rangeIndices())
 
   // Escape leaves whichever click tool is active.
   useEffect(() => {
@@ -236,26 +225,7 @@ export function LedList({ onAddShape }: { onAddShape: () => void }) {
       ) : (
         <>
           <div className="renumber-bar">
-            <label className="muted">Select #</label>
-            <input
-              className="order"
-              type="number"
-              min={0}
-              max={Math.max(0, leds.length - 1)}
-              value={rangeFrom}
-              onChange={(e) => setRangeFrom(Math.max(0, parseInt(e.target.value, 10) || 0))}
-            />
-            <span className="muted">to</span>
-            <input
-              className="order"
-              type="number"
-              min={0}
-              max={Math.max(0, leds.length - 1)}
-              value={rangeTo}
-              onChange={(e) => setRangeTo(Math.max(0, parseInt(e.target.value, 10) || 0))}
-            />
-            <button className="btn" disabled={leds.length === 0} onClick={() => selectRange(false)}>Select</button>
-            <button className="btn" disabled={leds.length === 0} onClick={() => selectRange(true)} title="Add this range to the current selection">Add</button>
+            <button className="btn" disabled={leds.length === 0} onClick={() => setShowRange(true)}>Select numbered range…</button>
           </div>
           <div className="renumber-bar">
             <label className="muted">Renumber (wiring) from</label>
@@ -282,6 +252,8 @@ export function LedList({ onAddShape }: { onAddShape: () => void }) {
           </div>
         </>
       )}
+
+      {showRange && <RangeSelectDialog onClose={() => setShowRange(false)} />}
     </div>
   )
 }

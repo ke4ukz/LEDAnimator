@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useStore } from '../store'
 import { sampleRaster } from '../types'
 import { rgbToHex } from '../color'
+import { InfoDot } from './InfoDot'
 
 /** LED properties: editable position + track assignment for the selection. */
 export function Inspector() {
@@ -55,7 +56,14 @@ export function Inspector() {
         <strong>{single != null ? `LED #${single}` : `${sel.length} LEDs`}</strong>
       </div>
       <label className="insp-row insp-check">
-        <span className="muted" title="Add the entered amount to each selected LED's position (e.g. +50 on Z moves them all up by 50), instead of setting them all to the same value.">Relative move</span>
+        <span className="muted">
+          Relative move{' '}
+          <InfoDot label="About relative move">
+            Adds the entered amount to each selected LED's position (e.g. +50 on Z raises them all by 50),
+            instead of setting them all to the same value. Handy for moving a whole device without
+            flattening its spacing.
+          </InfoDot>
+        </span>
         <input type="checkbox" checked={relative} onChange={(e) => setRelative(e.target.checked)} />
       </label>
       {relative ? (
@@ -81,11 +89,24 @@ export function Inspector() {
         </select>
       </div>
       <label className="insp-row insp-check">
-        <span className="muted" title="Part of the physical chain. Off = excluded from the exported strip.">In chain</span>
+        <span className="muted">
+          Enabled{' '}
+          <InfoDot label="About Enabled">
+            When on, this LED is part of the physical chain and the exported strip. Turn it off for a
+            layout/reference LED that isn't wired — it's dropped from the export, and following LEDs shift
+            up to close the gap.
+          </InfoDot>
+        </span>
         <input type="checkbox" checked={!allUnassigned} onChange={(e) => setLedUnassigned(sel, !e.target.checked)} />
       </label>
       <div className="insp-row">
-        <span className="muted" title="Which physical device renders this LED in a multi-device install. LEDs sharing a device export together as that board's slice. 0 = default (single device).">Device</span>
+        <span className="muted">
+          Device{' '}
+          <InfoDot label="About Device">
+            Which physical device renders this LED in a multi-device install. LEDs sharing a device export
+            together as that board's slice. 0 = default (single device).
+          </InfoDot>
+        </span>
         <input
           type="number"
           min={0}
@@ -96,7 +117,13 @@ export function Inspector() {
         />
       </div>
       <div className="insp-row">
-        <span className="muted" title="Position in the animation sequence (separate from wiring). LEDs sharing a number animate together. Blank = default (wiring order).">Anim #</span>
+        <span className="muted">
+          Anim #{' '}
+          <InfoDot label="About the animation index">
+            Position in the animation sequence, separate from wiring order. LEDs sharing a number animate
+            together (e.g. a whole column). Blank = default (follows wiring order).
+          </InfoDot>
+        </span>
         <input
           type="number"
           min={0}
@@ -107,7 +134,14 @@ export function Inspector() {
         />
       </div>
       <label className="insp-row insp-check">
-        <span className="muted" title="Turn this LED off in the animation (black), keeping its chain slot so the pattern doesn't shift.">Off (not animated)</span>
+        <span className="muted">
+          Off (not animated){' '}
+          <InfoDot label="About Off">
+            Forces this LED to black in the animation but keeps its slot in the chain, so the pattern
+            doesn't shift. Use for dead or intentionally-dark pixels. (Different from Enabled, which drops
+            the LED from the chain entirely.)
+          </InfoDot>
+        </span>
         <input type="checkbox" checked={allDisabled} disabled={allUnassigned} onChange={(e) => setLedDisabled(sel, e.target.checked)} />
       </label>
       {color && (
