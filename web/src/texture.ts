@@ -1,5 +1,5 @@
 import type { RGB } from './types'
-import { type GradientSource, applyPost } from './project'
+import { type GradientSource, type ImageSource, type Source, applyPost } from './project'
 import { evalGradient } from './gradient'
 
 // The single source of truth for color: every source is rasterized to a square
@@ -24,6 +24,71 @@ export interface SourceTexture {
 const texCache = new WeakMap<object, SourceTexture>()
 const canvasCache = new WeakMap<object, HTMLCanvasElement>()
 
+// A tiny opaque-black stand-in returned while an image is still decoding; never
+// cached, so the next call after decode produces the real texture.
+const PLACEHOLDER: SourceTexture = { res: 1, data: new Uint8ClampedArray([0, 0, 0]) }
+
+// Raw decoded image pixels keyed by data URL (decoded once, shared across
+// sources and post edits). `null` means a decode is in flight.
+const rawImageCache = new Map<string, SourceTexture | null>()
+
+let readyListener: (() => void) | null = null
+/** Register a callback fired when an async image decode finishes, so the app can
+ *  re-bake / re-render now that the real pixels exist. */
+export function setTextureReadyListener(fn: () => void) {
+  readyListener = fn
+}
+
+/** Kick off a one-time async decode of an image data URL into a square RGB grid. */
+function decodeImage(url: string) {
+  if (rawImageCache.has(url)) return // decoding or already done
+  rawImageCache.set(url, null)
+  const img = new Image()
+  img.onload = () => {
+    const res = SOURCE_TEXTURE_RES
+    const canvas = document.createElement('canvas')
+    canvas.width = res
+    canvas.height = res
+    const ctx = canvas.getContext('2d')!
+    ctx.drawImage(img, 0, 0, res, res) // stretch to the square source space
+    const px = ctx.getImageData(0, 0, res, res).data
+    const data = new Uint8ClampedArray(res * res * 3)
+    for (let p = 0, q = 0; q < px.length; p += 3, q += 4) {
+      data[p] = px[q]
+      data[p + 1] = px[q + 1]
+      data[p + 2] = px[q + 2]
+    }
+    rawImageCache.set(url, { res, data })
+    readyListener?.()
+  }
+  img.onerror = () => {
+    rawImageCache.set(url, PLACEHOLDER) // couldn't decode → stays black
+    readyListener?.()
+  }
+  img.src = url
+}
+
+/** An image source's texture: the decoded pixels with post-processing applied.
+ *  Returns the placeholder (and starts a decode) until the pixels are ready. */
+function imageTexture(source: ImageSource): SourceTexture {
+  const raw = rawImageCache.get(source.image)
+  if (raw === undefined) {
+    decodeImage(source.image)
+    return PLACEHOLDER
+  }
+  if (raw === null || raw === PLACEHOLDER) return PLACEHOLDER
+  if (!source.post) return raw // no adjustments → share the raw grid
+  const { res, data: src } = raw
+  const data = new Uint8ClampedArray(src.length)
+  for (let i = 0; i < src.length; i += 3) {
+    const [r, g, b] = applyPost([src[i], src[i + 1], src[i + 2]], source.post)
+    data[i] = r
+    data[i + 1] = g
+    data[i + 2] = b
+  }
+  return { res, data }
+}
+
 /** Rasterize a gradient source to an RGB grid with post-processing baked in. */
 function rasterize(source: GradientSource, res: number): SourceTexture {
   const data = new Uint8ClampedArray(res * res * 3)
@@ -43,13 +108,13 @@ function rasterize(source: GradientSource, res: number): SourceTexture {
 }
 
 /** The source's texture, built once per source object (cache invalidates when
- *  the store replaces the source on any gradient/post edit). */
-export function getSourceTexture(source: GradientSource, res = SOURCE_TEXTURE_RES): SourceTexture {
-  let t = texCache.get(source)
-  if (!t || t.res !== res) {
-    t = rasterize(source, res)
-    texCache.set(source, t)
-  }
+ *  the store replaces the source on any gradient/post/image edit). Image sources
+ *  return a black placeholder until their async decode completes. */
+export function getSourceTexture(source: Source, res = SOURCE_TEXTURE_RES): SourceTexture {
+  const cached = texCache.get(source)
+  if (cached && cached.res === res) return cached
+  const t = source.kind === 'image' ? imageTexture(source) : rasterize(source, res)
+  if (t !== PLACEHOLDER) texCache.set(source, t)
   return t
 }
 
@@ -65,16 +130,16 @@ export function sampleNearest(tex: SourceTexture, u: number, v: number): RGB {
 
 /** The texture as a canvas, so a loupe can `drawImage` a cropped region scaled
  *  up with nearest-neighbor to show the individual source pixels crisply. */
-export function getSourceCanvas(source: GradientSource, res = SOURCE_TEXTURE_RES): HTMLCanvasElement {
+export function getSourceCanvas(source: Source, res = SOURCE_TEXTURE_RES): HTMLCanvasElement {
   const cached = canvasCache.get(source)
-  if (cached && cached.width === res) return cached
+  if (cached) return cached
 
   const tex = getSourceTexture(source, res)
   const canvas = document.createElement('canvas')
-  canvas.width = res
-  canvas.height = res
+  canvas.width = tex.res
+  canvas.height = tex.res
   const ctx = canvas.getContext('2d')!
-  const img = ctx.createImageData(res, res)
+  const img = ctx.createImageData(tex.res, tex.res)
   for (let p = 0, q = 0; p < tex.data.length; p += 3, q += 4) {
     img.data[q] = tex.data[p]
     img.data[q + 1] = tex.data[p + 1]
@@ -82,6 +147,6 @@ export function getSourceCanvas(source: GradientSource, res = SOURCE_TEXTURE_RES
     img.data[q + 3] = 255
   }
   ctx.putImageData(img, 0, 0)
-  canvasCache.set(source, canvas)
+  if (tex !== PLACEHOLDER) canvasCache.set(source, canvas)
   return canvas
 }

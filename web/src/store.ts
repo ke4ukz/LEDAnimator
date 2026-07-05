@@ -18,6 +18,7 @@ import {
 } from './project'
 import { reserveStopIds } from './gradient'
 import { bakeProject } from './bake'
+import { setTextureReadyListener } from './texture'
 import type { ProjectFile } from './export/projectFile'
 import { loadSavedProjectFile, loadSavedDirty, loadSavedName, saveProjectFile, clearSavedProject } from './persistence'
 import { saveProjectToLibrary, listLibrary } from './export/library'
@@ -61,11 +62,18 @@ interface AppState {
   /** When true, the gradient texture is the big center editor and the 3D view
    *  is a small preview (for precise node/handle placement). */
   focusGradient: boolean
+  /** Bumped when an async image texture finishes decoding, so views that draw
+   *  image sources re-render once the real pixels exist. */
+  textureVersion: number
 
   // Track / source editing (all re-bake the raster).
   updateGradient: (g: Gradient) => void
   /** Merge a patch into the selected track's source post-processing (adjustments). */
   updatePost: (patch: Partial<PostFx>) => void
+  /** Turn the selected track's source into an image (from a data URL). */
+  setSourceImage: (image: string, name?: string) => void
+  /** Turn the selected track's source back into a (default) gradient. */
+  setSourceGradient: () => void
   addTrack: () => void
   /** Clone a track's settings + source (starts with no LEDs assigned). */
   duplicateTrack: (id: string) => void
@@ -164,8 +172,8 @@ function reserveProjectIds(project: Project) {
   reserveIds(ids)
   const stopIds: string[] = []
   for (const s of project.sources) {
-    const g = s.gradient
-    if ('stops' in g) for (const st of g.stops) stopIds.push(st.id)
+    if (s.kind !== 'gradient') continue
+    if ('stops' in s.gradient) for (const st of s.gradient.stops) stopIds.push(st.id)
   }
   reserveStopIds(stopIds)
 }
@@ -244,6 +252,13 @@ export const useStore = create<AppState>((set, get) => {
     programmatic = false
   }
 
+  // When an image source finishes decoding, re-bake (its pixels were black
+  // placeholders until now) and bump the version so image views re-render. This
+  // touches only derived state, so it doesn't mark the project dirty.
+  setTextureReadyListener(() => {
+    set((s) => ({ textureVersion: s.textureVersion + 1, raster: rebake(s.project) }))
+  })
+
   return {
     leds: init.leds,
     project: init.project,
@@ -269,13 +284,38 @@ export const useStore = create<AppState>((set, get) => {
     showLabels: init.showLabels,
     showSamples: false,
     focusGradient: false,
+    textureVersion: 0,
 
     updateGradient: (g) => {
       const { project, selectedTrack } = get()
       const track = project.tracks.find((t) => t.id === selectedTrack)
       if (!track) return
       const sources = project.sources.map((s) =>
-        s.id === track.sourceId ? { ...s, gradient: g } : s,
+        s.id === track.sourceId && s.kind === 'gradient' ? { ...s, gradient: g } : s,
+      )
+      commit({ ...project, sources })
+    },
+
+    setSourceImage: (image, name) => {
+      const { project, selectedTrack } = get()
+      const track = project.tracks.find((t) => t.id === selectedTrack)
+      if (!track) return
+      const sources = project.sources.map((s): Source =>
+        s.id === track.sourceId
+          ? { id: s.id, name: name ?? s.name, kind: 'image', image, post: s.post }
+          : s,
+      )
+      commit({ ...project, sources })
+    },
+
+    setSourceGradient: () => {
+      const { project, selectedTrack } = get()
+      const track = project.tracks.find((t) => t.id === selectedTrack)
+      if (!track) return
+      const sources = project.sources.map((s): Source =>
+        s.id === track.sourceId && s.kind !== 'gradient'
+          ? { id: s.id, name: s.name, kind: 'gradient', gradient: defaultGradient(), post: s.post }
+          : s,
       )
       commit({ ...project, sources })
     },
@@ -330,15 +370,10 @@ export const useStore = create<AppState>((set, get) => {
       const src = project.tracks.find((t) => t.id === id)
       if (!src) return
       const source = project.sources.find((s) => s.id === src.sourceId)
-      // Clone the source (own gradient + adjustments) so edits stay independent.
+      // Clone the whole source (gradient or image + adjustments) so edits stay
+      // independent; structuredClone handles either kind.
       const newSource: Source = source
-        ? {
-            ...source,
-            id: newId('src'),
-            name: `${source.name} copy`,
-            gradient: structuredClone(source.gradient),
-            post: source.post ? { ...source.post } : undefined,
-          }
+        ? { ...structuredClone(source), id: newId('src'), name: `${source.name} copy` }
         : { id: newId('src'), name: 'Source', kind: 'gradient', gradient: defaultGradient() }
       // Clone the track's settings; it starts with no LEDs (assign them after).
       const newTrack: Track = {
@@ -574,8 +609,8 @@ export const useStore = create<AppState>((set, get) => {
       reserveIds(projIds)
       const stopIds: string[] = []
       for (const src of f.sources) {
-        const g = src.gradient
-        if ('stops' in g) for (const st of g.stops) stopIds.push(st.id)
+        if (src.kind !== 'gradient') continue
+        if ('stops' in src.gradient) for (const st of src.gradient.stops) stopIds.push(st.id)
       }
       reserveStopIds(stopIds)
 

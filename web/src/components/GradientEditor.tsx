@@ -8,6 +8,7 @@ import {
   type RadialMetric,
   makeStop,
 } from '../gradient'
+import { useRef } from 'react'
 import type { PathDef } from '../project'
 import { PRESETS, instantiateGradient } from '../presets'
 import { TexturePreview } from './TexturePreview'
@@ -51,6 +52,7 @@ export function GradientEditor({ place = 'panel' }: { place?: 'panel' | 'focus' 
   const project = useStore((s) => s.project)
   const selectedTrack = useStore((s) => s.selectedTrack)
   const setGradient = useStore((s) => s.updateGradient)
+  const setSourceGradient = useStore((s) => s.setSourceGradient)
   const updatePost = useStore((s) => s.updatePost)
   const updateTrack = useStore((s) => s.updateTrack)
   const focusGradient = useStore((s) => s.focusGradient)
@@ -60,26 +62,28 @@ export function GradientEditor({ place = 'panel' }: { place?: 'panel' | 'focus' 
 
   if (!track || !source) return <p className="placeholder">Select a track to edit its source.</p>
 
-  const gradient = source.gradient
+  const gradient: Gradient | null = source.kind === 'gradient' ? source.gradient : null
   const post = source.post ?? {}
   const setPath = (p: PathDef) => updateTrack(track.id, { path: p })
   // Spread-and-cast patch: the discriminated union keeps the active variant.
-  const patch = (p: Partial<Gradient>) => setGradient({ ...gradient, ...p } as Gradient)
+  const patch = (p: Partial<Gradient>) => {
+    if (gradient) setGradient({ ...gradient, ...p } as Gradient)
+  }
 
   // The two "editor" surfaces (stop ramp, or bilinear corners). In focus mode
   // these live large in the center; the normal panel then hides them so its
-  // other properties stay put in their original place.
-  const rampOrCorners =
-    gradient.type === 'bilinear' ? (
-      <div className="corners">
-        <Corner label="TL" value={gradient.tl} onChange={(tl) => patch({ tl })} />
-        <Corner label="TR" value={gradient.tr} onChange={(tr) => patch({ tr })} />
-        <Corner label="BL" value={gradient.bl} onChange={(bl) => patch({ bl })} />
-        <Corner label="BR" value={gradient.br} onChange={(br) => patch({ br })} />
-      </div>
-    ) : (
-      <RampEditor stops={gradient.stops} interp={gradient.interp} onChange={(stops) => patch({ stops })} large={place === 'focus'} />
-    )
+  // other properties stay put in their original place. An image source has
+  // neither.
+  const rampOrCorners = !gradient ? null : gradient.type === 'bilinear' ? (
+    <div className="corners">
+      <Corner label="TL" value={gradient.tl} onChange={(tl) => patch({ tl })} />
+      <Corner label="TR" value={gradient.tr} onChange={(tr) => patch({ tr })} />
+      <Corner label="BL" value={gradient.bl} onChange={(bl) => patch({ bl })} />
+      <Corner label="BR" value={gradient.br} onChange={(br) => patch({ br })} />
+    </div>
+  ) : (
+    <RampEditor stops={gradient.stops} interp={gradient.interp} onChange={(stops) => patch({ stops })} large={place === 'focus'} />
+  )
 
   // Center focus surface: the large texture (with its sampling path), a
   // magnifier + color readout, and the full-width ramp — the precise bits.
@@ -179,98 +183,114 @@ export function GradientEditor({ place = 'panel' }: { place?: 'panel' | 'focus' 
 
       <hr className="sep" />
 
-      <Row label="Preset">
-        <select
-          defaultValue=""
-          onChange={(e) => {
-            const preset = PRESETS[Number(e.target.value)]
-            if (preset) setGradient(instantiateGradient(preset.gradient))
-            e.target.value = ''
-          }}
-        >
-          <option value="" disabled>Load…</option>
-          {PRESETS.map((p, i) => (
-            <option key={p.name} value={i}>{p.name}</option>
-          ))}
-        </select>
-      </Row>
-
-      <Row label="Type">
-        <select value={gradient.type} onChange={(e) => setGradient(withType(gradient, e.target.value as Gradient['type']))}>
-          {TYPES.map((t) => (
-            <option key={t.value} value={t.value}>{t.label}</option>
-          ))}
-        </select>
-      </Row>
-
-      <Row label="Interp">
-        <select value={gradient.interp} onChange={(e) => patch({ interp: e.target.value as InterpSpace })}>
-          <option value="rgb">RGB</option>
-          <option value="hsl">HSL (hue)</option>
-          <option value="oklch">OKLCH</option>
-          <option value="step">Step (hard)</option>
-        </select>
-      </Row>
-
-      {gradient.type === 'linear' && (
-        <Angle label="Angle" rad={gradient.angle} onChange={(angle) => patch({ angle })} />
-      )}
-
-      {gradient.type === 'radial' && (
+      {gradient ? (
         <>
-          <Num label="Center X" value={gradient.cx} onChange={(cx) => patch({ cx })} />
-          <Num label="Center Y" value={gradient.cy} onChange={(cy) => patch({ cy })} />
-          <Num label="Radius" value={gradient.radius} onChange={(radius) => patch({ radius })} />
-          <Row label="Shape">
-            <select value={gradient.metric} onChange={(e) => patch({ metric: e.target.value as RadialMetric })}>
-              <option value="euclidean">Circle</option>
-              <option value="chebyshev">Square</option>
+          <Row label="Preset">
+            <select
+              defaultValue=""
+              onChange={(e) => {
+                const preset = PRESETS[Number(e.target.value)]
+                if (preset) setGradient(instantiateGradient(preset.gradient))
+                e.target.value = ''
+              }}
+            >
+              <option value="" disabled>Load…</option>
+              {PRESETS.map((p, i) => (
+                <option key={p.name} value={i}>{p.name}</option>
+              ))}
             </select>
           </Row>
-        </>
-      )}
 
-      {gradient.type === 'conic' && (
-        <>
-          <Num label="Center X" value={gradient.cx} onChange={(cx) => patch({ cx })} />
-          <Num label="Center Y" value={gradient.cy} onChange={(cy) => patch({ cy })} />
-          <Angle label="Angle" rad={gradient.angle} onChange={(angle) => patch({ angle })} />
-        </>
-      )}
-
-      {gradient.type === 'dualRadial' && (
-        <>
-          <Num label="Center 1 X" value={gradient.c1x} onChange={(c1x) => patch({ c1x })} />
-          <Num label="Center 1 Y" value={gradient.c1y} onChange={(c1y) => patch({ c1y })} />
-          <Num label="Center 2 X" value={gradient.c2x} onChange={(c2x) => patch({ c2x })} />
-          <Num label="Center 2 Y" value={gradient.c2y} onChange={(c2y) => patch({ c2y })} />
-          <Num label="Radius" value={gradient.radius} onChange={(radius) => patch({ radius })} />
-          <Row label="Combine">
-            <select value={gradient.combine} onChange={(e) => patch({ combine: e.target.value as DualCombine })}>
-              <option value="nearest">Nearest (two pulses)</option>
-              <option value="blend">Blend (soft basin)</option>
-              <option value="difference">Difference (curved)</option>
+          <Row label="Type">
+            <select value={gradient.type} onChange={(e) => setGradient(withType(gradient, e.target.value as Gradient['type']))}>
+              {TYPES.map((t) => (
+                <option key={t.value} value={t.value}>{t.label}</option>
+              ))}
             </select>
           </Row>
-        </>
-      )}
 
-      {gradient.type === 'noise' && (
+          <Row label="Interp">
+            <select value={gradient.interp} onChange={(e) => patch({ interp: e.target.value as InterpSpace })}>
+              <option value="rgb">RGB</option>
+              <option value="hsl">HSL (hue)</option>
+              <option value="oklch">OKLCH</option>
+              <option value="step">Step (hard)</option>
+            </select>
+          </Row>
+
+          {gradient.type === 'linear' && (
+            <Angle label="Angle" rad={gradient.angle} onChange={(angle) => patch({ angle })} />
+          )}
+
+          {gradient.type === 'radial' && (
+            <>
+              <Num label="Center X" value={gradient.cx} onChange={(cx) => patch({ cx })} />
+              <Num label="Center Y" value={gradient.cy} onChange={(cy) => patch({ cy })} />
+              <Num label="Radius" value={gradient.radius} onChange={(radius) => patch({ radius })} />
+              <Row label="Shape">
+                <select value={gradient.metric} onChange={(e) => patch({ metric: e.target.value as RadialMetric })}>
+                  <option value="euclidean">Circle</option>
+                  <option value="chebyshev">Square</option>
+                </select>
+              </Row>
+            </>
+          )}
+
+          {gradient.type === 'conic' && (
+            <>
+              <Num label="Center X" value={gradient.cx} onChange={(cx) => patch({ cx })} />
+              <Num label="Center Y" value={gradient.cy} onChange={(cy) => patch({ cy })} />
+              <Angle label="Angle" rad={gradient.angle} onChange={(angle) => patch({ angle })} />
+            </>
+          )}
+
+          {gradient.type === 'dualRadial' && (
+            <>
+              <Num label="Center 1 X" value={gradient.c1x} onChange={(c1x) => patch({ c1x })} />
+              <Num label="Center 1 Y" value={gradient.c1y} onChange={(c1y) => patch({ c1y })} />
+              <Num label="Center 2 X" value={gradient.c2x} onChange={(c2x) => patch({ c2x })} />
+              <Num label="Center 2 Y" value={gradient.c2y} onChange={(c2y) => patch({ c2y })} />
+              <Num label="Radius" value={gradient.radius} onChange={(radius) => patch({ radius })} />
+              <Row label="Combine">
+                <select value={gradient.combine} onChange={(e) => patch({ combine: e.target.value as DualCombine })}>
+                  <option value="nearest">Nearest (two pulses)</option>
+                  <option value="blend">Blend (soft basin)</option>
+                  <option value="difference">Difference (curved)</option>
+                </select>
+              </Row>
+            </>
+          )}
+
+          {gradient.type === 'noise' && (
+            <>
+              <Row label="Scale">
+                <input type="range" min={1} max={40} step={1} value={gradient.scale} onChange={(e) => patch({ scale: Number(e.target.value) })} />
+                <span className="muted">{gradient.scale}</span>
+              </Row>
+              <Row label="Octaves">
+                <input type="range" min={1} max={5} step={1} value={gradient.octaves} onChange={(e) => patch({ octaves: Number(e.target.value) })} />
+                <span className="muted">{gradient.octaves}</span>
+              </Row>
+              <Row label="Seed">
+                <span className="muted">{gradient.seed}</span>
+                <button className="btn" onClick={() => patch({ seed: Math.floor(Math.random() * 1e9) })}>
+                  Randomize
+                </button>
+              </Row>
+            </>
+          )}
+
+          <Row label="Image">
+            <ImagePicker label="Use an image…" />
+          </Row>
+        </>
+      ) : (
         <>
-          <Row label="Scale">
-            <input type="range" min={1} max={40} step={1} value={gradient.scale} onChange={(e) => patch({ scale: Number(e.target.value) })} />
-            <span className="muted">{gradient.scale}</span>
+          <Row label="Image">
+            <ImagePicker label="Replace…" />
+            <button className="btn" onClick={setSourceGradient}>To gradient</button>
           </Row>
-          <Row label="Octaves">
-            <input type="range" min={1} max={5} step={1} value={gradient.octaves} onChange={(e) => patch({ octaves: Number(e.target.value) })} />
-            <span className="muted">{gradient.octaves}</span>
-          </Row>
-          <Row label="Seed">
-            <span className="muted">{gradient.seed}</span>
-            <button className="btn" onClick={() => patch({ seed: Math.floor(Math.random() * 1e9) })}>
-              Randomize
-            </button>
-          </Row>
+          <span className="muted">Stretched to fill the square source texture; the path samples it.</span>
         </>
       )}
 
@@ -358,5 +378,32 @@ function Corner({ label, value, onChange }: { label: string; value: [number, num
       <span>{label}</span>
       <input type="color" value={rgbToHex(value)} onChange={(e) => onChange(hexToRgb(e.target.value))} />
     </label>
+  )
+}
+
+/** A button that picks an image file and sets it as the track's source (read as
+ *  a data URL so it persists with the project). */
+function ImagePicker({ label }: { label: string }) {
+  const setSourceImage = useStore((s) => s.setSourceImage)
+  const ref = useRef<HTMLInputElement>(null)
+  return (
+    <>
+      <input
+        ref={ref}
+        type="file"
+        accept="image/*"
+        style={{ display: 'none' }}
+        onChange={(e) => {
+          const file = e.target.files?.[0]
+          if (file) {
+            const reader = new FileReader()
+            reader.onload = () => setSourceImage(reader.result as string, file.name.replace(/\.[^.]+$/, ''))
+            reader.readAsDataURL(file)
+          }
+          e.target.value = ''
+        }}
+      />
+      <button className="btn" onClick={() => ref.current?.click()}>{label}</button>
+    </>
   )
 }

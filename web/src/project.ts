@@ -24,8 +24,17 @@ export interface GradientSource {
   post?: PostFx
 }
 
-// Images will join this union later.
-export type Source = GradientSource
+/** A user-supplied image, stored as a data URL so it travels with the project
+ *  JSON. It's decoded and stretched to the square source texture on demand. */
+export interface ImageSource {
+  id: string
+  name: string
+  kind: 'image'
+  image: string
+  post?: PostFx
+}
+
+export type Source = GradientSource | ImageSource
 
 /** A sampling path across a source's normalized (u,v) space, parameter s ∈ [0,1).
  *  Rotations (`rot`) are in DEGREES. */

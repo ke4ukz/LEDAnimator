@@ -1,5 +1,6 @@
 import { type ReactNode, useEffect, useRef, useState } from 'react'
-import { type GradientSource } from '../project'
+import { type Source } from '../project'
+import { useStore } from '../store'
 import { getSourceCanvas, getSourceTexture, sampleNearest } from '../texture'
 import { rgbToHex } from '../color'
 import { TexturePreview } from './TexturePreview'
@@ -13,9 +14,11 @@ const MAG = 200
  * magnifier loupe + color readout for whatever's under the cursor (sampled from
  * the exact export texture), and the full-width ramp below.
  */
-export function GradientFocusView({ source, ramp }: { source: GradientSource; ramp: ReactNode }) {
+export function GradientFocusView({ source, ramp }: { source: Source; ramp: ReactNode }) {
   const [hover, setHover] = useState<{ u: number; v: number } | null>(null)
   const [zoom, setZoom] = useState(4)
+  // Re-read the texture once an image source finishes decoding.
+  useStore((s) => s.textureVersion)
 
   const half = 0.5 / zoom
   const span = 2 * half
@@ -78,10 +81,11 @@ function TextureLoupe({
   win,
   size,
 }: {
-  source: GradientSource
+  source: Source
   win: { u0: number; v0: number; u1: number; v1: number }
   size: number
 }) {
+  const version = useStore((s) => s.textureVersion)
   const ref = useRef<HTMLCanvasElement>(null)
   useEffect(() => {
     const c = ref.current
@@ -112,6 +116,6 @@ function TextureLoupe({
         (cx0 - sx) * scale, (cy0 - sy) * scale, (cx1 - cx0) * scale, (cy1 - cy0) * scale,
       )
     }
-  }, [source, win.u0, win.v0, win.u1, win.v1, size])
+  }, [source, win.u0, win.v0, win.u1, win.v1, size, version])
   return <canvas ref={ref} width={size} height={size} className="grad-preview" />
 }

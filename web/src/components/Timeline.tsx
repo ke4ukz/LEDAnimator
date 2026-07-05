@@ -72,6 +72,7 @@ function Lane({
   const showSamples = useStore((s) => s.showSamples)
   const leds = useStore((s) => s.leds)
   const assignments = useStore((s) => s.project.assignments)
+  const textureVersion = useStore((s) => s.textureVersion)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const [editing, setEditing] = useState(false)
 
@@ -101,7 +102,7 @@ function Lane({
     ctx.putImageData(img, 0, 0)
     ctx.imageSmoothingEnabled = false
     ctx.drawImage(canvas, 0, 0, STRIP_W, 1, 0, 0, STRIP_W, STRIP_H)
-  }, [track.path, source])
+  }, [track.path, source, textureVersion])
 
   // Playhead = where the lead LED (order 0) reads right now (integrate speed).
   const s0 = frac(track.offset + trackPhaseAt(track, frame, raster.numFrames))
