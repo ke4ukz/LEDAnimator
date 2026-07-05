@@ -1,6 +1,5 @@
 import type { RGB } from './types'
 import { type Gradient, type GradientStop, makeStop } from './gradient'
-import { oklchToRgb } from './color'
 
 // Gradient presets as plain data. To add one, append an entry to PRESETS — no
 // code changes needed. Ramp stops are written without ids ({ pos, color }); ids
@@ -30,32 +29,30 @@ export function instantiateGradient(spec: GradientSpec): Gradient {
   return spec as Gradient
 }
 
-// Three rainbows trading vividness against even band widths. This tradeoff is
-// unavoidable: a perceptually-even rainbow needs constant lightness + chroma,
-// but the sRGB gamut caps constant chroma at ~0.11 (green/yellow can't go more
-// saturated), so "even" is inherently muted. All use 12 hues at even positions.
-const evenStops = (colors: RGB[]): StopSpec[] => [
-  ...colors.map((color, i) => ({ pos: i / colors.length, color })),
-  { pos: 1, color: colors[0] },
+// A "rainbow" tuned by eye, not by color science: the vivid sRGB colors, but
+// the stop positions are hand-placed so the warm hues (orange, yellow) get wide
+// bands and the saturated primaries (red, green, blue, magenta) get narrow ones
+// — a pleasing conic rather than a mathematically even hue sweep. RGB interp
+// keeps the colors saturated. Drag any stop to taste.
+const RAINBOW: StopSpec[] = [
+  { pos: 0, color: [255, 0, 0] }, //     red        (narrow)
+  { pos: 0.05, color: [255, 128, 0] }, //  orange
+  { pos: 0.22, color: [255, 255, 0] }, //  yellow     (wide)
+  { pos: 0.37, color: [128, 255, 0] }, //  chartreuse
+  { pos: 0.44, color: [0, 255, 0] }, //    green      (narrow)
+  { pos: 0.5, color: [0, 255, 128] }, //   spring
+  { pos: 0.58, color: [0, 255, 255] }, //  cyan
+  { pos: 0.65, color: [0, 128, 255] }, //  azure
+  { pos: 0.71, color: [0, 0, 255] }, //    blue       (narrow)
+  { pos: 0.77, color: [128, 0, 255] }, //  violet
+  { pos: 0.83, color: [255, 0, 255] }, //  magenta    (narrow)
+  { pos: 0.92, color: [255, 0, 128] }, //  rose
+  { pos: 1, color: [255, 0, 0] }, //       red
 ]
-// Even OKLCH hue steps at constant lightness/chroma, starting at red (~29°).
-const uniformHues = (L: number, C: number): RGB[] =>
-  Array.from({ length: 12 }, (_, i) => oklchToRgb(L, C, 29 + i * 30))
-
-// Vivid: the saturated hue wheel (all 12 named colors). Bright, but bands read
-// unevenly (green/blue look wider). Best with RGB interp (stays on cube edges).
-const RAINBOW_VIVID: RGB[] = [
-  [255, 0, 0], [255, 128, 0], [255, 255, 0], [128, 255, 0], [0, 255, 0], [0, 255, 128],
-  [0, 255, 255], [0, 128, 255], [0, 0, 255], [128, 0, 255], [255, 0, 255], [255, 0, 128],
-]
-// Even: constant lightness/chroma → equal band widths, but muted/pastel.
-const RAINBOW_EVEN = uniformHues(0.72, 0.115)
-// Middle: pushed chroma (some hues clip/desaturate), so more vivid, mostly even.
-const RAINBOW_BRIGHT = uniformHues(0.66, 0.17)
 
 // The startup gradient, defined independently of PRESETS so editing/removing
-// presets can never change (or break) the app's default. Vivid by default.
-const DEFAULT_SPEC: GradientSpec = { type: 'linear', angle: 0, interp: 'rgb', stops: evenStops(RAINBOW_VIVID) }
+// presets can never change (or break) the app's default.
+const DEFAULT_SPEC: GradientSpec = { type: 'linear', angle: 0, interp: 'rgb', stops: RAINBOW }
 
 export const PRESETS: Preset[] = [
   {
@@ -84,16 +81,8 @@ export const PRESETS: Preset[] = [
     gradient: DEFAULT_SPEC,
   },
   {
-    name: 'Conic rainbow (vivid)',
-    gradient: { type: 'conic', cx: 0.5, cy: 0.5, angle: 0, interp: 'rgb', stops: evenStops(RAINBOW_VIVID) },
-  },
-  {
-    name: 'Conic rainbow (even)',
-    gradient: { type: 'conic', cx: 0.5, cy: 0.5, angle: 0, interp: 'oklch', stops: evenStops(RAINBOW_EVEN) },
-  },
-  {
-    name: 'Conic rainbow (bright)',
-    gradient: { type: 'conic', cx: 0.5, cy: 0.5, angle: 0, interp: 'oklch', stops: evenStops(RAINBOW_BRIGHT) },
+    name: 'Conic rainbow',
+    gradient: { type: 'conic', cx: 0.5, cy: 0.5, angle: 0, interp: 'rgb', stops: RAINBOW },
   },
   {
     name: 'Sunset',
