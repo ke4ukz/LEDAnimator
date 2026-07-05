@@ -1,7 +1,7 @@
 import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useStore } from '../store'
-import { compactRaster } from '../bake'
+import { partitionByDevice } from '../bake'
 import { DEVICES, checkLimits } from '../export/devices'
 import { encodeRaster, estimateBytes } from '../export/format'
 import { rp2040MainPy, rp2040Readme, rp2040SettingsFiles } from '../export/rp2040'
@@ -13,8 +13,10 @@ type ExportFormat = 'uf2' | 'zip' | 'leda'
 
 const fmtBytes = (n: number) => (n < 1024 * 1024 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1024 / 1024).toFixed(2)} MB`)
 
-/** A filesystem-safe <name>.leda from the project title. */
-const ledaFilename = (name: string) => `${name.trim().replace(/[^A-Za-z0-9 _-]/g, '').trim() || 'pattern'}.leda`
+/** A filesystem-safe base name from the project title (no extension). */
+const sanitizeName = (name: string) => name.trim().replace(/[^A-Za-z0-9 _-]/g, '').trim() || 'pattern'
+/** Zero-padded program-number filename prefix, e.g. 7 → "07-". */
+const progPrefix = (program: number) => `${String(program).padStart(2, '0')}-`
 
 // Firmware build identifier baked into main.py (no real release yet) — the app
 // build's commit, so a device reports which build produced its firmware.
@@ -24,14 +26,21 @@ const FW_BUILD = `dev+${commit}`
 // filesystem capacity next to the data size on the UF2 target.
 const PICO_W_FS_BYTES = 212 * 4096
 
-/** Export modal: pick a target device, see size/limits, download program + data. */
+/** Export modal: pick a target, set the program number + per-device settings,
+ *  download one bundle per format (per-device slices from `partitionByDevice`). */
 export function ExportDialog({ onClose }: { onClose: () => void }) {
   const raster = useStore((s) => s.raster)
   const leds = useStore((s) => s.leds)
-  // The physical export stream: unassigned LEDs dropped (they aren't wired).
-  const exportRaster = useMemo(() => compactRaster(raster, leds), [raster, leds])
+  // One export stream per device id (unassigned LEDs dropped, chain order kept).
+  const devices = useMemo(() => partitionByDevice(raster, leds), [raster, leds])
   const getProjectFile = useStore((s) => s.getProjectFile)
-  // Remember the last target device + format across sessions.
+  const projectName = useStore((s) => s.projectName)
+  const program = useStore((s) => s.program)
+  const setProgram = useStore((s) => s.setProgram)
+  const deviceSettings = useStore((s) => s.deviceSettings)
+  const setDeviceSettings = useStore((s) => s.setDeviceSettings)
+
+  // Remember the last target platform + format across sessions.
   const [deviceId, setDeviceId] = useState(() => {
     const saved = localStorage.getItem('leda.export.device')
     return DEVICES.some((d) => d.id === saved) ? saved! : 'rp2040'
@@ -42,41 +51,87 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
   })
   useEffect(() => { localStorage.setItem('leda.export.device', deviceId) }, [deviceId])
   useEffect(() => { localStorage.setItem('leda.export.format', format) }, [format])
-  const [pin, setPin] = useState(0)
-  const [brightness, setBrightness] = useState(1)
-  const [deviceName, setDeviceName] = useState('LED Animator')
   const [building, setBuilding] = useState(false)
-  const projectName = useStore((s) => s.projectName)
 
-  const bleName = deviceName.trim() || 'LED Animator'
-  // Name/pin/brightness are written as device settings — they don't apply to a raw .leda.
+  const multi = devices.length > 1
+  const base = sanitizeName(projectName)
+  const progBase = `${progPrefix(program)}${base}` // e.g. 07-aurora
+  // The pattern filename handed to one device; distinct per device when split so
+  // the downloaded slices are tellable apart (the firmware keys on the "07-" prefix).
+  const ledaName = (device: number) => (multi ? `${progBase}-dev${device}.leda` : `${progBase}.leda`)
+
+  // Per-device firmware settings, falling back to project-derived defaults.
+  const defaultName = (projectName.trim() || 'LED Animator').slice(0, 26)
+  const settingsFor = (device: number) => {
+    const s = deviceSettings[device] ?? {}
+    return {
+      name: (s.name ?? '').trim() || defaultName,
+      pin: s.pin ?? 0,
+      brightness: s.brightness ?? 1,
+    }
+  }
+
+  // Name/pin/brightness are baked as device settings — they don't apply to a raw .leda.
   const needsSettings = format === 'uf2' || format === 'zip'
 
-  const device = DEVICES.find((d) => d.id === deviceId)!
-  const bytes = estimateBytes(exportRaster)
-  const warnings = checkLimits(device, exportRaster, bytes)
-  const duration = exportRaster.numFrames / exportRaster.fps
-  const hasRp2040 = device.targets.includes('rp2040-micropython')
+  const platform = DEVICES.find((d) => d.id === deviceId)!
+  const hasRp2040 = platform.targets.includes('rp2040-micropython')
 
-  const exportProject = () => {
-    const patternFile = ledaFilename(projectName)
-    const zip = zipProject({
-      'main.py': rp2040MainPy(FW_BUILD),
-      [patternFile]: encodeRaster(exportRaster),
-      ...rp2040SettingsFiles(pin, Number(brightness.toFixed(2)), bleName, patternFile),
-      'project.json': serializeProjectFile(getProjectFile()),
-      'README.txt': rp2040Readme(pin, patternFile),
-    })
-    downloadBytes('led-animation-rp2040.zip', zip, 'application/zip')
+  const perDevice = devices.map(({ device, raster }) => {
+    const bytes = estimateBytes(raster)
+    return { device, bytes, warnings: checkLimits(platform, raster, bytes) }
+  })
+  const totalLeds = devices.reduce((s, d) => s + d.raster.numLeds, 0)
+  const maxBytes = perDevice.reduce((m, d) => Math.max(m, d.bytes), 0)
+  // Each board holds its own slice, so limits apply per device; prefix multi-device
+  // warnings with the device id.
+  const warnings = perDevice.flatMap((d) => d.warnings.map((w) => (multi ? `Device ${d.device}: ${w}` : w)))
+  const duration = raster.numFrames / raster.fps
+
+  const exportLeda = () => {
+    if (!multi) {
+      downloadBytes(ledaName(devices[0].device), encodeRaster(devices[0].raster), 'application/octet-stream')
+      return
+    }
+    const files: Record<string, Uint8Array> = {}
+    for (const { device, raster } of devices) files[ledaName(device)] = encodeRaster(raster)
+    downloadBytes(`${progBase}.zip`, zipProject(files), 'application/zip')
   }
-  const exportData = () => downloadBytes(ledaFilename(projectName), encodeRaster(exportRaster), 'application/octet-stream')
+
+  const exportZip = () => {
+    const files: Record<string, string | Uint8Array> = {}
+    files['project.json'] = serializeProjectFile(getProjectFile())
+    for (const { device, raster } of devices) {
+      const s = settingsFor(device)
+      const pf = ledaName(device)
+      const dir = multi ? `device-${device}/` : '' // one folder per board when split
+      files[`${dir}main.py`] = rp2040MainPy(FW_BUILD)
+      files[`${dir}${pf}`] = encodeRaster(raster)
+      for (const [n, v] of Object.entries(rp2040SettingsFiles(s.pin, Number(s.brightness.toFixed(2)), s.name, pf))) {
+        files[`${dir}${n}`] = v
+      }
+      files[`${dir}README.txt`] = rp2040Readme(s.pin, pf)
+    }
+    downloadBytes(multi ? `${progBase}-rp2040.zip` : 'led-animation-rp2040.zip', zipProject(files), 'application/zip')
+  }
+
   const exportUf2 = async () => {
     setBuilding(true)
     try {
       // Lazy-load: pulls in the littlefs wasm + firmware only when used.
       const { buildRp2040CombinedUf2 } = await import('../export/combinedUf2')
-      const uf2 = await buildRp2040CombinedUf2(exportRaster, pin, Number(brightness.toFixed(2)), ledaFilename(projectName), bleName, FW_BUILD)
-      downloadBytes('led-animation-picow.uf2', uf2, 'application/octet-stream')
+      const buildOne = (device: number, r: typeof raster) => {
+        const s = settingsFor(device)
+        return buildRp2040CombinedUf2(r, s.pin, Number(s.brightness.toFixed(2)), ledaName(device), s.name, FW_BUILD)
+      }
+      if (!multi) {
+        const uf2 = await buildOne(devices[0].device, devices[0].raster)
+        downloadBytes('led-animation-picow.uf2', uf2, 'application/octet-stream')
+        return
+      }
+      const files: Record<string, Uint8Array> = {}
+      for (const { device, raster } of devices) files[`${progBase}-dev${device}.uf2`] = await buildOne(device, raster)
+      downloadBytes(`${progBase}-picow.zip`, zipProject(files), 'application/zip')
     } catch (e) {
       window.alert(`Could not build the UF2: ${(e as Error).message}`)
     } finally {
@@ -86,16 +141,16 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
 
   const download = () => {
     if (format === 'uf2') return void exportUf2()
-    if (format === 'zip') return exportProject()
-    return exportData()
+    if (format === 'zip') return exportZip()
+    return exportLeda()
   }
   const downloadLabel = building
     ? 'Building UF2…'
     : format === 'uf2'
-      ? 'Download UF2'
+      ? multi ? `Download ${devices.length} UF2s (.zip)` : 'Download UF2'
       : format === 'zip'
-        ? 'Download .zip'
-        : `Download ${ledaFilename(projectName)}`
+        ? multi ? `Download ${devices.length} devices (.zip)` : 'Download .zip'
+        : multi ? `Download ${devices.length} slices (.zip)` : `Download ${ledaName(devices[0].device)}`
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -106,7 +161,7 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
         </div>
 
         <label className="field-row">
-          <span>Target device</span>
+          <span>Target platform</span>
           <select value={deviceId} onChange={(e) => setDeviceId(e.target.value)}>
             {DEVICES.map((d) => (
               <option key={d.id} value={d.id}>{d.name}</option>
@@ -114,21 +169,27 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
           </select>
         </label>
 
+        <label className="field-row">
+          <span title="This pattern's selection id. The exported filename is prefixed with it (07-name), and a device group uses it to pick which program to play.">Program #</span>
+          <input type="number" min={0} max={255} value={program} onChange={(e) => setProgram(Number(e.target.value))} />
+        </label>
+
         <div className="export-stats">
-          <Stat label="Filename" value={ledaFilename(projectName)} wide />
-          <Stat label="LEDs" value={String(exportRaster.numLeds)} />
-          <Stat label="Frames" value={String(exportRaster.numFrames)} />
-          <Stat label="Rate" value={`${exportRaster.fps} fps`} />
+          <Stat label="Pattern file" value={multi ? `${progBase}-dev*.leda` : ledaName(devices[0].device)} wide />
+          <Stat label="Devices" value={String(devices.length)} />
+          <Stat label="LEDs" value={String(totalLeds)} />
+          <Stat label="Frames" value={String(raster.numFrames)} />
+          <Stat label="Rate" value={`${raster.fps} fps`} />
           <Stat label="Loop" value={`${duration.toFixed(2)} s`} />
           <Stat
-            label="Data size"
-            value={hasRp2040 ? `${fmtBytes(bytes)} / ${fmtBytes(PICO_W_FS_BYTES)}` : fmtBytes(bytes)}
+            label={multi ? 'Largest slice' : 'Data size'}
+            value={hasRp2040 ? `${fmtBytes(maxBytes)} / ${fmtBytes(PICO_W_FS_BYTES)}` : fmtBytes(maxBytes)}
           />
         </div>
 
         {warnings.length > 0 && (
           <div className="warn-box">
-            <strong>This project may be too large for {device.name}:</strong>
+            <strong>This project may be too large for {platform.name}:</strong>
             <ul>{warnings.map((w, i) => <li key={i}>{w}</li>)}</ul>
             <span className="muted">These are estimates — you can export anyway.</span>
           </div>
@@ -146,38 +207,61 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
             </label>
 
             {needsSettings && (
-              <>
-                <label className="field-row">
-                  <span>Device name</span>
-                  <input
-                    type="text"
-                    maxLength={26}
-                    value={deviceName}
-                    placeholder="LED Animator"
-                    onChange={(e) => setDeviceName(e.target.value)}
-                  />
-                </label>
-                <label className="field-row">
-                  <span>Data pin (GP)</span>
-                  <input type="number" min={0} max={29} value={pin} onChange={(e) => setPin(Number(e.target.value))} />
-                </label>
-                <label className="field-row">
-                  <span>Brightness</span>
-                  <input type="range" min={0} max={1} step={0.05} value={brightness} onChange={(e) => setBrightness(Number(e.target.value))} />
-                  <span className="muted">{Math.round(brightness * 100)}%</span>
-                </label>
-              </>
+              <div className="device-settings">
+                {devices.map(({ device, raster }) => {
+                  const s = settingsFor(device)
+                  return (
+                    <fieldset className="device-block" key={device}>
+                      <legend>
+                        {multi ? `Device ${device}` : 'Device'} · {raster.numLeds} LED{raster.numLeds === 1 ? '' : 's'}
+                      </legend>
+                      <label className="field-row">
+                        <span>Device name</span>
+                        <input
+                          type="text"
+                          maxLength={26}
+                          value={s.name}
+                          placeholder="LED Animator"
+                          onChange={(e) => setDeviceSettings(device, { name: e.target.value })}
+                        />
+                      </label>
+                      <label className="field-row">
+                        <span>Data pin (GP)</span>
+                        <input
+                          type="number"
+                          min={0}
+                          max={29}
+                          value={s.pin}
+                          onChange={(e) => setDeviceSettings(device, { pin: Number(e.target.value) })}
+                        />
+                      </label>
+                      <label className="field-row">
+                        <span>Brightness</span>
+                        <input
+                          type="range"
+                          min={0}
+                          max={1}
+                          step={0.05}
+                          value={s.brightness}
+                          onChange={(e) => setDeviceSettings(device, { brightness: Number(e.target.value) })}
+                        />
+                        <span className="muted">{Math.round(s.brightness * 100)}%</span>
+                      </label>
+                    </fieldset>
+                  )
+                })}
+              </div>
             )}
 
             <div className="export-actions">
               <button className="btn btn-primary" disabled={building} onClick={download}>
                 {downloadLabel}
               </button>
-              <InfoDot label="Export format details">{formatInfo(format)}</InfoDot>
+              <InfoDot label="Export format details">{formatInfo(format, multi)}</InfoDot>
             </div>
           </>
         ) : (
-          <p className="placeholder">Export for {device.name} is planned — the size and limits above already apply.</p>
+          <p className="placeholder">Export for {platform.name} is planned — the size and limits above already apply.</p>
         )}
       </div>
     </div>
@@ -251,7 +335,13 @@ function InfoDot({ label, children }: { label: string; children: ReactNode }) {
 }
 
 /** The details popover content for the selected export format. */
-function formatInfo(format: ExportFormat): ReactNode {
+function formatInfo(format: ExportFormat, multi: boolean): ReactNode {
+  const multiNote = (unit: string) => (
+    <p className="hint-link">
+      This project spans multiple devices, so the download is a <strong>.zip</strong> with one {unit} per
+      device (each device plays its own slice of the same program). Give each device its file.
+    </p>
+  )
   if (format === 'uf2') {
     return (
       <>
@@ -260,6 +350,7 @@ function formatInfo(format: ExportFormat): ReactNode {
         the player, your pattern, and the device settings (pin / brightness / name). If the strip stays
         dark after flashing, flash the same file with <code>picotool load led-animation-picow.uf2</code>{' '}
         instead.
+        {multi && multiNote('.uf2')}
         <p className="hint-link">
           To enter bootloader mode, hold <strong>BOOTSEL</strong> while plugging in —{' '}
           <a
@@ -281,14 +372,16 @@ function formatInfo(format: ExportFormat): ReactNode {
         the project), the settings files (<code>datapin.txt</code>, <code>bright.txt</code>,{' '}
         <code>devicename.txt</code>, <code>selected.txt</code>), <code>project.json</code>, and a README.
         Copy them to the board with <code>mpremote</code> or Thonny — it doesn't touch the firmware.
+        {multi && multiNote('device-N/ folder')}
       </>
     )
   }
   return (
     <>
-      Just the raw pattern file, named after your project. Drop it next to an existing <code>main.py</code>{' '}
-      on a Pico that already runs MicroPython, then <code>SELECT</code> it. Copy it over with{' '}
-      <code>mpremote</code> or Thonny.
+      Just the raw pattern file, named after your project (prefixed with the program number). Drop it next
+      to an existing <code>main.py</code> on a Pico that already runs MicroPython, then <code>SELECT</code>{' '}
+      it. Copy it over with <code>mpremote</code> or Thonny.
+      {multi && multiNote('.leda')}
     </>
   )
 }

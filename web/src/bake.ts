@@ -95,6 +95,41 @@ export function compactRaster(raster: Raster, leds: LedPosition[]): Raster {
   for (let i = 0; i < raster.numLeds; i++) if (!leds[i]?.unassigned) keep.push(i)
   if (keep.length === raster.numLeds) return raster
 
+  return sliceColumns(raster, keep)
+}
+
+/** One physical device's export stream: the device id and its raster slice. */
+export interface DeviceRaster {
+  device: number
+  raster: Raster
+}
+
+/**
+ * Split the full raster into one stream per device id (see `LedPosition.device`),
+ * ordered by ascending device id. Unassigned LEDs are dropped (not wired); each
+ * device keeps its LEDs in chain order. This is `compactRaster` generalized: a
+ * project that never sets a device id yields a single entry for device 0.
+ *
+ * Always returns at least one entry (device 0, possibly empty) so callers can
+ * treat single- and multi-device projects uniformly.
+ */
+export function partitionByDevice(raster: Raster, leds: LedPosition[]): DeviceRaster[] {
+  const groups = new Map<number, number[]>()
+  for (let i = 0; i < raster.numLeds; i++) {
+    if (leds[i]?.unassigned) continue
+    const d = leds[i]?.device ?? 0
+    let arr = groups.get(d)
+    if (!arr) groups.set(d, (arr = []))
+    arr.push(i)
+  }
+  if (groups.size === 0) return [{ device: 0, raster: sliceColumns(raster, []) }]
+  return [...groups.keys()]
+    .sort((a, b) => a - b)
+    .map((device) => ({ device, raster: sliceColumns(raster, groups.get(device)!) }))
+}
+
+/** Build a raster keeping only the given LED column indices, in the given order. */
+function sliceColumns(raster: Raster, keep: number[]): Raster {
   const m = keep.length
   const data = new Uint8Array(raster.numFrames * m * 3)
   for (let f = 0; f < raster.numFrames; f++) {

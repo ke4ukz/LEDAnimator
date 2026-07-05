@@ -25,6 +25,10 @@ export interface LedPosition {
    *  walks THIS. Shareable — LEDs with the same value animate identically (e.g.
    *  columns). Defaults to the LED's wiring rank when unset. */
   animIndex?: number
+  /** Which physical device (render slice) drives this LED in a multi-device
+   *  installation. One project describes the whole install; per-device export
+   *  produces each device's slice. Defaults to 0 (single-device). */
+  device?: number
 }
 
 /**

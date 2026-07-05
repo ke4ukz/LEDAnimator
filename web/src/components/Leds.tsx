@@ -162,7 +162,7 @@ export function LedLabels() {
       {leds.map((p, i) => {
         if (p.unassigned) return null
         n += 1
-        const label = mode === 'anim' ? p.animIndex ?? n : n
+        const label = mode === 'anim' ? p.animIndex ?? n : mode === 'device' ? p.device ?? 0 : n
         return (
           <Html key={i} position={[p.x, p.y, p.z]} center zIndexRange={[20, 0]} style={{ pointerEvents: 'none' }}>
             <div className={`led-label ${mode}`}>{label}</div>

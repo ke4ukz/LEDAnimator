@@ -170,16 +170,31 @@ and surface mismatches in group status ("device 3 is missing program 7").
   fallback.
 - Consistency check + mismatch warnings.
 
-## Web editor changes (transport-agnostic foundation — start here)
+## Web editor changes (transport-agnostic foundation — start here) — DONE
 
 These are useful on their own and everything else builds on them:
 
-1. **Per-LED `device` id** — a new per-LED property alongside
-   `disabled` / `unassigned` / `animIndex`.
-2. **Per-device export** — partition the raster by `device` (reuse the
-   `compactRaster` pattern) into one stream per device.
-3. **Program number per pattern** — a user-assignable number the export/upload
-   carries; drives the filename prefix on device.
+1. **Per-LED `device` id** — DONE. New optional `device?: number` on
+   `LedPosition` (default 0), alongside `disabled` / `unassigned` / `animIndex`.
+   Edited via a **Device** field in the Inspector; a **Device** option in the
+   viewport Numbers dropdown billboards each LED's device id (cyan pill).
+2. **Per-device export** — DONE. `partitionByDevice(raster, leds)` in `bake.ts`
+   generalizes `compactRaster`: drops unassigned LEDs, groups the rest by device
+   id (chain order preserved), returns one `{device, raster}` per device (always
+   ≥1, device 0 for a single-device project). The Export dialog delivers **one
+   bundle per format**: single device → today's single file; multiple →
+   `.leda` → a `.zip` of per-device slices; MicroPython → one `.zip` with
+   `device-N/` subfolders; UF2 → a `.zip` of per-device `.uf2` files.
+3. **Program number per pattern** — DONE. Project-level `program` (0–255, default
+   1), edited in the Export dialog, persisted in the project file. Drives the
+   zero-padded filename prefix (`07-name.leda`). The firmware will index by the
+   numeric prefix.
+
+**Also decided while building (2026-07-05):** per-board settings (data pin /
+device name / brightness) are now **per-device** — the Export dialog shows one
+settings block per device, persisted in the project file as
+`ProjectFile.devices` (keyed by device id). Device name defaults to the project
+name; pin 0; brightness 100%.
 
 ## Firmware changes
 
@@ -208,7 +223,8 @@ These are useful on their own and everything else builds on them:
 
 ## Suggested implementation order
 
-1. Web: per-LED `device` id + per-device export + program number (foundation).
+1. ~~Web: per-LED `device` id + per-device export + program number (foundation).~~
+   **DONE (2026-07-05).**
 2. Firmware: program library by numbered filename; single-device program select.
 3. Firmware: leader beacon + follower scan/phase-lock (bench test, 2 devices).
 4. Firmware: role config, group binding, teardown, reboot-search fallback.

@@ -14,6 +14,7 @@ export function Inspector() {
   const setLedDisabled = useStore((s) => s.setLedDisabled)
   const setLedUnassigned = useStore((s) => s.setLedUnassigned)
   const setLedAnimIndex = useStore((s) => s.setLedAnimIndex)
+  const setLedDevice = useStore((s) => s.setLedDevice)
 
   const sel = selection.filter((i) => leds[i])
   if (sel.length === 0) {
@@ -24,6 +25,8 @@ export function Inspector() {
   const allDisabled = sel.every((i) => leds[i].disabled)
   const a0 = leds[sel[0]].animIndex
   const commonAnim = sel.every((i) => leds[i].animIndex === a0) ? a0 : undefined
+  const dev0 = leds[sel[0]].device ?? 0
+  const commonDevice = sel.every((i) => (leds[i].device ?? 0) === dev0) ? dev0 : undefined
 
   // Common value for an axis, or null if the selection differs.
   const axis = (k: 'x' | 'y' | 'z'): number | null => {
@@ -60,6 +63,17 @@ export function Inspector() {
         <span className="muted" title="Part of the physical chain. Off = excluded from the exported strip.">In chain</span>
         <input type="checkbox" checked={!allUnassigned} onChange={(e) => setLedUnassigned(sel, !e.target.checked)} />
       </label>
+      <div className="insp-row">
+        <span className="muted" title="Which physical device renders this LED in a multi-device install. LEDs sharing a device export together as that board's slice. 0 = default (single device).">Device</span>
+        <input
+          type="number"
+          min={0}
+          placeholder={commonDevice === undefined ? 'mixed' : '0'}
+          disabled={allUnassigned}
+          value={commonDevice ?? ''}
+          onChange={(e) => setLedDevice(sel, e.target.value === '' ? 0 : Number(e.target.value))}
+        />
+      </div>
       <div className="insp-row">
         <span className="muted" title="Position in the animation sequence (separate from wiring). LEDs sharing a number animate together. Blank = default (wiring order).">Anim #</span>
         <input

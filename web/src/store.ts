@@ -20,7 +20,7 @@ import {
 import { reserveStopIds } from './gradient'
 import { bakeProject } from './bake'
 import { setTextureReadyListener } from './texture'
-import type { ProjectFile } from './export/projectFile'
+import type { DeviceSettings, ProjectFile } from './export/projectFile'
 import { loadSavedProjectFile, loadSavedDirty, loadSavedName, saveProjectFile, clearSavedProject, enforceStorageVersion } from './persistence'
 import { saveProjectToLibrary, listLibrary } from './export/library'
 
@@ -34,6 +34,11 @@ interface AppState {
   savedName: string | null
   /** Unsaved changes since the last Save / Open / New. */
   dirty: boolean
+  /** Program number for this pattern (the group's selection id; export filename
+   *  prefix). Useful even single-device as a stable id among loaded programs. */
+  program: number
+  /** Per-device firmware settings (name / pin / brightness), keyed by device id. */
+  deviceSettings: Record<number, DeviceSettings>
   raster: Raster
   frame: number
   playing: boolean
@@ -97,6 +102,12 @@ interface AppState {
   setLedUnassigned: (indices: number[], value: boolean) => void
   /** Override the animation index for these LEDs (null clears → wiring default). */
   setLedAnimIndex: (indices: number[], value: number | null) => void
+  /** Set which device renders these LEDs (0 = default single device). */
+  setLedDevice: (indices: number[], value: number) => void
+  /** Set the program number (export filename prefix). */
+  setProgram: (n: number) => void
+  /** Merge a patch into one device's firmware settings. */
+  setDeviceSettings: (device: number, patch: Partial<DeviceSettings>) => void
   /** Append LEDs to the arrangement (assigned to the first track; re-bakes). */
   addLeds: (leds: LedPosition[]) => void
   /** Remove LEDs by index (compacts assignments, remaps selection; re-bakes). */
@@ -189,6 +200,8 @@ interface Init {
   projectId: string
   projectName: string
   dirty: boolean
+  program: number
+  deviceSettings: Record<number, DeviceSettings>
   raster: Raster
   selectedTrack: string | null
   ledScale: number
@@ -220,6 +233,8 @@ function initialState(): Init {
       projectId: saved.id,
       projectName: saved.name,
       dirty: loadSavedDirty(),
+      program: saved.program ?? 1,
+      deviceSettings: saved.devices ?? {},
       raster: bakeProject(project, saved.leds.length, saved.numFrames, saved.fps, saved.leds),
       selectedTrack: saved.tracks[0]?.id ?? null,
       ledScale: saved.display?.ledScale ?? 1,
@@ -235,6 +250,8 @@ function initialState(): Init {
     projectId: crypto.randomUUID(),
     projectName: 'Untitled',
     dirty: false,
+    program: 1,
+    deviceSettings: {},
     raster: bakeProject(project, 0),
     selectedTrack: null,
     ledScale: 1,
@@ -281,6 +298,8 @@ export const useStore = create<AppState>((set, get) => {
     // it was never saved to the library, so a rename+Save won't falsely warn).
     savedName: wasEmptyStart ? null : loadSavedName(),
     dirty: init.dirty,
+    program: init.program,
+    deviceSettings: init.deviceSettings,
     raster: init.raster,
     frame: 0,
     playing: true,
@@ -492,6 +511,26 @@ export const useStore = create<AppState>((set, get) => {
       set({ leds: newLeds, raster: bakeProject(project, newLeds.length, raster.numFrames, raster.fps, newLeds) })
     },
 
+    // Device id doesn't affect baked colors (only which slice an LED exports to),
+    // so no re-bake — just update the leds (which marks the project dirty).
+    setLedDevice: (indices, value) => {
+      const set2 = new Set(indices)
+      set((s) => ({
+        leds: s.leds.map((p, i) => {
+          if (!set2.has(i)) return p
+          const next = { ...p }
+          if (value <= 0) delete next.device // 0 = default single device
+          else next.device = Math.floor(value)
+          return next
+        }),
+      }))
+    },
+
+    setProgram: (n) => set({ program: Math.max(0, Math.min(255, Math.floor(n) || 0)) }),
+
+    setDeviceSettings: (device, patch) =>
+      set((s) => ({ deviceSettings: { ...s.deviceSettings, [device]: { ...s.deviceSettings[device], ...patch } } })),
+
     addLeds: (newLeds) => {
       const { leds, project, raster } = get()
       const fallback = project.tracks[0]?.id ?? ''
@@ -612,6 +651,8 @@ export const useStore = create<AppState>((set, get) => {
         sources: s.project.sources,
         tracks: s.project.tracks,
         assignments: s.project.assignments,
+        program: s.program,
+        devices: s.deviceSettings,
         display: { ledScale: s.ledScale, ledShape: s.ledShape, labelMode: s.labelMode },
       }
     },
@@ -644,6 +685,8 @@ export const useStore = create<AppState>((set, get) => {
         projectName: f.name,
         savedName: f.name,
         dirty: opts?.dirty ?? false,
+        program: f.program ?? 1,
+        deviceSettings: f.devices ?? {},
         ledScale: f.display?.ledScale ?? 1,
         ledShape: f.display?.ledShape ?? 'cube',
         labelMode: labelModeFrom(f.display),
@@ -665,6 +708,8 @@ export const useStore = create<AppState>((set, get) => {
         projectName: 'Untitled',
         savedName: null,
         dirty: false,
+        program: 1,
+        deviceSettings: {},
         raster: bakeProject(project, 0),
         frame: 0,
         selection: [],
@@ -690,6 +735,8 @@ export const useStore = create<AppState>((set, get) => {
         projectName: 'Untitled',
         savedName: null,
         dirty: false,
+        program: 1,
+        deviceSettings: {},
         raster: bakeProject(project, 0),
         frame: 0,
         selection: [],
@@ -763,7 +810,9 @@ useStore.subscribe((state, prev) => {
     state.ledScale !== prev.ledScale ||
     state.ledShape !== prev.ledShape ||
     state.labelMode !== prev.labelMode ||
-    state.projectName !== prev.projectName
+    state.projectName !== prev.projectName ||
+    state.program !== prev.program ||
+    state.deviceSettings !== prev.deviceSettings
   if (!editable) return
 
   // A genuine user edit marks the project dirty (programmatic loads/new don't).

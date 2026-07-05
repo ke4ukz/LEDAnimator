@@ -217,6 +217,27 @@
   align-items: center;
 }
 
+/* Per-device firmware settings in the Export dialog (one block per render device). */
+.device-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.device-block {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 4px 10px 8px;
+  margin: 0;
+  min-inline-size: 0;
+}
+
+.device-block legend {
+  font-size: 11px;
+  color: var(--text-dim, #8b93a3);
+  padding: 0 4px;
+}
+
 .modal-confirm {
   width: 400px;
 }
@@ -1385,6 +1406,15 @@ input[type='color'] {
   color: #201400;
   background: #ffb300;
   border-color: #4a2f00;
+  border-radius: 7px;
+  font-weight: 700;
+}
+
+/* Device (render-slice) id: cyan pill, distinct from the chain/anim numbers. */
+.led-label.device {
+  color: #04212a;
+  background: #34d0e6;
+  border-color: #06414f;
   border-radius: 7px;
   font-weight: 700;
 }

@@ -5,6 +5,15 @@ import type { LabelMode, Source, Track } from '../project'
 // The editable project state, serialized to JSON. The baked raster is NOT
 // stored (it's derived) — it's re-baked from this on load.
 
+/** Per-device firmware settings, keyed by device id in `ProjectFile.devices`. */
+export interface DeviceSettings {
+  name?: string
+  /** GPIO pin the strip data line is wired to. */
+  pin?: number
+  /** Startup brightness, 0-1. */
+  brightness?: number
+}
+
 export interface ProjectFile {
   format: 'led-animator-project'
   version: number
@@ -16,6 +25,11 @@ export interface ProjectFile {
   sources: Source[]
   tracks: Track[]
   assignments: string[]
+  /** Program number for this pattern (the selection id a device group uses); the
+   *  export filename is prefixed with it. Optional for older files (default 1). */
+  program?: number
+  /** Per-device firmware settings, keyed by device id (see `LedPosition.device`). */
+  devices?: Record<string, DeviceSettings>
   // `labelMode` is current; `showLabels` is read from older files for back-compat.
   display: { ledScale: number; ledShape: 'sphere' | 'cube'; labelMode?: LabelMode; showLabels?: boolean }
 }

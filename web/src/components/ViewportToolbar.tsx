@@ -39,10 +39,11 @@ export function ViewportToolbar() {
       </div>
       <div className="vt-group">
         <span className="muted">Numbers</span>
-        <select value={labelMode} onChange={(e) => setLabelMode(e.target.value as 'none' | 'chain' | 'anim')}>
+        <select value={labelMode} onChange={(e) => setLabelMode(e.target.value as 'none' | 'chain' | 'anim' | 'device')}>
           <option value="none">None</option>
           <option value="chain">LED index</option>
           <option value="anim">Animation index</option>
+          <option value="device">Device</option>
         </select>
       </div>
       <label className="vt-group">
