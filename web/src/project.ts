@@ -1,6 +1,5 @@
 import type { RGB } from './types'
 import type { Gradient } from './gradient'
-import { evalGradient } from './gradient'
 import { defaultGradient } from './presets'
 
 // Project model: sources (color textures) → tracks (how a group of LEDs samples
@@ -271,10 +270,6 @@ export function applyPost(rgb: RGB, fx?: PostFx): RGB {
 
   const to255 = (x: number) => Math.round(Math.min(1, Math.max(0, x)) * 255)
   return [to255(r), to255(g), to255(b)]
-}
-
-export function evalSource(source: Source, u: number, v: number): RGB {
-  return applyPost(evalGradient(source.gradient, u, v), source.post)
 }
 
 function applyEase(ease: EaseType, x: number): number {

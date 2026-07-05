@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useStore } from '../store'
-import { type Source, type Track, evalSource, pathPoint, trackParamAt, trackPhaseAt } from '../project'
+import { type Source, type Track, pathPoint, trackParamAt, trackPhaseAt } from '../project'
+import { getSourceTexture, sampleNearest } from '../texture'
 import { SpeedLane } from './SpeedLane'
 
 const STRIP_W = 600
@@ -86,10 +87,11 @@ function Lane({
     if (!canvas) return
     const ctx = canvas.getContext('2d')
     if (!ctx) return
+    const tex = getSourceTexture(source)
     const img = ctx.createImageData(STRIP_W, 1)
     for (let x = 0; x < STRIP_W; x++) {
       const [u, v] = pathPoint(track.path, x / STRIP_W)
-      const [r, g, b] = evalSource(source, u, v)
+      const [r, g, b] = sampleNearest(tex, u, v)
       const i = x * 4
       img.data[i] = r
       img.data[i + 1] = g

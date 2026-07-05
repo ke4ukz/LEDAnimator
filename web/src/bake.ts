@@ -1,5 +1,6 @@
 import type { Project } from './project'
-import { evalSource, pathPoint, trackParamAt } from './project'
+import { pathPoint, trackParamAt } from './project'
+import { getSourceTexture, sampleNearest } from './texture'
 import type { LedPosition, Raster } from './types'
 
 export const DEFAULT_FRAMES = 120
@@ -35,6 +36,9 @@ export function bakeProject(
   for (const track of project.tracks) {
     const source = sourceById.get(track.sourceId)
     if (!source) continue
+    // Sample the source's rasterized texture (built once, cached) so the export
+    // reads exactly the pixels the loupe/swatch show.
+    const tex = getSourceTexture(source)
     const members = project.assignments
       // Unassigned LEDs are not part of the chain: skip them so they don't
       // consume an `order` step (which would shift everything after them).
@@ -69,7 +73,7 @@ export function bakeProject(
         }
         const s = frac(offsetAt[f] + ord * chaseAt[f] + phase[f])
         const [u, v] = pathPoint(track.path, s)
-        const [r, g, b] = evalSource(source, u, v)
+        const [r, g, b] = sampleNearest(tex, u, v)
         data[base] = r
         data[base + 1] = g
         data[base + 2] = b
