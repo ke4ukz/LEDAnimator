@@ -103,7 +103,7 @@ function rgbToOklch(rgb: RGB): [number, number, number] {
   return [L, C, h]
 }
 
-function oklchToRgb(L: number, C: number, h: number): RGB {
+export function oklchToRgb(L: number, C: number, h: number): RGB {
   const rad = (h * Math.PI) / 180
   return oklabToRgb(L, C * Math.cos(rad), C * Math.sin(rad))
 }

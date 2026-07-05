@@ -1,5 +1,6 @@
 import type { RGB } from './types'
 import { type Gradient, type GradientStop, makeStop } from './gradient'
+import { oklchToRgb } from './color'
 
 // Gradient presets as plain data. To add one, append an entry to PRESETS — no
 // code changes needed. Ramp stops are written without ids ({ pos, color }); ids
@@ -29,25 +30,18 @@ export function instantiateGradient(spec: GradientSpec): Gradient {
   return spec as Gradient
 }
 
-// Red → … → red: all twelve named hues (primaries + the intermediates orange,
-// chartreuse, azure, violet, rose…) at even positions, so every color gets its
-// own node and roughly equal width — a conic reads evenly and the transitions
-// are distinct. Interpolated in OKLCH for smooth, perceptual blends.
-const RAINBOW: StopSpec[] = [
-  { pos: 0 / 12, color: [255, 0, 0] }, //     red
-  { pos: 1 / 12, color: [255, 128, 0] }, //   orange
-  { pos: 2 / 12, color: [255, 255, 0] }, //   yellow
-  { pos: 3 / 12, color: [128, 255, 0] }, //   chartreuse
-  { pos: 4 / 12, color: [0, 255, 0] }, //     green
-  { pos: 5 / 12, color: [0, 255, 128] }, //   spring green
-  { pos: 6 / 12, color: [0, 255, 255] }, //   cyan
-  { pos: 7 / 12, color: [0, 128, 255] }, //   azure
-  { pos: 8 / 12, color: [0, 0, 255] }, //     blue
-  { pos: 9 / 12, color: [128, 0, 255] }, //   violet
-  { pos: 10 / 12, color: [255, 0, 255] }, //  magenta
-  { pos: 11 / 12, color: [255, 0, 128] }, //  rose
-  { pos: 1, color: [255, 0, 0] }, //          red (wrap)
-]
+// A perceptually-uniform rainbow: 12 stops at EVEN positions, each color at an
+// even OKLCH hue step with CONSTANT lightness + chroma. Uniform hue rate AND
+// uniform brightness → every band is the same visual width (a conic reads
+// evenly). The cost is muted/pastel colors — constant chroma can't reach the
+// vivid sRGB primaries. Starts at red (OKLCH hue ≈ 29°). Interpolated in OKLCH.
+const RAINBOW: StopSpec[] = (() => {
+  const L = 0.72
+  const C = 0.115
+  const H0 = 29 // red
+  const hues = Array.from({ length: 12 }, (_, i) => oklchToRgb(L, C, H0 + i * 30))
+  return [...hues.map((color, i) => ({ pos: i / 12, color })), { pos: 1, color: hues[0] }]
+})()
 
 // The startup gradient, defined independently of PRESETS so editing/removing
 // presets can never change (or break) the app's default.
