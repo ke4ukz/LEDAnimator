@@ -148,6 +148,9 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
       files[`${dir}README.txt`] = rp2040Readme(s.pin, pf)
     }
     if (multi) files['manifest.txt'] = buildManifest((d) => `device-${d}/`, 'Folder', 'folder')
+    // "-rp2040" (not "-picow"): these are files for any RP2040 already running
+    // MicroPython — a plain Pico plays fine; only BLE/Wi-Fi need the W. The UF2
+    // is "-picow" because it bundles Pico W firmware. Intentional, not a typo.
     downloadBytes(multi ? `${progBase}-rp2040.zip` : 'led-animation-rp2040.zip', zipProject(files), 'application/zip')
   }
 
@@ -168,6 +171,8 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
       const files: Record<string, string | Uint8Array> = {}
       for (const { device, raster } of devices) files[`${progBase}-dev${device}.uf2`] = await buildOne(device, raster)
       files['manifest.txt'] = buildManifest((d) => `${progBase}-dev${d}.uf2`, 'File', 'file')
+      // "-picow": the combined UF2 bakes in Pico W firmware + needs the W's radio,
+      // so it's Pico-W-only (unlike the "-rp2040" MicroPython zip above).
       downloadBytes(`${progBase}-picow.zip`, zipProject(files), 'application/zip')
     } catch (e) {
       window.alert(`Could not build the UF2: ${(e as Error).message}`)
