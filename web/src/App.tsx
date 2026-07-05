@@ -216,11 +216,11 @@ export default function App() {
       {dragging && <div className="drop-overlay">Drop a project (.json or .zip) to import</div>}
 
       <aside className="sidebar">
-        <Panel title="Track">
-          <TrackInspector />
-        </Panel>
         <Panel title="Source · Path">
           <GradientEditor />
+        </Panel>
+        <Panel title="Track">
+          <TrackInspector />
         </Panel>
       </aside>
 
