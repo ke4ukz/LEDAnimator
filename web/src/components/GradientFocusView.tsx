@@ -4,7 +4,6 @@ import { getSourceCanvas, getSourceTexture, sampleNearest } from '../texture'
 import { rgbToHex } from '../color'
 import { TexturePreview } from './TexturePreview'
 
-const clamp = (x: number, lo: number, hi: number) => (x < lo ? lo : x > hi ? hi : x)
 // Loupe display size in px; drawn from the texture at nearest-neighbor so the
 // individual source texels stay crisp when zoomed.
 const MAG = 200
@@ -20,26 +19,23 @@ export function GradientFocusView({ source, ramp }: { source: GradientSource; ra
 
   const half = 0.5 / zoom
   const span = 2 * half
-  // Loupe window centered on the cursor, clamped so it never leaves the texture.
-  const cu = hover ? clamp(hover.u, half, 1 - half) : 0.5
-  const cv = hover ? clamp(hover.v, half, 1 - half) : 0.5
-  const win = { u0: cu - half, v0: cv - half, u1: cu + half, v1: cv + half }
-
-  // The exact texel under the cursor: its color (= what the export reads) and a
-  // box framing it, snapped to the pixel grid so the marker jumps pixel-to-pixel
-  // instead of sliding smoothly across a hard color edge.
+  // The loupe window is centered on the *texel* under the cursor (snapped to the
+  // pixel grid), so the reticle stays fixed dead-center and the image steps one
+  // pixel at a time beneath it. Not clamped: near an edge the window runs off the
+  // texture and the loupe simply shows blank there, which reads more naturally
+  // than sliding the reticle. The framed texel is exactly what the export reads.
   const tex = hover ? getSourceTexture(source) : null
-  let pixel: { cx: number; cy: number; size: number } | null = null
+  let win: { u0: number; v0: number; u1: number; v1: number } | null = null
+  let pixelSize = 0
   let hex = ''
   if (hover && tex) {
     const res = tex.res
     const xi = Math.min(res - 1, Math.max(0, Math.floor(hover.u * res)))
     const yi = Math.min(res - 1, Math.max(0, Math.floor(hover.v * res)))
-    pixel = {
-      cx: (((xi + 0.5) / res - win.u0) / span) * 100,
-      cy: (((yi + 0.5) / res - win.v0) / span) * 100,
-      size: (1 / res / span) * 100,
-    }
+    const uc = (xi + 0.5) / res
+    const vc = (yi + 0.5) / res
+    win = { u0: uc - half, v0: vc - half, u1: uc + half, v1: vc + half }
+    pixelSize = (1 / res / span) * 100
     hex = rgbToHex(sampleNearest(tex, hover.u, hover.v))
   }
 
@@ -54,15 +50,10 @@ export function GradientFocusView({ source, ramp }: { source: GradientSource; ra
             <span className="muted num">{zoom}×</span>
           </div>
           <div className="mag-view">
-            {hover ? (
+            {hover && win ? (
               <>
                 <TextureLoupe source={source} win={win} size={MAG} />
-                {pixel && (
-                  <div
-                    className="mag-pixel"
-                    style={{ left: `${pixel.cx}%`, top: `${pixel.cy}%`, width: `${pixel.size}%`, height: `${pixel.size}%` }}
-                  />
-                )}
+                <div className="mag-pixel" style={{ width: `${pixelSize}%`, height: `${pixelSize}%` }} />
               </>
             ) : (
               <div className="mag-empty muted">Hover the texture</div>
@@ -101,11 +92,26 @@ function TextureLoupe({
     const res = src.width
     ctx.imageSmoothingEnabled = false
     ctx.clearRect(0, 0, size, size)
-    ctx.drawImage(
-      src,
-      win.u0 * res, win.v0 * res, (win.u1 - win.u0) * res, (win.v1 - win.v0) * res,
-      0, 0, size, size,
-    )
+
+    // Source rect in texels; the window may extend past the texture near an edge.
+    const sx = win.u0 * res
+    const sy = win.v0 * res
+    const sw = (win.u1 - win.u0) * res
+    const sh = (win.v1 - win.v0) * res
+    const scale = size / sw // dest px per source texel (sw === sh, square window)
+    // Clip to the texture and map only the in-bounds part into dest, leaving the
+    // rest cleared (blank) rather than stretching edge pixels.
+    const cx0 = Math.max(0, sx)
+    const cy0 = Math.max(0, sy)
+    const cx1 = Math.min(res, sx + sw)
+    const cy1 = Math.min(res, sy + sh)
+    if (cx1 > cx0 && cy1 > cy0) {
+      ctx.drawImage(
+        src,
+        cx0, cy0, cx1 - cx0, cy1 - cy0,
+        (cx0 - sx) * scale, (cy0 - sy) * scale, (cx1 - cx0) * scale, (cy1 - cy0) * scale,
+      )
+    }
   }, [source, win.u0, win.v0, win.u1, win.v1, size])
   return <canvas ref={ref} width={size} height={size} className="grad-preview" />
 }

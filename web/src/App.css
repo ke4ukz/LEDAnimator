@@ -826,11 +826,13 @@ label.vt-group {
   text-align: center;
 }
 
-/* A box framing the exact texel the loupe/export samples. Positioned by its
-   center and snapped to the pixel grid, with a floor size so it stays visible
-   at low zoom (where a single texel is sub-pixel). */
+/* A box framing the exact texel the loupe/export samples. Fixed dead-center of
+   the loupe — the image scrolls under it, snapped one pixel at a time. A floor
+   size keeps it visible at low zoom (where a single texel is sub-pixel). */
 .mag-pixel {
   position: absolute;
+  left: 50%;
+  top: 50%;
   box-sizing: border-box;
   min-width: 7px;
   min-height: 7px;
