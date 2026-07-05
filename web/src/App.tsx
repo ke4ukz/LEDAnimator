@@ -48,6 +48,7 @@ export default function App() {
   const saveProject = useStore((s) => s.saveProject)
   const saveProjectAs = useStore((s) => s.saveProjectAs)
   const focusGradient = useStore((s) => s.focusGradient)
+  const toggleFocusGradient = useStore((s) => s.toggleFocusGradient)
   const fileRef = useRef<HTMLInputElement>(null)
 
   // Confirm before throwing away unsaved edits (no undo).
@@ -219,7 +220,12 @@ export default function App() {
       <aside className="sidebar">
         {focusGradient && (
           <Panel title="3D preview">
-            <div className="mini-viewport"><Viewport /></div>
+            <div className="mini-viewport">
+              <Viewport />
+              <button className="preview-focus-btn" onClick={toggleFocusGradient} title="Enlarge the 3D view">
+                ⤢
+              </button>
+            </div>
           </Panel>
         )}
         <Panel title="Source · Path">

@@ -11,7 +11,6 @@ import { PathOverlay } from './PathOverlay'
 export function TexturePreview({ large = false }: { large?: boolean }) {
   const project = useStore((s) => s.project)
   const selectedTrack = useStore((s) => s.selectedTrack)
-  const focus = useStore((s) => s.focusGradient)
   const toggleFocus = useStore((s) => s.toggleFocusGradient)
 
   const track = project.tracks.find((t) => t.id === selectedTrack)
@@ -26,13 +25,13 @@ export function TexturePreview({ large = false }: { large?: boolean }) {
     <div className={`preview-wrap${large ? ' large' : ''}`}>
       <GradientPreview gradient={source.gradient} post={source.post} width={res} height={res} />
       <PathOverlay track={track} />
-      <button
-        className="preview-focus-btn"
-        onClick={toggleFocus}
-        title={focus ? 'Collapse the gradient editor' : 'Expand the gradient editor'}
-      >
-        {focus ? '⤡' : '⤢'}
-      </button>
+      {/* Only the small (sidebar) preview gets the enlarge button; enlarging it
+          shrinks the 3D view. The large one is collapsed from the 3D preview. */}
+      {!large && (
+        <button className="preview-focus-btn" onClick={toggleFocus} title="Enlarge the gradient editor">
+          ⤢
+        </button>
+      )}
     </div>
   )
 }
