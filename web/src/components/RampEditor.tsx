@@ -2,21 +2,27 @@ import { useEffect, useRef, useState } from 'react'
 import { type InterpSpace, hexToRgb, rgbToHex, sampleRamp } from '../color'
 import { type GradientStop, makeStop } from '../gradient'
 
-const WIDTH = 224
+// Canvas drawing resolution (independent of on-screen width, which is CSS-
+// driven so the bar can be small in the panel or full-width when `large`).
+const RES = 512
 const HEIGHT = 26
+const SMALL_W = 224
 
 /**
  * Editable color ramp: a live preview bar with draggable stop handles. Click the
  * bar to add a stop, drag a handle to move it, and edit/delete the selected one.
+ * `large` stretches the bar to fill its container (used in the focus editor).
  */
 export function RampEditor({
   stops,
   interp,
   onChange,
+  large = false,
 }: {
   stops: GradientStop[]
   interp: InterpSpace
   onChange: (stops: GradientStop[]) => void
+  large?: boolean
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const barRef = useRef<HTMLDivElement>(null)
@@ -29,9 +35,9 @@ export function RampEditor({
     if (!canvas) return
     const ctx = canvas.getContext('2d')
     if (!ctx) return
-    const img = ctx.createImageData(WIDTH, 1)
-    for (let x = 0; x < WIDTH; x++) {
-      const [r, g, b] = sampleRamp(stops, x / (WIDTH - 1), interp)
+    const img = ctx.createImageData(RES, 1)
+    for (let x = 0; x < RES; x++) {
+      const [r, g, b] = sampleRamp(stops, x / (RES - 1), interp)
       const i = x * 4
       img.data[i] = r
       img.data[i + 1] = g
@@ -41,7 +47,7 @@ export function RampEditor({
     // Stretch the 1px row down the bar.
     ctx.putImageData(img, 0, 0)
     ctx.imageSmoothingEnabled = false
-    ctx.drawImage(canvas, 0, 0, WIDTH, 1, 0, 0, WIDTH, HEIGHT)
+    ctx.drawImage(canvas, 0, 0, RES, 1, 0, 0, RES, HEIGHT)
   }, [stops, interp])
 
   const posFromEvent = (clientX: number): number => {
@@ -69,11 +75,11 @@ export function RampEditor({
   }
 
   return (
-    <div className="ramp">
+    <div className={`ramp${large ? ' large' : ''}`}>
       <div
         ref={barRef}
         className="ramp-bar"
-        style={{ width: WIDTH, height: HEIGHT }}
+        style={large ? { width: '100%', height: 40 } : { width: SMALL_W, height: HEIGHT }}
         onPointerDown={(e) => {
           // Click on the bar background adds a stop.
           if (e.target === e.currentTarget || e.target === canvasRef.current) {
@@ -86,7 +92,7 @@ export function RampEditor({
         onPointerUp={() => (dragId.current = null)}
         onPointerLeave={() => (dragId.current = null)}
       >
-        <canvas ref={canvasRef} width={WIDTH} height={HEIGHT} className="ramp-canvas" />
+        <canvas ref={canvasRef} width={RES} height={HEIGHT} className="ramp-canvas" />
         {sorted.map((s) => (
           <button
             key={s.id}

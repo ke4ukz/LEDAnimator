@@ -217,15 +217,14 @@ export default function App() {
       {dragging && <div className="drop-overlay">Drop a project (.json or .zip) to import</div>}
 
       <aside className="sidebar">
-        {focusGradient ? (
+        {focusGradient && (
           <Panel title="3D preview">
             <div className="mini-viewport"><Viewport /></div>
           </Panel>
-        ) : (
-          <Panel title="Source · Path">
-            <GradientEditor />
-          </Panel>
         )}
+        <Panel title="Source · Path">
+          <GradientEditor />
+        </Panel>
         <Panel title="Track">
           <TrackInspector />
         </Panel>
@@ -234,7 +233,7 @@ export default function App() {
       <main className="viewport">
         {focusGradient ? (
           <div className="gradient-stage">
-            <GradientEditor />
+            <GradientEditor place="focus" />
           </div>
         ) : (
           <>

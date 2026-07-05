@@ -945,6 +945,13 @@ label.vt-group {
   outline-offset: 1px;
 }
 
+/* Full-width ramp used in the focus editor: taller bar + bigger grab handles. */
+.ramp.large .ramp-handle {
+  width: 14px;
+  height: 50px;
+  top: -5px;
+}
+
 .ramp-controls {
   display: flex;
   align-items: center;
