@@ -87,6 +87,7 @@ export function LedList({ onAddShape }: { onAddShape: () => void }) {
   const assignments = useStore((s) => s.project.assignments)
   const selection = useStore((s) => s.selection)
   const selectLed = useStore((s) => s.selectLed)
+  const selectDeviceOf = useStore((s) => s.selectDeviceOf)
   const setSelection = useStore((s) => s.setSelection)
   const deviceSettings = useStore((s) => s.deviceSettings)
   const assignLed = useStore((s) => s.assignLed)
@@ -154,7 +155,7 @@ export function LedList({ onAddShape }: { onAddShape: () => void }) {
         </div>
         <span className="muted">
           {listMode === 'leds'
-            ? `${leds.length} LEDs · Shift = range, ⌘/Ctrl = toggle`
+            ? `${leds.length} LEDs · Shift = range, ⌘/Ctrl = toggle, Alt = device`
             : `${deviceIds.length} device${deviceIds.length === 1 ? '' : 's'} · ⌘/Ctrl = add`}
         </span>
       </div>
@@ -180,7 +181,9 @@ export function LedList({ onAddShape }: { onAddShape: () => void }) {
               key={i}
               className={selection.includes(i) ? 'sel' : ''}
               onClick={(e) =>
-                selectLed(i, e.shiftKey ? 'range' : e.metaKey || e.ctrlKey ? 'toggle' : 'replace')
+                e.altKey
+                  ? selectDeviceOf(i, e.metaKey || e.ctrlKey)
+                  : selectLed(i, e.shiftKey ? 'range' : e.metaKey || e.ctrlKey ? 'toggle' : 'replace')
               }
             >
               <LedSwatch index={i} />

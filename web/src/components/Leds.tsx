@@ -65,9 +65,11 @@ export function Leds() {
         e.stopPropagation()
         if (e.instanceId == null) return
         // The active tool decides what a click does.
-        const { tool, renumberAt, animAssignAt } = useStore.getState()
+        const { tool, renumberAt, animAssignAt, selectDeviceOf } = useStore.getState()
         if (tool === 'renumber') renumberAt(e.instanceId)
         else if (tool === 'animassign') animAssignAt(e.instanceId)
+        // Alt/Option-click selects the whole device the LED belongs to.
+        else if (e.altKey) selectDeviceOf(e.instanceId, e.metaKey || e.ctrlKey)
         else selectLed(e.instanceId, e.shiftKey ? 'toggle' : 'replace')
       }}
     >

@@ -139,6 +139,9 @@ interface AppState {
   selectTrack: (id: string | null) => void
   /** replace = set to [i]; toggle = add/remove i; range = i…anchor inclusive. */
   selectLed: (i: number, mode?: 'replace' | 'toggle' | 'range') => void
+  /** Select every LED sharing the given LED's device (Alt/Option-click).
+   *  `additive` unions onto the current selection instead of replacing it. */
+  selectDeviceOf: (led: number, additive?: boolean) => void
   /** Enter the renumber tool, assigning consecutive numbers from `start`. */
   startRenumber: (start: number) => void
   /** Assign the next number to the LED at `index` (moves it there), then advance. */
@@ -641,6 +644,12 @@ export const useStore = create<AppState>((set, get) => {
       }),
     setSelection: (indices) => set({ selection: indices }),
     clearSelection: () => set({ selection: [] }),
+    selectDeviceOf: (led, additive = false) => {
+      const { leds, selection } = get()
+      const d = leds[led]?.device ?? 0
+      const idxs = leds.map((p, i) => ((p.device ?? 0) === d ? i : -1)).filter((i) => i >= 0)
+      set({ selection: additive ? [...new Set([...selection, ...idxs])] : idxs, selectionAnchor: led })
+    },
 
     // The active tool forces the relevant labels on (see LedLabels).
     startRenumber: (start) => set({ tool: 'renumber', renumberNext: Math.max(0, Math.floor(start) || 0) }),
