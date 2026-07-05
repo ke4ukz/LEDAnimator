@@ -59,14 +59,23 @@ function decodeImage(url: string) {
     const scale = res / Math.max(img.width, img.height)
     const dw = img.width * scale
     const dh = img.height * scale
+    const ox = (res - dw) / 2
+    const oy = (res - dh) / 2
     const canvas = document.createElement('canvas')
     canvas.width = res
     canvas.height = res
     const ctx = canvas.getContext('2d')!
     ctx.imageSmoothingEnabled = true
     ctx.imageSmoothingQuality = 'high'
-    // Centered, aspect-preserved; the surrounding letterbox stays black.
-    ctx.drawImage(img, (res - dw) / 2, (res - dh) / 2, dw, dh)
+    // Flatten transparency over white (matching how the image looks in a normal
+    // viewer): drawing an image with alpha onto a transparent canvas makes
+    // getImageData return black for transparent pixels (premultiplied alpha
+    // loses their color). Letterbox around a non-square image stays black.
+    ctx.fillStyle = '#000'
+    ctx.fillRect(0, 0, res, res)
+    ctx.fillStyle = '#fff'
+    ctx.fillRect(ox, oy, dw, dh)
+    ctx.drawImage(img, ox, oy, dw, dh)
     const px = ctx.getImageData(0, 0, res, res).data
     const data = new Uint8ClampedArray(res * res * 3)
     for (let p = 0, q = 0; q < px.length; p += 3, q += 4) {
