@@ -1378,6 +1378,17 @@ input[type='color'] {
   white-space: nowrap;
 }
 
+/* LED (wiring/chain) index: plain white pill. Animation index: amber pill with
+   a rounded shape, so the two are unmistakable — especially when the anim-assign
+   tool swaps the numbers. */
+.led-label.anim {
+  color: #201400;
+  background: #ffb300;
+  border-color: #4a2f00;
+  border-radius: 7px;
+  font-weight: 700;
+}
+
 /* LED list reorder arrows */
 .reorder {
   display: inline-flex;

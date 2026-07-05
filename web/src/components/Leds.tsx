@@ -150,22 +150,22 @@ export function UnassignedMarkers() {
  */
 export function LedLabels() {
   const leds = useStore((s) => s.leds)
-  const show = useStore((s) => s.showLabels)
+  const labelMode = useStore((s) => s.labelMode)
   const tool = useStore((s) => s.tool)
-  if (!show) return null
-  const showAnim = tool === 'animassign'
+  // The active assign tool overrides the display choice so you always see what
+  // you're assigning; otherwise follow the Numbers dropdown.
+  const mode = tool === 'renumber' ? 'chain' : tool === 'animassign' ? 'anim' : labelMode
+  if (mode === 'none') return null
   let n = -1
   return (
     <>
       {leds.map((p, i) => {
         if (p.unassigned) return null
         n += 1
-        // Anim-assign mode labels by animation index (so groups are visible);
-        // otherwise by chain/wiring number.
-        const label = showAnim ? p.animIndex ?? n : n
+        const label = mode === 'anim' ? p.animIndex ?? n : n
         return (
           <Html key={i} position={[p.x, p.y, p.z]} center zIndexRange={[20, 0]} style={{ pointerEvents: 'none' }}>
-            <div className="led-label">{label}</div>
+            <div className={`led-label ${mode}`}>{label}</div>
           </Html>
         )
       })}

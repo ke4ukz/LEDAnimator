@@ -288,8 +288,8 @@ export function GradientEditor({ place = 'panel' }: { place?: 'panel' | 'focus' 
       ) : (
         <>
           <Row label="Image">
-            <ImagePicker label="Replace…" />
-            <button className="btn" onClick={setSourceGradient}>To gradient</button>
+            <ImagePicker label="Replace" />
+            <button className="btn" onClick={setSourceGradient} title="Remove the image and go back to a gradient">Remove</button>
           </Row>
           <Row label="Transparency">
             <select value={source.kind === 'image' ? source.bg ?? 'white' : 'white'} onChange={(e) => setImageBg(e.target.value as 'white' | 'black')}>

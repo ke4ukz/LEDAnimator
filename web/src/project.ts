@@ -54,6 +54,9 @@ export type PathDef =
 
 export type PolyPath = Extract<PathDef, { type: 'poly' }>
 
+/** Which number to show on each LED billboard. */
+export type LabelMode = 'none' | 'chain' | 'anim'
+
 /** Easing of the segment leaving a keyframe toward the next one. */
 export type EaseType = 'linear' | 'smooth' | 'hold'
 

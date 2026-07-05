@@ -1,6 +1,6 @@
 import { strFromU8, unzipSync } from 'fflate'
 import type { LedPosition } from '../types'
-import type { Source, Track } from '../project'
+import type { LabelMode, Source, Track } from '../project'
 
 // The editable project state, serialized to JSON. The baked raster is NOT
 // stored (it's derived) — it's re-baked from this on load.
@@ -16,7 +16,8 @@ export interface ProjectFile {
   sources: Source[]
   tracks: Track[]
   assignments: string[]
-  display: { ledScale: number; ledShape: 'sphere' | 'cube'; showLabels: boolean }
+  // `labelMode` is current; `showLabels` is read from older files for back-compat.
+  display: { ledScale: number; ledShape: 'sphere' | 'cube'; labelMode?: LabelMode; showLabels?: boolean }
 }
 
 export function serializeProjectFile(file: ProjectFile): string {

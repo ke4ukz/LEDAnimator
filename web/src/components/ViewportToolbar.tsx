@@ -9,11 +9,11 @@ import { useStore } from '../store'
 export function ViewportToolbar() {
   const ledScale = useStore((s) => s.ledScale)
   const ledShape = useStore((s) => s.ledShape)
-  const showLabels = useStore((s) => s.showLabels)
+  const labelMode = useStore((s) => s.labelMode)
   const showSamples = useStore((s) => s.showSamples)
   const setLedScale = useStore((s) => s.setLedScale)
   const setLedShape = useStore((s) => s.setLedShape)
-  const setShowLabels = useStore((s) => s.setShowLabels)
+  const setLabelMode = useStore((s) => s.setLabelMode)
   const setShowSamples = useStore((s) => s.setShowSamples)
 
   return (
@@ -37,10 +37,14 @@ export function ViewportToolbar() {
           <option value="cube">Cube</option>
         </select>
       </div>
-      <label className="vt-group">
-        <input type="checkbox" checked={showLabels} onChange={(e) => setShowLabels(e.target.checked)} />
+      <div className="vt-group">
         <span className="muted">Numbers</span>
-      </label>
+        <select value={labelMode} onChange={(e) => setLabelMode(e.target.value as 'none' | 'chain' | 'anim')}>
+          <option value="none">None</option>
+          <option value="chain">LED index</option>
+          <option value="anim">Animation index</option>
+        </select>
+      </div>
       <label className="vt-group">
         <input type="checkbox" checked={showSamples} onChange={(e) => setShowSamples(e.target.checked)} />
         <span className="muted">Sample markers</span>

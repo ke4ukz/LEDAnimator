@@ -6,6 +6,7 @@ import { defaultGradient } from './presets'
 import {
   type Automation,
   type AutoParam,
+  type LabelMode,
   type PostFx,
   type Project,
   type Source,
@@ -56,7 +57,9 @@ interface AppState {
   // Display settings.
   ledScale: number
   ledShape: 'sphere' | 'cube'
-  showLabels: boolean
+  /** Which number to billboard on each LED: none, wiring/chain #, or animation #.
+   *  The renumber/anim-assign tools override this while active. */
+  labelMode: LabelMode
   /** Show a dim ghost marker on the path where each LED currently samples. */
   showSamples: boolean
   /** When true, the gradient texture is the big center editor and the 3D view
@@ -104,7 +107,7 @@ interface AppState {
 
   setLedScale: (v: number) => void
   setLedShape: (s: 'sphere' | 'cube') => void
-  setShowLabels: (b: boolean) => void
+  setLabelMode: (mode: LabelMode) => void
   setShowSamples: (b: boolean) => void
   toggleFocusGradient: () => void
 
@@ -190,8 +193,13 @@ interface Init {
   selectedTrack: string | null
   ledScale: number
   ledShape: 'sphere' | 'cube'
-  showLabels: boolean
+  labelMode: LabelMode
 }
+
+/** Read a label mode from a saved display block, defaulting old files (which
+ *  stored a boolean `showLabels`) to chain numbers / none. */
+const labelModeFrom = (d?: { labelMode?: LabelMode; showLabels?: boolean }): LabelMode =>
+  d?.labelMode ?? (d?.showLabels ? 'chain' : 'none')
 
 // True when startup found no last-open project — the bootstrap then seeds the
 // ring demo only if the library is also empty (a truly first-ever run).
@@ -216,7 +224,7 @@ function initialState(): Init {
       selectedTrack: saved.tracks[0]?.id ?? null,
       ledScale: saved.display?.ledScale ?? 1,
       ledShape: saved.display?.ledShape ?? 'cube',
-      showLabels: saved.display?.showLabels ?? false,
+      labelMode: labelModeFrom(saved.display),
     }
   }
   wasEmptyStart = true
@@ -231,7 +239,7 @@ function initialState(): Init {
     selectedTrack: null,
     ledScale: 1,
     ledShape: 'cube',
-    showLabels: false,
+    labelMode: 'none',
   }
 }
 
@@ -286,7 +294,7 @@ export const useStore = create<AppState>((set, get) => {
     animAssignAuto: false,
     ledScale: init.ledScale,
     ledShape: init.ledShape,
-    showLabels: init.showLabels,
+    labelMode: init.labelMode,
     showSamples: false,
     focusGradient: false,
     textureVersion: 0,
@@ -540,7 +548,7 @@ export const useStore = create<AppState>((set, get) => {
 
     setLedScale: (v) => set({ ledScale: v }),
     setLedShape: (s) => set({ ledShape: s }),
-    setShowLabels: (b) => set({ showLabels: b }),
+    setLabelMode: (mode) => set({ labelMode: mode }),
     setShowSamples: (b) => set({ showSamples: b }),
     toggleFocusGradient: () => set((s) => ({ focusGradient: !s.focusGradient })),
 
@@ -567,8 +575,8 @@ export const useStore = create<AppState>((set, get) => {
     setSelection: (indices) => set({ selection: indices }),
     clearSelection: () => set({ selection: [] }),
 
-    // Turn on number labels so you can see what you're assigning.
-    startRenumber: (start) => set({ tool: 'renumber', renumberNext: Math.max(0, Math.floor(start) || 0), showLabels: true }),
+    // The active tool forces the relevant labels on (see LedLabels).
+    startRenumber: (start) => set({ tool: 'renumber', renumberNext: Math.max(0, Math.floor(start) || 0) }),
     endRenumber: () => set({ tool: 'select' }),
     renumberAt: (index) => {
       const { leds, renumberNext } = get()
@@ -579,7 +587,7 @@ export const useStore = create<AppState>((set, get) => {
       set({ renumberNext: Math.min(to + 1, leds.length - 1), selection: [to] })
     },
 
-    startAnimAssign: (start) => set({ tool: 'animassign', animAssignValue: Math.max(0, Math.floor(start) || 0), showLabels: true }),
+    startAnimAssign: (start) => set({ tool: 'animassign', animAssignValue: Math.max(0, Math.floor(start) || 0) }),
     endAnimAssign: () => set({ tool: 'select' }),
     nextAnimAssign: () => set((s) => ({ animAssignValue: s.animAssignValue + 1 })),
     setAnimAssignAuto: (value) => set({ animAssignAuto: value }),
@@ -604,7 +612,7 @@ export const useStore = create<AppState>((set, get) => {
         sources: s.project.sources,
         tracks: s.project.tracks,
         assignments: s.project.assignments,
-        display: { ledScale: s.ledScale, ledShape: s.ledShape, showLabels: s.showLabels },
+        display: { ledScale: s.ledScale, ledShape: s.ledShape, labelMode: s.labelMode },
       }
     },
 
@@ -638,7 +646,7 @@ export const useStore = create<AppState>((set, get) => {
         dirty: opts?.dirty ?? false,
         ledScale: f.display?.ledScale ?? 1,
         ledShape: f.display?.ledShape ?? 'cube',
-        showLabels: f.display?.showLabels ?? false,
+        labelMode: labelModeFrom(f.display),
         selection: [],
         selectionAnchor: null,
         selectedTrack: f.tracks[0]?.id ?? null,
@@ -665,7 +673,7 @@ export const useStore = create<AppState>((set, get) => {
         ghost: null,
         ledScale: 1,
         ledShape: 'cube',
-        showLabels: false,
+        labelMode: 'none',
       })
     },
 
@@ -690,7 +698,7 @@ export const useStore = create<AppState>((set, get) => {
         ghost: null,
         ledScale: 1,
         ledShape: 'cube',
-        showLabels: false,
+        labelMode: 'none',
       })
     },
 
@@ -754,7 +762,7 @@ useStore.subscribe((state, prev) => {
     state.raster !== prev.raster ||
     state.ledScale !== prev.ledScale ||
     state.ledShape !== prev.ledShape ||
-    state.showLabels !== prev.showLabels ||
+    state.labelMode !== prev.labelMode ||
     state.projectName !== prev.projectName
   if (!editable) return
 
