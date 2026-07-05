@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from 'react'
 import { useStore } from '../store'
 import { sampleRaster } from '../types'
 import { rgbToHex } from '../color'
@@ -10,11 +11,17 @@ export function Inspector() {
   const frame = useStore((s) => s.frame)
   const project = useStore((s) => s.project)
   const updateLeds = useStore((s) => s.updateLeds)
+  const offsetLeds = useStore((s) => s.offsetLeds)
   const assignLeds = useStore((s) => s.assignLeds)
   const setLedDisabled = useStore((s) => s.setLedDisabled)
   const setLedUnassigned = useStore((s) => s.setLedUnassigned)
   const setLedAnimIndex = useStore((s) => s.setLedAnimIndex)
   const setLedDevice = useStore((s) => s.setLedDevice)
+
+  // Relative mode: X/Y/Z inputs add a delta to each selected LED instead of
+  // setting them all to one value. Remembered across sessions.
+  const [relative, setRelative] = useState(() => localStorage.getItem('leda.inspector.relative') === '1')
+  useEffect(() => { localStorage.setItem('leda.inspector.relative', relative ? '1' : '0') }, [relative])
 
   const sel = selection.filter((i) => leds[i])
   if (sel.length === 0) {
@@ -47,9 +54,23 @@ export function Inspector() {
         <span className="muted">Selected</span>
         <strong>{single != null ? `LED #${single}` : `${sel.length} LEDs`}</strong>
       </div>
-      <AxisField label="X" value={axis('x')} onChange={(v) => setAxis('x', v)} />
-      <AxisField label="Y" value={axis('y')} onChange={(v) => setAxis('y', v)} />
-      <AxisField label="Z" value={axis('z')} onChange={(v) => setAxis('z', v)} />
+      <label className="insp-row insp-check">
+        <span className="muted" title="Add the entered amount to each selected LED's position (e.g. +50 on Z moves them all up by 50), instead of setting them all to the same value.">Relative move</span>
+        <input type="checkbox" checked={relative} onChange={(e) => setRelative(e.target.checked)} />
+      </label>
+      {relative ? (
+        <>
+          <NudgeField label="X" onNudge={(d) => offsetLeds(sel, { x: d })} />
+          <NudgeField label="Y" onNudge={(d) => offsetLeds(sel, { y: d })} />
+          <NudgeField label="Z" onNudge={(d) => offsetLeds(sel, { z: d })} />
+        </>
+      ) : (
+        <>
+          <AxisField label="X" value={axis('x')} onChange={(v) => setAxis('x', v)} />
+          <AxisField label="Y" value={axis('y')} onChange={(v) => setAxis('y', v)} />
+          <AxisField label="Z" value={axis('z')} onChange={(v) => setAxis('z', v)} />
+        </>
+      )}
       <div className="insp-row">
         <span className="muted">Track</span>
         <select value={commonTrack} onChange={(e) => assignLeds(sel, e.target.value)}>
@@ -98,6 +119,37 @@ export function Inspector() {
           </span>
         </div>
       )}
+    </div>
+  )
+}
+
+/** Relative position input: type a delta (e.g. 50 or -10) and commit on
+ *  Enter/blur to add it to every selected LED, then clear. Uncontrolled so a
+ *  keystroke doesn't apply mid-type. */
+function NudgeField({ label, onNudge }: { label: string; onNudge: (delta: number) => void }) {
+  const ref = useRef<HTMLInputElement>(null)
+  const commit = () => {
+    const raw = ref.current?.value ?? ''
+    const n = parseFloat(raw)
+    if (raw !== '' && !Number.isNaN(n) && n !== 0) onNudge(n)
+    if (ref.current) ref.current.value = ''
+  }
+  return (
+    <div className="insp-row">
+      <span className="muted">{label}</span>
+      <input
+        ref={ref}
+        type="number"
+        step={0.1}
+        placeholder="+0"
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault()
+            commit()
+          }
+        }}
+      />
     </div>
   )
 }

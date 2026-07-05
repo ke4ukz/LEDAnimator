@@ -106,6 +106,8 @@ interface AppState {
   /** Patch position fields on the given LED indices (does not re-bake — position
    *  doesn't affect baked colors). */
   updateLeds: (indices: number[], patch: Partial<LedPosition>) => void
+  /** Add a per-axis delta to each LED's position (relative move; no re-bake). */
+  offsetLeds: (indices: number[], delta: Partial<Pick<LedPosition, 'x' | 'y' | 'z'>>) => void
   /** Blackout: force these LEDs' output to black (kept in the chain + order). */
   setLedDisabled: (indices: number[], value: boolean) => void
   /** Exclude/include these LEDs from the physical chain + export stream. */
@@ -498,6 +500,14 @@ export const useStore = create<AppState>((set, get) => {
     updateLeds: (indices, patch) => {
       const set2 = new Set(indices)
       set((s) => ({ leds: s.leds.map((p, i) => (set2.has(i) ? { ...p, ...patch } : p)) }))
+    },
+
+    offsetLeds: (indices, delta) => {
+      const set2 = new Set(indices)
+      const { x = 0, y = 0, z = 0 } = delta
+      set((s) => ({
+        leds: s.leds.map((p, i) => (set2.has(i) ? { ...p, x: p.x + x, y: p.y + y, z: p.z + z } : p)),
+      }))
     },
 
     setLedDisabled: (indices, value) => {

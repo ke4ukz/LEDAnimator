@@ -13,6 +13,7 @@ export function ArrangementDialog({ onClose }: { onClose: () => void }) {
   const [idx, setIdx] = useState(0)
   const preset = ARRANGEMENTS[idx]
   const [params, setParams] = useState<Record<string, number>>(() => defaultParams(preset))
+  const [device, setDevice] = useState(0)
 
   const built = preset.build(params)
 
@@ -34,7 +35,9 @@ export function ArrangementDialog({ onClose }: { onClose: () => void }) {
     setParams(defaultParams(ARRANGEMENTS[i]))
   }
   const add = () => {
-    addLeds(preset.build(params))
+    const built = preset.build(params)
+    // Tag the new LEDs with the chosen device (omit when 0 = default single device).
+    addLeds(device > 0 ? built.map((p) => ({ ...p, device })) : built)
     onClose()
   }
 
@@ -68,6 +71,16 @@ export function ArrangementDialog({ onClose }: { onClose: () => void }) {
           <span className="muted num">{params[p.key]}</span>
         </label>
       ))}
+
+      <label className="field-row">
+        <span title="Assign the new LEDs to this device (render slice). 0 = default single device.">Device</span>
+        <input
+          type="number"
+          min={0}
+          value={device}
+          onChange={(e) => setDevice(Math.max(0, parseInt(e.target.value, 10) || 0))}
+        />
+      </label>
 
       <p className="muted arrange-hint">Preview shown in the viewport.</p>
       <div className="arrange-actions">
