@@ -191,10 +191,25 @@ These are useful on their own and everything else builds on them:
    numeric prefix.
 
 **Also decided while building (2026-07-05):** per-board settings (data pin /
-device name / brightness) are now **per-device** — the Export dialog shows one
+device name / brightness) are **per-device** — the Export dialog shows one
 settings block per device, persisted in the project file as
 `ProjectFile.devices` (keyed by device id). Device name defaults to the project
 name; pin 0; brightness 100%.
+
+- **Set-all toggle:** a "Same pin & brightness for all" checkbox (multi-device
+  only) bakes shared pin/brightness into every device (persisted as
+  `ProjectFile.deviceDefaults` = `{uniform,pin,brightness}`); names stay
+  per-device. In set-all mode the per-device frames show only the name (no
+  per-device size — the "Largest slice" stat covers it); in per-device mode each
+  frame shows its slice size.
+- **Manifest:** every multi-device bundle (UF2 zip / MicroPython zip / .leda zip)
+  includes a root `manifest.txt` mapping device number → device name →
+  file/folder → LED count + size, so the user knows which artifact goes to which
+  named board (e.g. "Northeast corner = device 3 = 07-name-dev3.uf2").
+- **Condensed the export README** (`rp2040Readme`) to purpose + per-file
+  descriptions + target device; dropped the protocol/UUID/LEDA-format dump.
+  `networks.txt`/`state.txt` are listed as runtime-generated, and it flags that
+  the Wi-Fi password in `networks.txt` is plaintext.
 
 ## Firmware changes
 

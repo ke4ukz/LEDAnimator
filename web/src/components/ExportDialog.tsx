@@ -39,6 +39,8 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
   const setProgram = useStore((s) => s.setProgram)
   const deviceSettings = useStore((s) => s.deviceSettings)
   const setDeviceSettings = useStore((s) => s.setDeviceSettings)
+  const deviceDefaults = useStore((s) => s.deviceDefaults)
+  const setDeviceDefaults = useStore((s) => s.setDeviceDefaults)
 
   // Remember the last target platform + format across sessions.
   const [deviceId, setDeviceId] = useState(() => {
@@ -55,19 +57,24 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
 
   const multi = devices.length > 1
   const base = sanitizeName(projectName)
+  const progNum = String(program).padStart(2, '0')
   const progBase = `${progPrefix(program)}${base}` // e.g. 07-aurora
   // The pattern filename handed to one device; distinct per device when split so
   // the downloaded slices are tellable apart (the firmware keys on the "07-" prefix).
   const ledaName = (device: number) => (multi ? `${progBase}-dev${device}.leda` : `${progBase}.leda`)
 
-  // Per-device firmware settings, falling back to project-derived defaults.
+  // "Set all devices at once" only applies when there's more than one device.
+  const uniform = multi && deviceDefaults.uniform
+
+  // Per-device firmware settings. Pin/brightness come from the shared defaults
+  // when uniform, else per device; the name is always per device.
   const defaultName = (projectName.trim() || 'LED Animator').slice(0, 26)
   const settingsFor = (device: number) => {
     const s = deviceSettings[device] ?? {}
     return {
       name: (s.name ?? '').trim() || defaultName,
-      pin: s.pin ?? 0,
-      brightness: s.brightness ?? 1,
+      pin: uniform ? deviceDefaults.pin : s.pin ?? 0,
+      brightness: uniform ? deviceDefaults.brightness : s.brightness ?? 1,
     }
   }
 
@@ -81,6 +88,7 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
     const bytes = estimateBytes(raster)
     return { device, bytes, warnings: checkLimits(platform, raster, bytes) }
   })
+  const bytesByDevice = new Map(perDevice.map((d) => [d.device, d.bytes]))
   const totalLeds = devices.reduce((s, d) => s + d.raster.numLeds, 0)
   const maxBytes = perDevice.reduce((m, d) => Math.max(m, d.bytes), 0)
   // Each board holds its own slice, so limits apply per device; prefix multi-device
@@ -88,13 +96,40 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
   const warnings = perDevice.flatMap((d) => d.warnings.map((w) => (multi ? `Device ${d.device}: ${w}` : w)))
   const duration = raster.numFrames / raster.fps
 
+  // Root-level manifest for a multi-device bundle: which file/folder is whose.
+  const buildManifest = (targetFor: (device: number) => string, targetHead: string, targetWord: string): string => {
+    const rows = devices.map(({ device, raster }) => ({
+      num: String(device),
+      name: settingsFor(device).name,
+      target: targetFor(device),
+      leds: String(raster.numLeds),
+      size: fmtBytes(bytesByDevice.get(device) ?? 0),
+    }))
+    const head = { num: '#', name: 'Device name', target: targetHead, leds: 'LEDs', size: 'Size' }
+    const width = (k: 'num' | 'name' | 'target' | 'leds') => Math.max(head[k].length, ...rows.map((r) => r[k].length))
+    const wNum = width('num'), wName = width('name'), wTarget = width('target'), wLeds = width('leds')
+    const line = (num: string, name: string, target: string, leds: string, size: string) =>
+      `  ${num.padEnd(wNum)}  ${name.padEnd(wName)}  ${target.padEnd(wTarget)}  ${leds.padStart(wLeds)}  ${size}`
+    return [
+      'LED Animator - multi-device export',
+      `Program ${progNum} "${projectName.trim() || 'Untitled'}" - ${raster.numFrames} frames @ ${raster.fps} fps, ${devices.length} devices`,
+      '',
+      `Give each device its own ${targetWord} below, matched by device number:`,
+      '',
+      line(head.num, head.name, head.target, head.leds, head.size),
+      ...rows.map((r) => line(r.num, r.name, r.target, r.leds, r.size)),
+      '',
+    ].join('\n')
+  }
+
   const exportLeda = () => {
     if (!multi) {
       downloadBytes(ledaName(devices[0].device), encodeRaster(devices[0].raster), 'application/octet-stream')
       return
     }
-    const files: Record<string, Uint8Array> = {}
+    const files: Record<string, string | Uint8Array> = {}
     for (const { device, raster } of devices) files[ledaName(device)] = encodeRaster(raster)
+    files['manifest.txt'] = buildManifest(ledaName, 'File', 'file')
     downloadBytes(`${progBase}.zip`, zipProject(files), 'application/zip')
   }
 
@@ -112,6 +147,7 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
       }
       files[`${dir}README.txt`] = rp2040Readme(s.pin, pf)
     }
+    if (multi) files['manifest.txt'] = buildManifest((d) => `device-${d}/`, 'Folder', 'folder')
     downloadBytes(multi ? `${progBase}-rp2040.zip` : 'led-animation-rp2040.zip', zipProject(files), 'application/zip')
   }
 
@@ -129,8 +165,9 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
         downloadBytes('led-animation-picow.uf2', uf2, 'application/octet-stream')
         return
       }
-      const files: Record<string, Uint8Array> = {}
+      const files: Record<string, string | Uint8Array> = {}
       for (const { device, raster } of devices) files[`${progBase}-dev${device}.uf2`] = await buildOne(device, raster)
+      files['manifest.txt'] = buildManifest((d) => `${progBase}-dev${d}.uf2`, 'File', 'file')
       downloadBytes(`${progBase}-picow.zip`, zipProject(files), 'application/zip')
     } catch (e) {
       window.alert(`Could not build the UF2: ${(e as Error).message}`)
@@ -208,12 +245,54 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
 
             {needsSettings && (
               <div className="device-settings">
+                {multi && (
+                  <label className="field-row">
+                    <span title="Bake the same data pin and brightness into every device. Turn off to set them per device.">
+                      Same pin &amp; brightness for all
+                    </span>
+                    <input
+                      type="checkbox"
+                      checked={deviceDefaults.uniform}
+                      onChange={(e) => setDeviceDefaults({ uniform: e.target.checked })}
+                    />
+                  </label>
+                )}
+
+                {uniform && (
+                  <fieldset className="device-block">
+                    <legend>All devices</legend>
+                    <label className="field-row">
+                      <span>Data pin (GP)</span>
+                      <input
+                        type="number"
+                        min={0}
+                        max={29}
+                        value={deviceDefaults.pin}
+                        onChange={(e) => setDeviceDefaults({ pin: Number(e.target.value) })}
+                      />
+                    </label>
+                    <label className="field-row">
+                      <span>Brightness</span>
+                      <input
+                        type="range"
+                        min={0}
+                        max={1}
+                        step={0.05}
+                        value={deviceDefaults.brightness}
+                        onChange={(e) => setDeviceDefaults({ brightness: Number(e.target.value) })}
+                      />
+                      <span className="muted">{Math.round(deviceDefaults.brightness * 100)}%</span>
+                    </label>
+                  </fieldset>
+                )}
+
                 {devices.map(({ device, raster }) => {
                   const s = settingsFor(device)
                   return (
                     <fieldset className="device-block" key={device}>
                       <legend>
                         {multi ? `Device ${device}` : 'Device'} · {raster.numLeds} LED{raster.numLeds === 1 ? '' : 's'}
+                        {multi && !uniform && ` · ${fmtBytes(bytesByDevice.get(device) ?? 0)}`}
                       </legend>
                       <label className="field-row">
                         <span>Device name</span>
@@ -225,28 +304,32 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
                           onChange={(e) => setDeviceSettings(device, { name: e.target.value })}
                         />
                       </label>
-                      <label className="field-row">
-                        <span>Data pin (GP)</span>
-                        <input
-                          type="number"
-                          min={0}
-                          max={29}
-                          value={s.pin}
-                          onChange={(e) => setDeviceSettings(device, { pin: Number(e.target.value) })}
-                        />
-                      </label>
-                      <label className="field-row">
-                        <span>Brightness</span>
-                        <input
-                          type="range"
-                          min={0}
-                          max={1}
-                          step={0.05}
-                          value={s.brightness}
-                          onChange={(e) => setDeviceSettings(device, { brightness: Number(e.target.value) })}
-                        />
-                        <span className="muted">{Math.round(s.brightness * 100)}%</span>
-                      </label>
+                      {!uniform && (
+                        <>
+                          <label className="field-row">
+                            <span>Data pin (GP)</span>
+                            <input
+                              type="number"
+                              min={0}
+                              max={29}
+                              value={s.pin}
+                              onChange={(e) => setDeviceSettings(device, { pin: Number(e.target.value) })}
+                            />
+                          </label>
+                          <label className="field-row">
+                            <span>Brightness</span>
+                            <input
+                              type="range"
+                              min={0}
+                              max={1}
+                              step={0.05}
+                              value={s.brightness}
+                              onChange={(e) => setDeviceSettings(device, { brightness: Number(e.target.value) })}
+                            />
+                            <span className="muted">{Math.round(s.brightness * 100)}%</span>
+                          </label>
+                        </>
+                      )}
                     </fieldset>
                   )
                 })}

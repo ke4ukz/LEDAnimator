@@ -14,6 +14,14 @@ export interface DeviceSettings {
   brightness?: number
 }
 
+/** The Export dialog's "set all devices at once" toggle: when `uniform`, every
+ *  device is baked with the shared `pin`/`brightness` instead of its own. */
+export interface DeviceDefaults {
+  uniform?: boolean
+  pin?: number
+  brightness?: number
+}
+
 export interface ProjectFile {
   format: 'led-animator-project'
   version: number
@@ -30,6 +38,8 @@ export interface ProjectFile {
   program?: number
   /** Per-device firmware settings, keyed by device id (see `LedPosition.device`). */
   devices?: Record<string, DeviceSettings>
+  /** Shared pin/brightness + the "set all at once" toggle for multi-device export. */
+  deviceDefaults?: DeviceDefaults
   // `labelMode` is current; `showLabels` is read from older files for back-compat.
   display: { ledScale: number; ledShape: 'sphere' | 'cube'; labelMode?: LabelMode; showLabels?: boolean }
 }
