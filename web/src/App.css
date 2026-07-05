@@ -1150,6 +1150,21 @@ input[type='color'] {
 .led-list-head {
   font-size: 11px;
   margin-bottom: 6px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* LEDs / Devices view switch at the top of the LED list. */
+.list-mode-toggle {
+  display: flex;
+  gap: 4px;
+}
+
+.list-mode-toggle .btn {
+  padding: 2px 10px;
+  font-size: 11px;
 }
 
 .led-list {
