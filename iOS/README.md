@@ -57,12 +57,9 @@ hardware (or run the Mac target) to exercise discovery.
 
 ## Source documentation
 
-The Swift source is documented with `///` doc comments. Generate HTML with
-Doxygen from the repo root:
-
-```bash
-doxygen Doxyfile
-```
-
-Or use Xcode's native **Build Documentation** (DocC), which reads the same
-comments.
+The Swift source is documented with `///` doc comments. In Xcode, use
+**Product ▸ Build Documentation** (⌃⇧⌘D) to compile and browse them with **DocC**
+— Swift-native, nothing to install. (When a non-Apple codebase joins the project,
+a cross-language documentation portal — linking DocC, TypeDoc, etc. — is the way
+to unify docs; a single generator like Doxygen can't cover Swift + TypeScript
+well.)

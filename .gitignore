@@ -25,6 +25,3 @@ dist-ssr
 
 # Vite cache (stray, if any at repo level)
 .vite
-
-# Generated API docs
-docs/doxygen/
