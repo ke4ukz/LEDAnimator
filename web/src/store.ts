@@ -20,7 +20,7 @@ import { reserveStopIds } from './gradient'
 import { bakeProject } from './bake'
 import { setTextureReadyListener } from './texture'
 import type { ProjectFile } from './export/projectFile'
-import { loadSavedProjectFile, loadSavedDirty, loadSavedName, saveProjectFile, clearSavedProject } from './persistence'
+import { loadSavedProjectFile, loadSavedDirty, loadSavedName, saveProjectFile, clearSavedProject, enforceStorageVersion } from './persistence'
 import { saveProjectToLibrary, listLibrary } from './export/library'
 
 interface AppState {
@@ -199,6 +199,9 @@ let wasEmptyStart = false
 
 /** Startup state: the autosaved project if present, else an empty project. */
 function initialState(): Init {
+  // Drop a stale working session after a system change, so old tweaks (e.g.
+  // cranked Adjustments) don't bleed into a new build.
+  enforceStorageVersion()
   const saved = loadSavedProjectFile()
   if (saved) {
     const project: Project = { sources: saved.sources, tracks: saved.tracks, assignments: saved.assignments }
