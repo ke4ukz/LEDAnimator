@@ -16,15 +16,29 @@ preview is identical to hardware.
 
 ## Working today
 
-Non-destructive gradient generator (linear/radial/conic/dual-radial/bilinear/noise,
-RGB/HSL/OKLCH/step interpolation), per-track sampling paths (line/sine/ellipse) with
-on-texture drag editing, per-track speed-automation lane, 3D arrangement editor
-(shape presets + multi-select + manual editing), editable timeline length/fps, an
-RP2040 MicroPython export (program + `pattern.bin` + `project.json`, in a zip), and
-project save/load (JSON, drag-and-drop import).
+- **Sources** — a non-destructive gradient generator (linear/radial/conic/
+  dual-radial/bilinear/noise, with RGB/HSL/OKLCH/step interpolation) *or* a
+  user-supplied **image** (aspect-preserved, transparency flattened over
+  white/black). Per-source Adjustments (invert / brightness / contrast /
+  saturation).
+- **Sampling paths** — line / sine / ellipse / spiral / polygon / free-drawn
+  **poly** (rounded corners, optional closed loop), edited by dragging handles
+  on the texture. A **focus mode** enlarges the texture with a magnifier loupe
+  and a live color/hex readout for pixel-precise handle and stop placement.
+- **Tracks & timeline** — per-track speed + chase, a speed-automation lane,
+  animation-index assignment, and editable timeline length / fps.
+- **3D arrangement** — shape presets, multi-select, and manual per-LED editing;
+  LED and animation index billboards.
+- **Export** — for RP2040 (Pico / Pico W): a **one-drag UF2** (MicroPython +
+  player + pattern), a **MicroPython `.zip`**, or the raw **`.leda`** pattern.
+- **Projects** — save/load (JSON), a local project library (IndexedDB), and
+  crash recovery.
 
-See the roadmap notes for the connectivity/native-app plans (BLE control, WiFi
-provisioning, UF2 packaging, encodings, FSEQ).
+Everything reads a single rasterized **source texture** (`texture.ts`) so the
+loupe, timeline strip, and export all agree pixel-for-pixel with playback.
+
+See [`../docs/`](../docs/) for the getting-started guide, control protocol, and
+the multi-device sync plan.
 
 ## Develop
 
