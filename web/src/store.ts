@@ -140,8 +140,9 @@ interface AppState {
   /** replace = set to [i]; toggle = add/remove i; range = i…anchor inclusive. */
   selectLed: (i: number, mode?: 'replace' | 'toggle' | 'range') => void
   /** Select every LED sharing the given LED's device (Alt/Option-click).
-   *  `additive` unions onto the current selection instead of replacing it. */
-  selectDeviceOf: (led: number, additive?: boolean) => void
+   *  'replace' selects just that device; 'toggle' adds the whole device, or
+   *  removes it if all of its LEDs are already selected. */
+  selectDeviceOf: (led: number, mode?: 'replace' | 'toggle') => void
   /** Enter the renumber tool, assigning consecutive numbers from `start`. */
   startRenumber: (start: number) => void
   /** Assign the next number to the LED at `index` (moves it there), then advance. */
@@ -644,11 +645,19 @@ export const useStore = create<AppState>((set, get) => {
       }),
     setSelection: (indices) => set({ selection: indices }),
     clearSelection: () => set({ selection: [] }),
-    selectDeviceOf: (led, additive = false) => {
+    selectDeviceOf: (led, mode = 'replace') => {
       const { leds, selection } = get()
       const d = leds[led]?.device ?? 0
       const idxs = leds.map((p, i) => ((p.device ?? 0) === d ? i : -1)).filter((i) => i >= 0)
-      set({ selection: additive ? [...new Set([...selection, ...idxs])] : idxs, selectionAnchor: led })
+      if (mode === 'toggle') {
+        const sel = new Set(selection)
+        // Toggle the whole device as a unit: remove it if fully selected, else add it.
+        if (idxs.every((i) => sel.has(i))) idxs.forEach((i) => sel.delete(i))
+        else idxs.forEach((i) => sel.add(i))
+        set({ selection: [...sel], selectionAnchor: led })
+      } else {
+        set({ selection: idxs, selectionAnchor: led })
+      }
     },
 
     // The active tool forces the relevant labels on (see LedLabels).

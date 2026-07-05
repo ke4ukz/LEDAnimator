@@ -66,11 +66,13 @@ export function Leds() {
         if (e.instanceId == null) return
         // The active tool decides what a click does.
         const { tool, renumberAt, animAssignAt, selectDeviceOf } = useStore.getState()
+        // Any modifier means "toggle in/out"; unmodified means "replace". Alt
+        // scopes the click to the whole device instead of the single LED.
+        const toggle = e.shiftKey || e.metaKey || e.ctrlKey
         if (tool === 'renumber') renumberAt(e.instanceId)
         else if (tool === 'animassign') animAssignAt(e.instanceId)
-        // Alt/Option-click selects the whole device the LED belongs to.
-        else if (e.altKey) selectDeviceOf(e.instanceId, e.metaKey || e.ctrlKey)
-        else selectLed(e.instanceId, e.shiftKey ? 'toggle' : 'replace')
+        else if (e.altKey) selectDeviceOf(e.instanceId, toggle ? 'toggle' : 'replace')
+        else selectLed(e.instanceId, toggle ? 'toggle' : 'replace')
       }}
     >
       <Geometry shape={ledShape} />

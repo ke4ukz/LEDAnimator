@@ -118,9 +118,14 @@ export function LedList({ onAddShape }: { onAddShape: () => void }) {
   // Distinct device ids present, ascending, and the LED indices each contains.
   const deviceIds = [...new Set(leds.map((p) => p.device ?? 0))].sort((a, b) => a - b)
   const ledsOfDevice = (d: number) => leds.map((p, i) => ((p.device ?? 0) === d ? i : -1)).filter((i) => i >= 0)
-  const selectDevice = (d: number, additive: boolean) => {
+  const selectDevice = (d: number, toggle: boolean) => {
     const idxs = ledsOfDevice(d)
-    setSelection(additive ? [...new Set([...selection, ...idxs])] : idxs)
+    if (!toggle) return setSelection(idxs)
+    // Toggle the whole device: remove it if fully selected, else add it.
+    const sel = new Set(selection)
+    if (idxs.every((i) => sel.has(i))) idxs.forEach((i) => sel.delete(i))
+    else idxs.forEach((i) => sel.add(i))
+    setSelection([...sel])
   }
 
   // Inclusive index range → LED indices, clamped to the chain.
@@ -156,7 +161,7 @@ export function LedList({ onAddShape }: { onAddShape: () => void }) {
         <span className="muted">
           {listMode === 'leds'
             ? `${leds.length} LEDs · Shift = range, ⌘/Ctrl = toggle, Alt = device`
-            : `${deviceIds.length} device${deviceIds.length === 1 ? '' : 's'} · ⌘/Ctrl = add`}
+            : `${deviceIds.length} device${deviceIds.length === 1 ? '' : 's'} · ⌘/Ctrl/Shift = toggle`}
         </span>
       </div>
       {listMode === 'devices' ? (
@@ -166,7 +171,7 @@ export function LedList({ onAddShape }: { onAddShape: () => void }) {
             const allSel = idxs.length > 0 && idxs.every((i) => selection.includes(i))
             const name = deviceSettings[d]?.name?.trim()
             return (
-              <li key={d} className={allSel ? 'sel' : ''} onClick={(e) => selectDevice(d, e.metaKey || e.ctrlKey)}>
+              <li key={d} className={allSel ? 'sel' : ''} onClick={(e) => selectDevice(d, e.metaKey || e.ctrlKey || e.shiftKey)}>
                 <span className="idx">{d}</span>
                 <span>{name || `Device ${d}`}</span>
                 <span className="tag">{idxs.length} LED{idxs.length === 1 ? '' : 's'}</span>
@@ -182,7 +187,7 @@ export function LedList({ onAddShape }: { onAddShape: () => void }) {
               className={selection.includes(i) ? 'sel' : ''}
               onClick={(e) =>
                 e.altKey
-                  ? selectDeviceOf(i, e.metaKey || e.ctrlKey)
+                  ? selectDeviceOf(i, e.metaKey || e.ctrlKey || e.shiftKey ? 'toggle' : 'replace')
                   : selectLed(i, e.shiftKey ? 'range' : e.metaKey || e.ctrlKey ? 'toggle' : 'replace')
               }
             >
