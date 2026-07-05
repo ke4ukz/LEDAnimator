@@ -55,6 +55,8 @@ Project-wide files (this README, `LICENSE`, the GitHub Pages workflow in
 
 - **[Getting Started](docs/getting-started.md)** — flash a Pico and connect,
   from zero (UF2 drag-and-drop *and* the `mpremote` path).
+- **[Pattern file format](docs/file-format.md)** — the `.leda` binary the editor
+  writes and the device plays (LEDA v1).
 - **[Control protocol](docs/protocol.md)** — the text command protocol the app
   and firmware speak over BLE and Wi‑Fi.
 - **[Project status](docs/STATUS.md)** — what works today and what's next.
@@ -77,6 +79,31 @@ UF2**, and follow the [Getting Started guide](docs/getting-started.md) to flash 
 
 **Companion app**: open the Xcode project under `iOS/LED Animator/` and run on an
 iPhone/iPad or Mac. See [`iOS/README.md`](iOS/README.md).
+
+## Data format & control protocol at a glance
+
+The two contracts everything depends on — full specs in
+[`docs/file-format.md`](docs/file-format.md) and [`docs/protocol.md`](docs/protocol.md).
+
+**Pattern file (`.leda`, "LEDA v1"):** a 16-byte header + frame-major RGB888
+pixels. All integers little-endian.
+
+| Offset | Size | Field |
+|---:|---:|---|
+| 0 | 4 | magic `LEDA` |
+| 4 | 1 | version (`1`) |
+| 5 | 1 | pixel format (`0` = RGB888) |
+| 6 | 2 | numLeds (uint16) |
+| 8 | 4 | numFrames (uint32) |
+| 12 | 2 | fps (uint16) |
+| 14 | 2 | reserved |
+| 16 | … | `numFrames × numLeds × (R,G,B)` |
+
+**Control protocol:** one-line text commands (e.g. `INFO`, `SELECT <name>`,
+`BRIGHT 50`), identical over two transports:
+- **BLE** — a custom service UUID + Nordic-UART RX/TX characteristics.
+- **Wi‑Fi** — the same commands over **TCP port 4550**; discovery via a UDP
+  `LEDADISCOVER` broadcast (also 4550).
 
 ## Hardware supported today
 

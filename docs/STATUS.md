@@ -69,7 +69,8 @@ a second Pico exists:
 
 ## Format sizing — key facts
 
-For the export-size work, the numbers that matter:
+The on-disk pattern format is [`file-format.md`](file-format.md) (LEDA v1). For
+the export-size work, the numbers that matter:
 - Raster size = `frames × LEDs × bytes-per-pixel`. The levers are **independent
   and multiply**: frame rate, per-pixel depth (RGB888→565→indexed-8), and
   splitting across N devices (divides the **spatial** dimension only — frame

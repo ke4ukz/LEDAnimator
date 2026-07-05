@@ -43,9 +43,15 @@ nc <device-ip> 4550
 PING
 ```
 
-**Discovery** on Wi‑Fi is a **UDP probe**: the app broadcasts `LEDADISCOVER` on
-port 4550 and listening devices reply with their identity. (BLE discovery is a
-normal scan filtered by the service UUID above.)
+**Discovery** on Wi‑Fi is a **UDP probe**: the app broadcasts `LEDADISCOVER` to
+the subnet on port 4550, and each device replies (UDP, to the sender) with:
+
+```
+LEDA <hostname> <name>
+```
+
+— its Wi‑Fi hostname and its user-visible device name. (BLE discovery is a normal
+scan filtered by the service UUID above.)
 
 The app prefers Wi‑Fi when a device is reachable there and falls back to BLE.
 
@@ -107,12 +113,61 @@ its own after a reboot.
 
 ## Reply model
 
-- Replies are text. Streamed responses (`LIST`, `WIFISCAN`, `MOREINFO`) arrive as
-  a paced series of lines rather than one blob.
-- `INFO` is both a reply to the `INFO` command *and* an unsolicited broadcast
-  whenever the device's control state changes, so every connected controller
-  stays in sync.
-- On BLE, replies are TX notifications; on Wi‑Fi, they're lines on the TCP socket.
+Replies are text lines. On BLE they're TX notifications; on Wi‑Fi they're lines
+on the TCP socket. Streamed responses are **paced** (~30 ms/line) so they don't
+outrun a BLE link, and are framed by a length header and an end marker.
+
+### `INFO` — the lean control state
+
+```
+INFO <mode> <bright%> <speed%> <r> <g> <b> <file...>
+```
+
+The filename is last so a name with spaces survives. `INFO` is both the reply to
+the `INFO` command *and* an **unsolicited broadcast** whenever the device's state
+changes — so every connected controller stays in sync. Live setter acks like
+`BRIGHT <n>` and `SPEED <n>` are likewise echoed to all clients (debounced).
+
+### `LIST` — pattern files
+
+```
+LISTLEN <count>          # reset the list; count follows
+FILE <name>              # one per pattern (repeated)
+...
+ENDLIST                  # done
+```
+
+### `WIFISCAN` — nearby networks
+
+```
+WIFISCANLEN <count>
+WIFINET <rssi> <ssid>    # rssi in dBm; ssid last so spaces survive (repeated)
+...
+WIFISCANEND
+```
+
+### `MOREINFO` — device details
+
+A set of discrete, self-describing `KEY <value>` lines (order-independent; the
+app ignores keys it doesn't recognize), e.g. `VERSION`, `LEDS`, `FREE`,
+`WIFIMAC`, `BTMAC`, `HOSTNAME`, `PLATFORM`, `PIN`, `POWER`.
+
+## Uploading a pattern (Wi‑Fi)
+
+Bulk binary upload is **TCP-only** (it doesn't fit BLE's small writes). It's a
+handshake around a raw byte stream of a [`.leda` file](file-format.md):
+
+```
+→  UPLOAD <length> <name>      # client announces size + target filename
+←  OK UPLOAD                   # device ready (or  ERR args|name|size|open)
+→  <length raw bytes>          # the client streams exactly <length> bytes
+←  OK UPLOADED                 # device verified the LEDA magic + saved it
+                               #   (or  ERR badfile  and the upload is discarded)
+```
+
+Playback pauses during the transfer and resumes afterward. The device validates
+the [`LEDA` magic](file-format.md#header-16-bytes) before accepting the file, and
+overwrites a same-named pattern.
 
 ## Notes for future transports
 
