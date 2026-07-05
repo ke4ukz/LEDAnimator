@@ -7,6 +7,38 @@ const clamp = (x: number, lo: number, hi: number) => (x < lo ? lo : x > hi ? hi 
 const frac = (x: number) => x - Math.floor(x)
 const DEG = Math.PI / 180
 
+// How close (in normalized preview units) a click must be to a poly segment to
+// insert a point on it rather than appending a new one at the end.
+const POLY_INSERT_DIST = 0.06
+
+/** The nearest segment insertion for a click at (u,v): the projected point on
+ *  the closest edge and the index it should be spliced in at, or null if the
+ *  click isn't near any edge. */
+function nearestSegmentInsert(
+  pts: { x: number; y: number }[],
+  closed: boolean,
+  u: number,
+  v: number,
+): { index: number; x: number; y: number } | null {
+  const n = pts.length
+  if (n < 2) return null
+  let best: { d: number; index: number; x: number; y: number } | null = null
+  const segs = closed ? n : n - 1
+  for (let i = 0; i < segs; i++) {
+    const a = pts[i]
+    const b = pts[(i + 1) % n]
+    const dx = b.x - a.x
+    const dy = b.y - a.y
+    const len2 = dx * dx + dy * dy
+    const t = len2 > 0 ? clamp01(((u - a.x) * dx + (v - a.y) * dy) / len2) : 0
+    const px = a.x + dx * t
+    const py = a.y + dy * t
+    const d = Math.hypot(u - px, v - py)
+    if (!best || d < best.d) best = { d, index: i + 1, x: px, y: py }
+  }
+  return best && best.d <= POLY_INSERT_DIST ? { index: best.index, x: best.x, y: best.y } : null
+}
+
 interface Handle {
   id: string
   u: number
@@ -167,10 +199,15 @@ export function PathOverlay({ track }: { track: Track }) {
       ref={ref}
       className="path-overlay"
       onPointerDown={(e) => {
-        // Clicking empty preview space (not a handle) drops a new poly point.
+        // Clicking empty preview space (not a handle) adds a poly point: on the
+        // line if the click lands near a segment, else appended at the end.
         if (path.type !== 'poly' || e.target !== ref.current) return
         const { u, v } = fromEvent(e)
-        setPath({ ...path, pts: [...path.pts, { x: u, y: v }] })
+        const ins = nearestSegmentInsert(path.pts, path.closed, u, v)
+        const pts = [...path.pts]
+        if (ins) pts.splice(ins.index, 0, { x: ins.x, y: ins.y })
+        else pts.push({ x: u, y: v })
+        setPath({ ...path, pts })
       }}
       onPointerMove={onMove}
       onPointerUp={() => (drag.current = null)}
