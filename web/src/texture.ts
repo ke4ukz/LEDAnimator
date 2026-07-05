@@ -39,18 +39,34 @@ export function setTextureReadyListener(fn: () => void) {
   readyListener = fn
 }
 
-/** Kick off a one-time async decode of an image data URL into a square RGB grid. */
+// Largest square an image decodes into. Images are just pixels (no CPU eval like
+// a gradient), so they can be far bigger than SOURCE_TEXTURE_RES — this only
+// caps memory for huge photos. 2048² is effectively lossless for the preview and
+// loupe while staying ~12 MB.
+const IMAGE_MAX = 2048
+
+/** Kick off a one-time async decode of an image data URL. The image keeps its
+ *  aspect ratio (letterboxed into a square at close to native resolution) rather
+ *  than being squished into a fixed grid. */
 function decodeImage(url: string) {
   if (rawImageCache.has(url)) return // decoding or already done
   rawImageCache.set(url, null)
   const img = new Image()
   img.onload = () => {
-    const res = SOURCE_TEXTURE_RES
+    // Square texture sized to the image's longest edge (capped). Small images
+    // aren't upscaled; large ones are limited to IMAGE_MAX.
+    const res = Math.max(1, Math.min(IMAGE_MAX, Math.max(img.width, img.height)))
+    const scale = res / Math.max(img.width, img.height)
+    const dw = img.width * scale
+    const dh = img.height * scale
     const canvas = document.createElement('canvas')
     canvas.width = res
     canvas.height = res
     const ctx = canvas.getContext('2d')!
-    ctx.drawImage(img, 0, 0, res, res) // stretch to the square source space
+    ctx.imageSmoothingEnabled = true
+    ctx.imageSmoothingQuality = 'high'
+    // Centered, aspect-preserved; the surrounding letterbox stays black.
+    ctx.drawImage(img, (res - dw) / 2, (res - dh) / 2, dw, dh)
     const px = ctx.getImageData(0, 0, res, res).data
     const data = new Uint8ClampedArray(res * res * 3)
     for (let p = 0, q = 0; q < px.length; p += 3, q += 4) {
