@@ -34,20 +34,26 @@ export function PathOverlay({ track }: { track: Track }) {
 
   // Where each in-chain member LED samples the path at the current frame — dim
   // "ghost" dots showing the chase spread. Shared animation indices overlap.
-  const samplePts: [number, number][] = []
+  // The LED first in the animation series (lowest animation index) is marked
+  // distinctly so you can tell which one leads.
+  const samplePts: { x: number; y: number; first: boolean }[] = []
   if (showSamples && numFrames > 0) {
     const t = frame / numFrames
     const phase = trackPhaseAt(track, frame, numFrames)
     const offset = trackParamAt(track, 'offset', t)
     const chase = trackParamAt(track, 'chase', t)
+    const rows: { idx: number; x: number; y: number }[] = []
     let rank = 0
+    let minIdx = Infinity
     assignments.forEach((id, i) => {
       if (id !== track.id || leds[i]?.unassigned) return
       const idx = leds[i]?.animIndex ?? rank
       rank++
       const [u, v] = pathPoint(path, frac(offset + idx * chase + phase))
-      samplePts.push([u * 100, v * 100])
+      rows.push({ idx, x: u * 100, y: v * 100 })
+      if (idx < minIdx) minIdx = idx
     })
+    for (const r of rows) samplePts.push({ x: r.x, y: r.y, first: r.idx === minIdx })
   }
 
   const setPath = (p: PathDef) => updateTrack(track.id, { path: p })
@@ -156,7 +162,7 @@ export function PathOverlay({ track }: { track: Track }) {
         <polyline points={curve} className="path-curve" />
         <polygon points={arrow} className="path-arrow" />
         {samplePts.map((p, i) => (
-          <circle key={i} cx={p[0]} cy={p[1]} r={2} className="path-sample" />
+          <circle key={i} cx={p.x} cy={p.y} r={p.first ? 2.8 : 2} className={p.first ? 'path-sample first' : 'path-sample'} />
         ))}
       </svg>
       {handles.map((h) => (

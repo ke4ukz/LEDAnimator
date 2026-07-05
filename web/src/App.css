@@ -1230,15 +1230,15 @@ input[type='color'] {
   pointer-events: none;
 }
 
-/* The start ("primary") node — bigger, green, with a glow + a white ring so
-   it clearly reads as where the path begins. */
+/* The lead sample (lowest animation index) — brighter, with a white ring. */
+.path-sample.first {
+  opacity: 1;
+  stroke: #fff;
+  stroke-width: 0.7;
+}
+
 .path-handle.start {
-  width: 18px;
-  height: 18px;
   background: #7bd06a;
-  border: 3px solid #fff;
-  box-shadow: 0 0 0 1px #000, 0 0 8px 1px rgba(123, 208, 106, 0.85);
-  z-index: 1;
 }
 
 /* Timeline lanes */
