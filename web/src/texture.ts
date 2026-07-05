@@ -28,9 +28,15 @@ const canvasCache = new WeakMap<object, HTMLCanvasElement>()
 // cached, so the next call after decode produces the real texture.
 const PLACEHOLDER: SourceTexture = { res: 1, data: new Uint8ClampedArray([0, 0, 0]) }
 
+interface RawImage {
+  res: number
+  /** Straight (non-premultiplied) RGBA at native-ish resolution. */
+  rgba: Uint8ClampedArray
+}
+
 // Raw decoded image pixels keyed by data URL (decoded once, shared across
-// sources and post edits). `null` means a decode is in flight.
-const rawImageCache = new Map<string, SourceTexture | null>()
+// sources / bg / post edits). `null` means a decode is in flight.
+const rawImageCache = new Map<string, RawImage | null>()
 
 let readyListener: (() => void) | null = null
 /** Register a callback fired when an async image decode finishes, so the app can
@@ -67,49 +73,46 @@ function decodeImage(url: string) {
     const ctx = canvas.getContext('2d')!
     ctx.imageSmoothingEnabled = true
     ctx.imageSmoothingQuality = 'high'
-    // Flatten transparency over white (matching how the image looks in a normal
-    // viewer): drawing an image with alpha onto a transparent canvas makes
-    // getImageData return black for transparent pixels (premultiplied alpha
-    // loses their color). Letterbox around a non-square image stays black.
-    ctx.fillStyle = '#000'
-    ctx.fillRect(0, 0, res, res)
-    ctx.fillStyle = '#fff'
-    ctx.fillRect(ox, oy, dw, dh)
     ctx.drawImage(img, ox, oy, dw, dh)
-    const px = ctx.getImageData(0, 0, res, res).data
-    const data = new Uint8ClampedArray(res * res * 3)
-    for (let p = 0, q = 0; q < px.length; p += 3, q += 4) {
-      data[p] = px[q]
-      data[p + 1] = px[q + 1]
-      data[p + 2] = px[q + 2]
-    }
-    rawImageCache.set(url, { res, data })
+    // Keep the straight RGBA (getImageData is non-premultiplied). Fully
+    // transparent pixels come back with RGB 0, but that's fine: the flatten
+    // step weights them by alpha=0, so their lost color never contributes.
+    const rgba = ctx.getImageData(0, 0, res, res).data
+    rawImageCache.set(url, { res, rgba: new Uint8ClampedArray(rgba) })
     readyListener?.()
   }
   img.onerror = () => {
-    rawImageCache.set(url, PLACEHOLDER) // couldn't decode → stays black
+    rawImageCache.set(url, { res: 1, rgba: new Uint8ClampedArray([0, 0, 0, 255]) }) // give up → black
     readyListener?.()
   }
   img.src = url
 }
 
-/** An image source's texture: the decoded pixels with post-processing applied.
- *  Returns the placeholder (and starts a decode) until the pixels are ready. */
+/** An image source's texture: the decoded pixels flattened over the chosen
+ *  background (so transparency composites like a viewer shows it) with
+ *  post-processing applied. Returns the placeholder (and starts a decode) until
+ *  the pixels are ready. */
 function imageTexture(source: ImageSource): SourceTexture {
   const raw = rawImageCache.get(source.image)
   if (raw === undefined) {
     decodeImage(source.image)
     return PLACEHOLDER
   }
-  if (raw === null || raw === PLACEHOLDER) return PLACEHOLDER
-  if (!source.post) return raw // no adjustments → share the raw grid
-  const { res, data: src } = raw
-  const data = new Uint8ClampedArray(src.length)
-  for (let i = 0; i < src.length; i += 3) {
-    const [r, g, b] = applyPost([src[i], src[i + 1], src[i + 2]], source.post)
-    data[i] = r
-    data[i + 1] = g
-    data[i + 2] = b
+  if (raw === null) return PLACEHOLDER
+  const { res, rgba } = raw
+  const bg = source.bg === 'black' ? 0 : 255
+  const post = source.post
+  const data = new Uint8ClampedArray(res * res * 3)
+  for (let p = 0, q = 0; q < rgba.length; p += 3, q += 4) {
+    const a = rgba[q + 3] / 255
+    const inv = (1 - a) * bg
+    let r = rgba[q] * a + inv
+    let g = rgba[q + 1] * a + inv
+    let b = rgba[q + 2] * a + inv
+    if (post) [r, g, b] = applyPost([r, g, b], post)
+    data[p] = r
+    data[p + 1] = g
+    data[p + 2] = b
   }
   return { res, data }
 }

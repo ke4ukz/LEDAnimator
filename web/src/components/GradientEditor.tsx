@@ -53,6 +53,7 @@ export function GradientEditor({ place = 'panel' }: { place?: 'panel' | 'focus' 
   const selectedTrack = useStore((s) => s.selectedTrack)
   const setGradient = useStore((s) => s.updateGradient)
   const setSourceGradient = useStore((s) => s.setSourceGradient)
+  const setImageBg = useStore((s) => s.setImageBg)
   const updatePost = useStore((s) => s.updatePost)
   const updateTrack = useStore((s) => s.updateTrack)
   const focusGradient = useStore((s) => s.focusGradient)
@@ -290,7 +291,13 @@ export function GradientEditor({ place = 'panel' }: { place?: 'panel' | 'focus' 
             <ImagePicker label="Replace…" />
             <button className="btn" onClick={setSourceGradient}>To gradient</button>
           </Row>
-          <span className="muted">Stretched to fill the square source texture; the path samples it.</span>
+          <Row label="Transparency">
+            <select value={source.kind === 'image' ? source.bg ?? 'white' : 'white'} onChange={(e) => setImageBg(e.target.value as 'white' | 'black')}>
+              <option value="white">Flatten over white</option>
+              <option value="black">Flatten over black (off)</option>
+            </select>
+          </Row>
+          <span className="muted">Keeps its aspect ratio; the path samples it.</span>
         </>
       )}
 

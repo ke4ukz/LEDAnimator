@@ -31,6 +31,9 @@ export interface ImageSource {
   name: string
   kind: 'image'
   image: string
+  /** Background the image's transparency is flattened over (default white, as a
+   *  viewer shows it; black effectively makes transparent areas "off"). */
+  bg?: 'white' | 'black'
   post?: PostFx
 }
 

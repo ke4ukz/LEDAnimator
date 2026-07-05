@@ -72,6 +72,8 @@ interface AppState {
   updatePost: (patch: Partial<PostFx>) => void
   /** Turn the selected track's source into an image (from a data URL). */
   setSourceImage: (image: string, name?: string) => void
+  /** Choose the background an image source's transparency flattens over. */
+  setImageBg: (bg: 'white' | 'black') => void
   /** Turn the selected track's source back into a (default) gradient. */
   setSourceGradient: () => void
   addTrack: () => void
@@ -302,8 +304,18 @@ export const useStore = create<AppState>((set, get) => {
       if (!track) return
       const sources = project.sources.map((s): Source =>
         s.id === track.sourceId
-          ? { id: s.id, name: name ?? s.name, kind: 'image', image, post: s.post }
+          ? { id: s.id, name: name ?? s.name, kind: 'image', image, bg: 'white', post: s.post }
           : s,
+      )
+      commit({ ...project, sources })
+    },
+
+    setImageBg: (bg) => {
+      const { project, selectedTrack } = get()
+      const track = project.tracks.find((t) => t.id === selectedTrack)
+      if (!track) return
+      const sources = project.sources.map((s): Source =>
+        s.id === track.sourceId && s.kind === 'image' ? { ...s, bg } : s,
       )
       commit({ ...project, sources })
     },
