@@ -5,6 +5,7 @@ import { GradientEditor } from './components/GradientEditor'
 import { TrackInspector } from './components/TrackInspector'
 import { ArrangementDialog } from './components/ArrangementDialog'
 import { ViewportToolbar } from './components/ViewportToolbar'
+import { TexturePreview } from './components/TexturePreview'
 import { LedList } from './components/LedList'
 import { Inspector } from './components/Inspector'
 import { Timeline } from './components/Timeline'
@@ -47,6 +48,7 @@ export default function App() {
   const dirty = useStore((s) => s.dirty)
   const saveProject = useStore((s) => s.saveProject)
   const saveProjectAs = useStore((s) => s.saveProjectAs)
+  const focusGradient = useStore((s) => s.focusGradient)
   const fileRef = useRef<HTMLInputElement>(null)
 
   // Confirm before throwing away unsaved edits (no undo).
@@ -225,8 +227,16 @@ export default function App() {
       </aside>
 
       <main className="viewport">
-        <ViewportToolbar />
-        <Viewport />
+        {focusGradient ? (
+          <div className="gradient-stage">
+            <TexturePreview large />
+          </div>
+        ) : (
+          <>
+            <ViewportToolbar />
+            <Viewport />
+          </>
+        )}
       </main>
 
       <aside className="inspector">

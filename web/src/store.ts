@@ -58,6 +58,9 @@ interface AppState {
   showLabels: boolean
   /** Show a dim ghost marker on the path where each LED currently samples. */
   showSamples: boolean
+  /** When true, the gradient texture is the big center editor and the 3D view
+   *  is a small preview (for precise node/handle placement). */
+  focusGradient: boolean
 
   // Track / source editing (all re-bake the raster).
   updateGradient: (g: Gradient) => void
@@ -93,6 +96,7 @@ interface AppState {
   setLedShape: (s: 'sphere' | 'cube') => void
   setShowLabels: (b: boolean) => void
   setShowSamples: (b: boolean) => void
+  toggleFocusGradient: () => void
 
   selectTrack: (id: string | null) => void
   /** replace = set to [i]; toggle = add/remove i; range = i…anchor inclusive. */
@@ -264,6 +268,7 @@ export const useStore = create<AppState>((set, get) => {
     ledShape: init.ledShape,
     showLabels: init.showLabels,
     showSamples: false,
+    focusGradient: false,
 
     updateGradient: (g) => {
       const { project, selectedTrack } = get()
@@ -487,6 +492,7 @@ export const useStore = create<AppState>((set, get) => {
     setLedShape: (s) => set({ ledShape: s }),
     setShowLabels: (b) => set({ showLabels: b }),
     setShowSamples: (b) => set({ showSamples: b }),
+    toggleFocusGradient: () => set((s) => ({ focusGradient: !s.focusGradient })),
 
     selectTrack: (id) => set({ selectedTrack: id }),
     selectLed: (i, mode = 'replace') =>
