@@ -30,22 +30,32 @@ export function instantiateGradient(spec: GradientSpec): Gradient {
   return spec as Gradient
 }
 
-// A perceptually-uniform rainbow: 12 stops at EVEN positions, each color at an
-// even OKLCH hue step with CONSTANT lightness + chroma. Uniform hue rate AND
-// uniform brightness → every band is the same visual width (a conic reads
-// evenly). The cost is muted/pastel colors — constant chroma can't reach the
-// vivid sRGB primaries. Starts at red (OKLCH hue ≈ 29°). Interpolated in OKLCH.
-const RAINBOW: StopSpec[] = (() => {
-  const L = 0.72
-  const C = 0.115
-  const H0 = 29 // red
-  const hues = Array.from({ length: 12 }, (_, i) => oklchToRgb(L, C, H0 + i * 30))
-  return [...hues.map((color, i) => ({ pos: i / 12, color })), { pos: 1, color: hues[0] }]
-})()
+// Three rainbows trading vividness against even band widths. This tradeoff is
+// unavoidable: a perceptually-even rainbow needs constant lightness + chroma,
+// but the sRGB gamut caps constant chroma at ~0.11 (green/yellow can't go more
+// saturated), so "even" is inherently muted. All use 12 hues at even positions.
+const evenStops = (colors: RGB[]): StopSpec[] => [
+  ...colors.map((color, i) => ({ pos: i / colors.length, color })),
+  { pos: 1, color: colors[0] },
+]
+// Even OKLCH hue steps at constant lightness/chroma, starting at red (~29°).
+const uniformHues = (L: number, C: number): RGB[] =>
+  Array.from({ length: 12 }, (_, i) => oklchToRgb(L, C, 29 + i * 30))
+
+// Vivid: the saturated hue wheel (all 12 named colors). Bright, but bands read
+// unevenly (green/blue look wider). Best with RGB interp (stays on cube edges).
+const RAINBOW_VIVID: RGB[] = [
+  [255, 0, 0], [255, 128, 0], [255, 255, 0], [128, 255, 0], [0, 255, 0], [0, 255, 128],
+  [0, 255, 255], [0, 128, 255], [0, 0, 255], [128, 0, 255], [255, 0, 255], [255, 0, 128],
+]
+// Even: constant lightness/chroma → equal band widths, but muted/pastel.
+const RAINBOW_EVEN = uniformHues(0.72, 0.115)
+// Middle: pushed chroma (some hues clip/desaturate), so more vivid, mostly even.
+const RAINBOW_BRIGHT = uniformHues(0.66, 0.17)
 
 // The startup gradient, defined independently of PRESETS so editing/removing
-// presets can never change (or break) the app's default.
-const DEFAULT_SPEC: GradientSpec = { type: 'linear', angle: 0, interp: 'oklch', stops: RAINBOW }
+// presets can never change (or break) the app's default. Vivid by default.
+const DEFAULT_SPEC: GradientSpec = { type: 'linear', angle: 0, interp: 'rgb', stops: evenStops(RAINBOW_VIVID) }
 
 export const PRESETS: Preset[] = [
   {
@@ -74,8 +84,16 @@ export const PRESETS: Preset[] = [
     gradient: DEFAULT_SPEC,
   },
   {
-    name: 'Conic rainbow',
-    gradient: { type: 'conic', cx: 0.5, cy: 0.5, angle: 0, interp: 'oklch', stops: RAINBOW },
+    name: 'Conic rainbow (vivid)',
+    gradient: { type: 'conic', cx: 0.5, cy: 0.5, angle: 0, interp: 'rgb', stops: evenStops(RAINBOW_VIVID) },
+  },
+  {
+    name: 'Conic rainbow (even)',
+    gradient: { type: 'conic', cx: 0.5, cy: 0.5, angle: 0, interp: 'oklch', stops: evenStops(RAINBOW_EVEN) },
+  },
+  {
+    name: 'Conic rainbow (bright)',
+    gradient: { type: 'conic', cx: 0.5, cy: 0.5, angle: 0, interp: 'oklch', stops: evenStops(RAINBOW_BRIGHT) },
   },
   {
     name: 'Sunset',
