@@ -15,22 +15,21 @@ struct DeviceListView: View {
     let ble: BLEController
     let wifi: TCPController
     let discovery: WiFiDiscovery
+    @AppStorage("deviceTiles") private var tiles = false
 
     var body: some View {
         content
-            .navigationTitle("Devices")
-            #if os(macOS)
+            .navigationTitle("LED Animator")
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
                     Button {
-                        ble.startScan()
-                        discovery.scan()
+                        tiles.toggle()
                     } label: {
-                        Image(systemName: "arrow.clockwise")
+                        Image(systemName: tiles ? "list.bullet" : "square.grid.2x2")
                     }
+                    .help(tiles ? "Show as a list" : "Show as tiles")
                 }
             }
-            #endif
             .navigationDestination(isPresented: connectedBinding) {
                 if let session = activeSession {
                     ControlView(session: session)
@@ -53,14 +52,16 @@ struct DeviceListView: View {
             }
     }
 
+    @ViewBuilder
     private var content: some View {
+        if tiles { tileGrid } else { deviceList }
+    }
+
+    private var deviceList: some View {
         List {
             Section {
                 if unifiedDevices.isEmpty {
-                    HStack(spacing: 12) {
-                        ProgressView()
-                        Text("Searching…").foregroundStyle(.secondary)
-                    }
+                    searching
                 } else {
                     ForEach(unifiedDevices) { device in
                         Button {
@@ -80,6 +81,39 @@ struct DeviceListView: View {
             }
         }
         .refreshable { ble.startScan(); discovery.scan() }
+    }
+
+    private var tileGrid: some View {
+        ScrollView {
+            if unifiedDevices.isEmpty {
+                searching.frame(maxWidth: .infinity).padding(.top, 48)
+            } else {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 12)], spacing: 12) {
+                    ForEach(unifiedDevices) { device in
+                        Button {
+                            connect(device)
+                        } label: {
+                            DeviceTile(device: device, connecting: connecting(device))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding()
+            }
+            if !ble.bluetoothOn {
+                Text("Bluetooth is off — only Wi-Fi devices will appear.")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .padding(.horizontal).padding(.bottom)
+            }
+        }
+        .refreshable { ble.startScan(); discovery.scan() }
+    }
+
+    private var searching: some View {
+        HStack(spacing: 12) {
+            ProgressView()
+            Text("Searching…").foregroundStyle(.secondary)
+        }
     }
 
     private var unifiedDevices: [UnifiedDevice] {
@@ -123,6 +157,40 @@ struct DeviceListView: View {
         if case let .failed(message) = ble.connectionState { message }
         else if case let .failed(message) = wifi.connectionState { message }
         else { "" }
+    }
+}
+
+/// A device as a card, for the tiles layout.
+private struct DeviceTile: View {
+    let device: UnifiedDevice
+    let connecting: Bool
+
+    var body: some View {
+        VStack(spacing: 6) {
+            Image(systemName: "lightbulb.fill")
+                .font(.system(size: 32))
+                .foregroundStyle(.tint)
+            Text(device.name)
+                .font(.callout)
+                .lineLimit(1)
+                .multilineTextAlignment(.center)
+            Text(device.wifi?.host ?? "Bluetooth")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            if connecting {
+                ProgressView().controlSize(.small)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 14)
+        .padding(.horizontal, 8)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
+        .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(.secondary.opacity(0.25)))
+        .overlay(alignment: .topTrailing) {
+            if device.isBTOnly {
+                BluetoothBadge().padding(7)
+            }
+        }
     }
 }
 #endif
