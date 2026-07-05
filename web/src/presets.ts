@@ -29,20 +29,23 @@ export function instantiateGradient(spec: GradientSpec): Gradient {
   return spec as Gradient
 }
 
-// Red → ... → red, smooth in HSL hue space. Shared by the rainbow presets.
+// Red → … → red. The six sRGB primaries, but positioned by their OKLCH hue
+// angle (not evenly) and interpolated in OKLCH, so the hue sweeps at a constant
+// perceptual rate — a visually uniform rainbow (e.g. as a conic). Evenly-spaced
+// positions look lopsided because these colors' hues aren't evenly distributed.
 const RAINBOW: StopSpec[] = [
-  { pos: 0, color: [255, 0, 0] },
-  { pos: 1 / 6, color: [255, 255, 0] },
-  { pos: 2 / 6, color: [0, 255, 0] },
-  { pos: 3 / 6, color: [0, 255, 255] },
-  { pos: 4 / 6, color: [0, 0, 255] },
-  { pos: 5 / 6, color: [255, 0, 255] },
-  { pos: 1, color: [255, 0, 0] },
+  { pos: 0, color: [255, 0, 0] }, //   red     OKLCH ~29°
+  { pos: 0.224, color: [255, 255, 0] }, // yellow  ~110°
+  { pos: 0.315, color: [0, 255, 0] }, //   green   ~143°
+  { pos: 0.46, color: [0, 255, 255] }, //  cyan    ~195°
+  { pos: 0.652, color: [0, 0, 255] }, //   blue    ~264°
+  { pos: 0.831, color: [255, 0, 255] }, // magenta ~328°
+  { pos: 1, color: [255, 0, 0] }, //   red (wrap)
 ]
 
 // The startup gradient, defined independently of PRESETS so editing/removing
 // presets can never change (or break) the app's default.
-const DEFAULT_SPEC: GradientSpec = { type: 'linear', angle: 0, interp: 'hsl', stops: RAINBOW }
+const DEFAULT_SPEC: GradientSpec = { type: 'linear', angle: 0, interp: 'oklch', stops: RAINBOW }
 
 export const PRESETS: Preset[] = [
   {
@@ -72,7 +75,7 @@ export const PRESETS: Preset[] = [
   },
   {
     name: 'Conic rainbow',
-    gradient: { type: 'conic', cx: 0.5, cy: 0.5, angle: 0, interp: 'hsl', stops: RAINBOW },
+    gradient: { type: 'conic', cx: 0.5, cy: 0.5, angle: 0, interp: 'oklch', stops: RAINBOW },
   },
   {
     name: 'Sunset',
