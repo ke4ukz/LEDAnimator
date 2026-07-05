@@ -11,7 +11,6 @@ import {
 import type { PathDef } from '../project'
 import { PRESETS, instantiateGradient } from '../presets'
 import { TexturePreview } from './TexturePreview'
-import { Viewport } from './Viewport'
 import { RampEditor } from './RampEditor'
 
 const DEG = 180 / Math.PI
@@ -68,13 +67,7 @@ export function GradientEditor() {
 
   return (
     <div className="grad-editor">
-      {/* Focused: the big gradient editor is in the center; show a small 3D
-          preview here instead. Otherwise show the texture preview here. */}
-      {focusGradient ? (
-        <div className="mini-viewport"><Viewport /></div>
-      ) : (
-        <TexturePreview />
-      )}
+      <TexturePreview large={focusGradient} />
       <span className="muted preview-hint">Drag the handles to edit this track's sampling path.</span>
 
       <Row label="Path">

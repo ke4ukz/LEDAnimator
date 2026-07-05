@@ -140,15 +140,12 @@ export function PathOverlay({ track }: { track: Track }) {
   })
   const curve = pts.map((p) => `${p[0]},${p[1]}`).join(' ')
 
-  // Arrowhead at the end of the path, pointing along its direction.
+  // Arrowhead direction at the path end. Rendered as a fixed-size DOM element
+  // (like the handles), not an SVG polygon, so it doesn't balloon when the
+  // preview is enlarged.
   const a1 = pts[pts.length - 2]
   const a2 = pts[pts.length - 1]
-  const dlen = Math.hypot(a2[0] - a1[0], a2[1] - a1[1]) || 1
-  const ux = (a2[0] - a1[0]) / dlen
-  const uy = (a2[1] - a1[1]) / dlen
-  const bx = a2[0] - ux * 5
-  const by = a2[1] - uy * 5
-  const arrow = `${a2[0]},${a2[1]} ${bx - uy * 3},${by + ux * 3} ${bx + uy * 3},${by - ux * 3}`
+  const arrowDeg = (Math.atan2(a2[1] - a1[1], a2[0] - a1[0]) * 180) / Math.PI
 
   return (
     <div
@@ -158,9 +155,12 @@ export function PathOverlay({ track }: { track: Track }) {
       onPointerUp={() => (drag.current = null)}
       onPointerLeave={() => (drag.current = null)}
     >
+      <div
+        className="path-arrow-el"
+        style={{ left: `${a2[0]}%`, top: `${a2[1]}%`, transform: `translate(-50%, -50%) rotate(${arrowDeg}deg)` }}
+      />
       <svg className="path-svg" viewBox="0 0 100 100" preserveAspectRatio="none">
         <polyline points={curve} className="path-curve" />
-        <polygon points={arrow} className="path-arrow" />
         {samplePts.map((p, i) => (
           <circle key={i} cx={p.x} cy={p.y} r={p.first ? 2.8 : 2} className={p.first ? 'path-sample first' : 'path-sample'} />
         ))}

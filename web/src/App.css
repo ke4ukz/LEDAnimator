@@ -752,18 +752,24 @@ label.vt-group {
   border-radius: 6px;
 }
 
-/* Focused gradient editor: a big square centered in the viewport area. */
+/* Focused gradient editor: the big texture + the editor controls below it,
+   centered in a scrollable column in the viewport area. */
 .gradient-stage {
   position: absolute;
   inset: 0;
+  overflow-y: auto;
   display: flex;
-  align-items: center;
   justify-content: center;
   padding: 16px;
 }
 
+.gradient-stage .grad-editor {
+  width: 100%;
+  max-width: 680px;
+}
+
 .preview-wrap.large {
-  height: 100%;
+  width: 100%;
   aspect-ratio: 1;
   max-width: 100%;
 }
@@ -1283,8 +1289,17 @@ input[type='color'] {
 }
 
 /* Path direction cues */
-.path-arrow {
-  fill: #fff;
+/* Fixed-size arrowhead at the path end (a CSS triangle, so it doesn't scale
+   with the preview). Points +x by default; rotated to the path direction. */
+.path-arrow-el {
+  position: absolute;
+  width: 0;
+  height: 0;
+  border-left: 9px solid #fff;
+  border-top: 6px solid transparent;
+  border-bottom: 6px solid transparent;
+  pointer-events: none;
+  filter: drop-shadow(0 0 1px rgba(0, 0, 0, 0.8));
 }
 
 /* Dim ghost markers showing where each LED samples the path (chase spread).

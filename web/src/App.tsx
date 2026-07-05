@@ -5,7 +5,6 @@ import { GradientEditor } from './components/GradientEditor'
 import { TrackInspector } from './components/TrackInspector'
 import { ArrangementDialog } from './components/ArrangementDialog'
 import { ViewportToolbar } from './components/ViewportToolbar'
-import { TexturePreview } from './components/TexturePreview'
 import { LedList } from './components/LedList'
 import { Inspector } from './components/Inspector'
 import { Timeline } from './components/Timeline'
@@ -218,9 +217,15 @@ export default function App() {
       {dragging && <div className="drop-overlay">Drop a project (.json or .zip) to import</div>}
 
       <aside className="sidebar">
-        <Panel title="Source · Path">
-          <GradientEditor />
-        </Panel>
+        {focusGradient ? (
+          <Panel title="3D preview">
+            <div className="mini-viewport"><Viewport /></div>
+          </Panel>
+        ) : (
+          <Panel title="Source · Path">
+            <GradientEditor />
+          </Panel>
+        )}
         <Panel title="Track">
           <TrackInspector />
         </Panel>
@@ -229,7 +234,7 @@ export default function App() {
       <main className="viewport">
         {focusGradient ? (
           <div className="gradient-stage">
-            <TexturePreview large />
+            <GradientEditor />
           </div>
         ) : (
           <>
