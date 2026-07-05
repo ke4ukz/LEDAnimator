@@ -11,10 +11,12 @@ export function ViewportToolbar() {
   const ledShape = useStore((s) => s.ledShape)
   const labelMode = useStore((s) => s.labelMode)
   const showSamples = useStore((s) => s.showSamples)
+  const moveTool = useStore((s) => s.moveTool)
   const setLedScale = useStore((s) => s.setLedScale)
   const setLedShape = useStore((s) => s.setLedShape)
   const setLabelMode = useStore((s) => s.setLabelMode)
   const setShowSamples = useStore((s) => s.setShowSamples)
+  const setMoveTool = useStore((s) => s.setMoveTool)
 
   return (
     <div className="viewport-toolbar">
@@ -49,6 +51,10 @@ export function ViewportToolbar() {
       <label className="vt-group">
         <input type="checkbox" checked={showSamples} onChange={(e) => setShowSamples(e.target.checked)} />
         <span className="muted">Sample markers</span>
+      </label>
+      <label className="vt-group" title="Show a drag handle on the selected LEDs to move them along X/Y/Z.">
+        <input type="checkbox" checked={moveTool} onChange={(e) => setMoveTool(e.target.checked)} />
+        <span className="muted">Move tool</span>
       </label>
     </div>
   )

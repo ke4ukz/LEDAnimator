@@ -1,7 +1,7 @@
-import { useLayoutEffect, useRef } from 'react'
+import { useLayoutEffect, useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
-import { Html } from '@react-three/drei'
-import { Color, type InstancedMesh, Object3D, SRGBColorSpace } from 'three'
+import { Html, TransformControls } from '@react-three/drei'
+import { Color, type InstancedMesh, Object3D, SRGBColorSpace, Vector3 } from 'three'
 import { useStore } from '../store'
 import { sampleRaster } from '../types'
 
@@ -173,6 +173,66 @@ export function LedLabels() {
           </Html>
         )
       })}
+    </>
+  )
+}
+
+/**
+ * A three-axis translate gizmo on the current selection. Because the LEDs are a
+ * single InstancedMesh (a gizmo can't attach to one instance), it drives an
+ * invisible proxy Object3D parked at the selection's centroid, and applies the
+ * proxy's drag delta to every selected LED via `offsetLeds` (no re-bake).
+ * Only rendered when the Move tool is on and something is selected.
+ */
+export function MoveGizmo() {
+  const selection = useStore((s) => s.selection)
+  const leds = useStore((s) => s.leds)
+  const offsetLeds = useStore((s) => s.offsetLeds)
+  const proxy = useMemo(() => new Object3D(), [])
+  const dragging = useRef(false)
+  const last = useRef(new Vector3())
+
+  const validSel = selection.filter((i) => leds[i])
+
+  // Park the gizmo at the selection's centroid when not mid-drag. During a drag,
+  // `leds` changes each tick but we hold position (the gizmo is being dragged).
+  // Layout effect so it's centered before paint (no one-frame flash at origin).
+  useLayoutEffect(() => {
+    if (dragging.current || validSel.length === 0) return
+    const c = new Vector3()
+    for (const i of validSel) c.add(new Vector3(leds[i].x, leds[i].y, leds[i].z))
+    proxy.position.copy(c.multiplyScalar(1 / validSel.length))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selection, leds, proxy])
+
+  if (validSel.length === 0) return null
+
+  return (
+    <>
+      <primitive object={proxy} />
+      <TransformControls
+        object={proxy}
+        mode="translate"
+        onMouseDown={() => {
+          dragging.current = true
+          last.current.copy(proxy.position)
+        }}
+        onMouseUp={() => {
+          dragging.current = false
+        }}
+        onObjectChange={() => {
+          if (!dragging.current) return
+          const p = proxy.position
+          const dx = p.x - last.current.x
+          const dy = p.y - last.current.y
+          const dz = p.z - last.current.z
+          if (dx || dy || dz) {
+            // Read the live selection so a stale closure can't misfire.
+            offsetLeds(useStore.getState().selection, { x: dx, y: dy, z: dz })
+            last.current.copy(p)
+          }
+        }}
+      />
     </>
   )
 }

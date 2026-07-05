@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react'
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { GizmoHelper, GizmoViewport, OrbitControls } from '@react-three/drei'
 import { Vector3 } from 'three'
-import { GhostLeds, LedLabels, Leds, SelectionMarker, UnassignedMarkers } from './Leds'
+import { GhostLeds, LedLabels, Leds, MoveGizmo, SelectionMarker, UnassignedMarkers } from './Leds'
 import { HOME_DISTANCE, goHome, viewportRefs } from '../viewportControls'
 import { useStore } from '../store'
 
@@ -68,6 +68,7 @@ function Rig() {
 /** The 3D simulation viewport: orbitable camera playing the baked animation. */
 export function Viewport() {
   const clearSelection = useStore((s) => s.clearSelection)
+  const moveTool = useStore((s) => s.moveTool)
   return (
     <>
       <Canvas
@@ -85,6 +86,7 @@ export function Viewport() {
         <UnassignedMarkers />
         <SelectionMarker />
         <LedLabels />
+        {moveTool && <MoveGizmo />}
         <OrbitControls makeDefault enableDamping />
         <GizmoHelper alignment="bottom-right" margin={[64, 64]}>
           <GizmoViewport axisColors={['#e0586b', '#7bd06a', '#5b8ff0']} labelColor="#cfd6e4" />

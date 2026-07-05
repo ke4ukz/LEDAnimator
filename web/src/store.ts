@@ -77,6 +77,8 @@ interface AppState {
   labelMode: LabelMode
   /** Show a dim ghost marker on the path where each LED currently samples. */
   showSamples: boolean
+  /** Show the 3D translate gizmo on the selection (drag LEDs along X/Y/Z). */
+  moveTool: boolean
   /** When true, the gradient texture is the big center editor and the 3D view
    *  is a small preview (for precise node/handle placement). */
   focusGradient: boolean
@@ -134,6 +136,7 @@ interface AppState {
   setLedShape: (s: 'sphere' | 'cube') => void
   setLabelMode: (mode: LabelMode) => void
   setShowSamples: (b: boolean) => void
+  setMoveTool: (v: boolean) => void
   toggleFocusGradient: () => void
 
   selectTrack: (id: string | null) => void
@@ -337,6 +340,7 @@ export const useStore = create<AppState>((set, get) => {
     ledShape: init.ledShape,
     labelMode: init.labelMode,
     showSamples: false,
+    moveTool: false,
     focusGradient: false,
     textureVersion: 0,
 
@@ -621,6 +625,7 @@ export const useStore = create<AppState>((set, get) => {
     setLedShape: (s) => set({ ledShape: s }),
     setLabelMode: (mode) => set({ labelMode: mode }),
     setShowSamples: (b) => set({ showSamples: b }),
+    setMoveTool: (v) => set({ moveTool: v }),
     toggleFocusGradient: () => set((s) => ({ focusGradient: !s.focusGradient })),
 
     selectTrack: (id) => set({ selectedTrack: id }),
