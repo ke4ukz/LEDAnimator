@@ -768,6 +768,19 @@ label.vt-group {
   max-width: 680px;
 }
 
+/* Focus layout: just the texture + the ramp, both as wide as the stage allows
+   so stop nodes have maximum room. The square texture is capped by viewport
+   height (else a full-width square would run off-screen) and centered. */
+.gradient-stage .grad-editor.focus {
+  max-width: 1000px;
+  gap: 14px;
+}
+
+.grad-editor.focus .preview-wrap.large {
+  max-width: min(100%, 58vh);
+  margin: 0 auto;
+}
+
 .preview-wrap.large {
   width: 100%;
   aspect-ratio: 1;

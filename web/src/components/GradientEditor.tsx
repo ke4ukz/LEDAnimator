@@ -65,6 +65,28 @@ export function GradientEditor() {
   // Spread-and-cast patch: the discriminated union keeps the active variant.
   const patch = (p: Partial<Gradient>) => setGradient({ ...gradient, ...p } as Gradient)
 
+  // Focus mode strips the editor down to just the two things worth placing
+  // precisely: the large square texture (with its sampling path) and the
+  // full-width ramp of stop nodes. Everything else stays in the normal panel.
+  if (focusGradient) {
+    return (
+      <div className="grad-editor focus">
+        <TexturePreview large />
+        <span className="muted preview-hint">Drag the path handles and the stop nodes below.</span>
+        {gradient.type === 'bilinear' ? (
+          <div className="corners">
+            <Corner label="TL" value={gradient.tl} onChange={(tl) => patch({ tl })} />
+            <Corner label="TR" value={gradient.tr} onChange={(tr) => patch({ tr })} />
+            <Corner label="BL" value={gradient.bl} onChange={(bl) => patch({ bl })} />
+            <Corner label="BR" value={gradient.br} onChange={(br) => patch({ br })} />
+          </div>
+        ) : (
+          <RampEditor stops={gradient.stops} interp={gradient.interp} onChange={(stops) => patch({ stops })} />
+        )}
+      </div>
+    )
+  }
+
   return (
     <div className="grad-editor">
       <TexturePreview large={focusGradient} />
