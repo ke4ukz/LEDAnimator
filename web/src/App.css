@@ -772,24 +772,25 @@ label.vt-group {
    so stop nodes have maximum room. The square texture is capped by viewport
    height (else a full-width square would run off-screen) and centered. */
 .gradient-stage .grad-editor.focus {
-  max-width: 1000px;
+  max-width: 1500px;
   gap: 14px;
 }
 
-/* Texture + magnifier sit side by side; the ramp spans full width below. */
+/* Texture + magnifier sit side by side; the ramp spans full width below. The
+   row never wraps — instead the texture shrinks to always leave room for the
+   236px magnifier column, so wide screens keep everything on one line (no
+   surprise vertical scroll) and narrow ones stay side by side. */
 .focus-main {
   display: flex;
   gap: 16px;
   justify-content: center;
   align-items: flex-start;
-  flex-wrap: wrap;
 }
 
 .grad-editor.focus .preview-wrap.large {
-  width: min(58vh, 100%);
-  max-width: 58vh;
+  width: min(58vh, calc(100% - 236px));
   margin: 0;
-  flex: 0 1 auto;
+  flex: 0 0 auto;
 }
 
 .focus-magnifier {
@@ -825,14 +826,16 @@ label.vt-group {
   text-align: center;
 }
 
-/* Crosshair marking the exact hovered pixel inside the loupe. */
-.mag-cross {
+/* A box framing the exact texel the loupe/export samples. Positioned by its
+   center and snapped to the pixel grid, with a floor size so it stays visible
+   at low zoom (where a single texel is sub-pixel). */
+.mag-pixel {
   position: absolute;
-  width: 14px;
-  height: 14px;
+  box-sizing: border-box;
+  min-width: 7px;
+  min-height: 7px;
   transform: translate(-50%, -50%);
   border: 1.5px solid #fff;
-  border-radius: 50%;
   box-shadow: 0 0 0 1px #000;
   pointer-events: none;
 }

@@ -19,14 +19,29 @@ export function GradientFocusView({ source, ramp }: { source: GradientSource; ra
   const [zoom, setZoom] = useState(4)
 
   const half = 0.5 / zoom
+  const span = 2 * half
   // Loupe window centered on the cursor, clamped so it never leaves the texture.
   const cu = hover ? clamp(hover.u, half, 1 - half) : 0.5
   const cv = hover ? clamp(hover.v, half, 1 - half) : 0.5
   const win = { u0: cu - half, v0: cv - half, u1: cu + half, v1: cv + half }
-  const crossX = hover ? ((hover.u - win.u0) / (2 * half)) * 100 : 50
-  const crossY = hover ? ((hover.v - win.v0) / (2 * half)) * 100 : 50
-  // Exactly the texel the export would read here.
-  const hex = hover ? rgbToHex(sampleNearest(getSourceTexture(source), hover.u, hover.v)) : ''
+
+  // The exact texel under the cursor: its color (= what the export reads) and a
+  // box framing it, snapped to the pixel grid so the marker jumps pixel-to-pixel
+  // instead of sliding smoothly across a hard color edge.
+  const tex = hover ? getSourceTexture(source) : null
+  let pixel: { cx: number; cy: number; size: number } | null = null
+  let hex = ''
+  if (hover && tex) {
+    const res = tex.res
+    const xi = Math.min(res - 1, Math.max(0, Math.floor(hover.u * res)))
+    const yi = Math.min(res - 1, Math.max(0, Math.floor(hover.v * res)))
+    pixel = {
+      cx: (((xi + 0.5) / res - win.u0) / span) * 100,
+      cy: (((yi + 0.5) / res - win.v0) / span) * 100,
+      size: (1 / res / span) * 100,
+    }
+    hex = rgbToHex(sampleNearest(tex, hover.u, hover.v))
+  }
 
   return (
     <div className="grad-editor focus">
@@ -35,14 +50,19 @@ export function GradientFocusView({ source, ramp }: { source: GradientSource; ra
         <div className="focus-magnifier">
           <div className="field-row">
             <span>Zoom</span>
-            <input type="range" min={2} max={16} step={1} value={zoom} onChange={(e) => setZoom(Number(e.target.value))} />
+            <input type="range" min={2} max={32} step={1} value={zoom} onChange={(e) => setZoom(Number(e.target.value))} />
             <span className="muted num">{zoom}×</span>
           </div>
           <div className="mag-view">
             {hover ? (
               <>
                 <TextureLoupe source={source} win={win} size={MAG} />
-                <div className="mag-cross" style={{ left: `${crossX}%`, top: `${crossY}%` }} />
+                {pixel && (
+                  <div
+                    className="mag-pixel"
+                    style={{ left: `${pixel.cx}%`, top: `${pixel.cy}%`, width: `${pixel.size}%`, height: `${pixel.size}%` }}
+                  />
+                )}
               </>
             ) : (
               <div className="mag-empty muted">Hover the texture</div>
