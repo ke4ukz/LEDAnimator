@@ -1328,101 +1328,38 @@ main()
 }
 
 export function rp2040Readme(pin: number, patternFile: string): string {
-  return `LED Animator - RP2040 / Pico W (MicroPython) export
+  return `LED Animator - WS2812 LED strip controller
+
+A baked animation for a WS2812 / NeoPixel strip, exported from LED Animator.
+
+Target device:
+  Raspberry Pi Pico or Pico W running MicroPython. The strip data line goes to
+  GP${pin} (change datapin.txt to use another pin); share GND and power the strip
+  from 5V. On a Pico W you can also control it over Bluetooth/Wi-Fi from the
+  LED Animator app.
 
 Files:
-  main.py         WS2812 player (PIO) + BLE control. No settings baked in.
+  main.py         The player - runs on boot, drives the strip, handles control.
   ${patternFile}
-                  The baked animation (LEDA v1).
-  datapin.txt     The GP pin the strip data line is wired to (GP${pin}).
+                  Your baked animation.
+  datapin.txt     GP pin the strip data line is wired to (GP${pin}).
   bright.txt      Startup brightness percent (0-100).
-  devicename.txt  BLE device name.
-  selected.txt    The pattern file to play on boot (${patternFile}).
-  state.txt       Playback mode + solid color, so play/solid/off survives a
-                  reboot. Written by the device at runtime (not in this export).
-  networks.txt    Wi-Fi credentials (SSID + password) once provisioned over BLE,
-                  so it re-joins on boot. Written at runtime (not in this export).
-  project.json    Editable project - re-import into LED Animator to keep editing.
-                  (App only; do NOT copy this to the board.)
+  devicename.txt  The device's Bluetooth name.
+  selected.txt    Which pattern file to play on boot (${patternFile}).
+  project.json    Your editable project - re-import into LED Animator to keep
+                  editing. Do NOT copy this one to the board.
 
-Install (Thonny or mpremote):
+Created on the device later (not in this download):
+  state.txt       Playback mode (playing / solid color / off) and the solid
+                  color, so it resumes where you left it after a reboot.
+  networks.txt    Wi-Fi network name and password, saved when you connect over
+                  Wi-Fi so it rejoins on boot. NOTE: the password is stored here
+                  in plain text - anyone with access to the board can read it.
+
+To install (with Thonny or mpremote):
   1. Flash MicroPython for RP2040 onto the Pico / Pico W.
   2. Copy every file except project.json to the board.
-  3. Reset - main.py runs on boot and loops the animation.
-
-Wiring:
-  Strip DIN -> GP${pin} (edit datapin.txt to change); GND common; 5V supply.
-
-Bluetooth control (Pico W only):
-  main.py advertises a custom LED Animator service (with UART-style
-  characteristics). An app finds our devices by filtering scans on the service
-  UUID below - the device name is user-settable, so it can't be the identifier.
-  Any BLE UART app (nRF Connect, LightBlue) can still connect and drive it.
-  Send one text command per write to the RX characteristic; replies come back
-  as notifications on TX.
-    Service      4C454441-0001-4000-8000-4C4544415254  (unique to LED Animator)
-    RX (write)   6E400002-B5A3-F393-E0A9-E50E24DCCA9E
-    TX (notify)  6E400003-B5A3-F393-E0A9-E50E24DCCA9E
-  Commands:
-    PING                 -> OK
-    INFO                 -> mode, brightness%, speed%, solid r g b, filename (last; may contain spaces)
-    MOREINFO             -> streams discrete labeled replies "KEY <value>" (VERSION, LEDS, FREE, WIFIMAC, BTMAC, HOSTNAME, PLATFORM, POWER), then ENDINFO. Fields with no hardware are omitted. All values are printable ASCII.
-    POWER                -> "POWER usb|batt|unknown <mv>" (VSYS millivolts; 0 = unavailable)
-    PIN [n]              -> no arg reports "PIN <n>"; "PIN <n>" re-points the strip output live + persists (OK PIN <n> / ERR pin)
-    VERSION              -> firmware version
-    PLATFORM             -> board/runtime (os.uname().machine)
-    LIST                 -> streams "LISTLEN <n>", one "FILE <name>" each, then ENDLIST
-    FREE                 -> free filesystem bytes
-    SELECT <name>        -> play a different pattern file (remembered on reboot)
-    BRIGHT <0-100>       -> master brightness percent (remembered on reboot)
-    SPEED <10-400>       -> playback speed percent (100 = as authored)
-    SOLID <r> <g> <b>    -> hold a solid color (0-255 each; remembered on reboot)
-    OFF                  -> blank the strip (mode "off"; remembered on reboot)
-    PLAY                 -> resume the selected pattern
-    DELETE <name>        -> remove a pattern file (not the active one)
-    UPLOAD <len> <name>  -> (TCP only) OK UPLOAD, then stream <len> bytes; OK UPLOADED <name>
-    NAME                 -> report the current advertised name
-    NAME <new name>      -> rename the device (saved to devicename.txt, survives reboot)
-    WIFISCAN             -> streams "WIFISCANLEN <n>", one "WIFINET <rssi> <ssid>" each, then WIFISCANEND
-    WIFISSID <ssid>      -> stash the network name for the next WIFICONNECT
-    WIFIPASS <password>  -> stash the password for the next WIFICONNECT
-    WIFICONNECT          -> join with the stashed credentials, save to networks.txt (auto-joins on boot)
-    WIFISTATUS           -> "WIFI <state> <detail>" (state = off/connecting/connected/failed; detail = IP or reason)
-    WIFIFORGET           -> clear networks.txt and disconnect
-  Wi-Fi status is also pushed unsolicited as "WIFI <state> <detail>" when a join
-  resolves. The advertised name defaults to what you set at export time; renaming
-  over BLE overrides it. On a plain Pico (no radio) the BLE/Wi-Fi halves are
-  skipped and playback still runs.
-
-Wi-Fi control (Pico W, once provisioned):
-  The SAME text commands are accepted over a plain TCP socket on port 4550,
-  one command per line (newline-terminated); each reply is newline-terminated
-  too. No HTTP - it's the identical protocol as BLE over a raw socket. Try it:
-    nc <device-ip> 4550     then type:  PING   ->  OK
-  Streamed replies (LIST / WIFISCAN / MOREINFO) arrive as lines ending in
-  ENDLIST / WIFISCANEND / ENDINFO, same as over BLE.
-  Discovery (mDNS is unreliable on stock Pico W): broadcast "LEDADISCOVER" as a
-  UDP datagram to port 4550 and each device answers "LEDA <hostname> <name>".
-  Upload a pattern (TCP only): send "UPLOAD <len> <name>" and wait for
-  "OK UPLOAD", then stream exactly <len> raw bytes of a LEDA file; the device
-  writes it, verifies the magic, and replies "OK UPLOADED <name>". Playback goes
-  dark and pauses during the transfer. Several clients (phone + Mac ...) can be
-  connected at once; replies to a request go only to the client that asked.
-
-LEDA v1 binary format (little-endian):
-  off size field
-  0   4    magic 'LEDA'
-  4   1    version (1)
-  5   1    pixel format (0 = RGB888)
-  6   2    numLeds (uint16)
-  8   4    numFrames (uint32)
-  12  2    fps (uint16)
-  14  2    reserved
-  16  ...  frame-major pixels: each frame is numLeds x (R,G,B)
-
-The player steps one frame every 1/fps seconds, looping. The command handler
-(dispatch) is transport-agnostic, so the same command set will back Wi-Fi/HTTP
-and USB-serial control as those are added.
+  3. Reset - it plays the animation on a loop.
 `
 }
 
