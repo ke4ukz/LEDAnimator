@@ -1,9 +1,9 @@
-import { useLayoutEffect, useMemo, useRef } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
 import { Html, TransformControls } from '@react-three/drei'
 import { Color, type InstancedMesh, Object3D, SRGBColorSpace, Vector3 } from 'three'
 import { useStore } from '../store'
-import { sampleRaster } from '../types'
+import { type LedPosition, sampleRaster } from '../types'
 
 const tmpObject = new Object3D()
 const tmpColor = new Color()
@@ -190,7 +190,13 @@ export function MoveGizmo() {
   const offsetLeds = useStore((s) => s.offsetLeds)
   const proxy = useMemo(() => new Object3D(), [])
   const dragging = useRef(false)
+  // Set when a drag is cancelled (Escape): swallow further gizmo motion until
+  // the mouse is released, and keep the gizmo pinned at where the drag began.
+  const aborted = useRef(false)
   const last = useRef(new Vector3())
+  const startPos = useRef(new Vector3())
+  // Snapshot of the leds array at drag start, to restore exactly on cancel.
+  const startLeds = useRef<LedPosition[] | null>(null)
 
   const validSel = selection.filter((i) => leds[i])
 
@@ -205,6 +211,18 @@ export function MoveGizmo() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selection, leds, proxy])
 
+  // Escape mid-drag cancels: restore the snapshot and hold until mouse release.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape' || !dragging.current || aborted.current) return
+      aborted.current = true
+      if (startLeds.current) useStore.setState({ leds: startLeds.current })
+      proxy.position.copy(startPos.current)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [proxy])
+
   if (validSel.length === 0) return null
 
   return (
@@ -215,13 +233,23 @@ export function MoveGizmo() {
         mode="translate"
         onMouseDown={() => {
           dragging.current = true
+          aborted.current = false
+          startPos.current.copy(proxy.position)
           last.current.copy(proxy.position)
+          startLeds.current = useStore.getState().leds
         }}
         onMouseUp={() => {
           dragging.current = false
+          aborted.current = false
+          startLeds.current = null
         }}
         onObjectChange={() => {
           if (!dragging.current) return
+          // After a cancel, keep the gizmo pinned and apply nothing more.
+          if (aborted.current) {
+            proxy.position.copy(startPos.current)
+            return
+          }
           const p = proxy.position
           const dx = p.x - last.current.x
           const dy = p.y - last.current.y
