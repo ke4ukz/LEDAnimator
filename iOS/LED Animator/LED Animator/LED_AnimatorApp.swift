@@ -7,6 +7,8 @@
 
 import SwiftUI
 
+/// App entry point: a single window hosting `ContentView` (given a sensible
+/// default size on macOS).
 @main
 struct LED_AnimatorApp: App {
     var body: some Scene {

@@ -13,11 +13,14 @@ import Darwin
 import Foundation
 import Observation
 
+/// A device that answered a LAN discovery probe — carries the address to
+/// connect to plus identity for matching against a BLE advert.
 struct DiscoveredWiFiDevice: Identifiable, Equatable {
     var host: String       // source IP of the reply
     var hostname: String   // e.g. "LED-Animator-0901CD"
     var name: String       // friendly device name
     var id: String { hostname }
+    /// Prefer the friendly name; fall back to the hostname when unnamed.
     var displayName: String { name.isEmpty ? hostname : name }
 
     /// The trailing "-XXXXXX" MAC suffix, matching the BLE advert's device id.
@@ -29,12 +32,18 @@ struct DiscoveredWiFiDevice: Identifiable, Equatable {
     }
 }
 
+/// LAN discovery of LED Animator devices via UDP broadcast (no mDNS). Publishes
+/// the live `devices` list for the picker; see the file header for why it uses a
+/// raw POSIX socket rather than `NWConnection`.
 @Observable
 final class WiFiDiscovery {
+    /// Devices heard recently, refreshed each scan and pruned when they go quiet.
     var devices: [DiscoveredWiFiDevice] = []
 
+    /// Serial queue for the blocking socket loop, off the main thread.
     @ObservationIgnored private let queue = DispatchQueue(label: "wifi-discovery")
     @ObservationIgnored private let port: UInt16 = 4550
+    /// The broadcast probe payload the firmware answers to.
     @ObservationIgnored private let probe = [UInt8]("LEDADISCOVER".utf8)
     @ObservationIgnored private var lastSeen: [String: Date] = [:]   // hostname -> when last heard
 
@@ -44,6 +53,8 @@ final class WiFiDiscovery {
         queue.async { [weak self] in self?.runScan() }
     }
 
+    /// The blocking scan body (runs on `queue`): open a UDP socket, repeatedly
+    /// broadcast the probe, and collect replies for ~2.5s, then prune.
     private func runScan() {
         let fd = socket(AF_INET, SOCK_DGRAM, 0)
         guard fd >= 0 else { return }
@@ -91,6 +102,7 @@ final class WiFiDiscovery {
         lastSeen = lastSeen.filter { key, _ in devices.contains { $0.hostname == key } }
     }
 
+    /// Fire one probe datagram at a broadcast address.
     private func sendProbe(_ fd: Int32, to broadcast: in_addr_t) {
         var dst = sockaddr_in()
         dst.sin_family = sa_family_t(AF_INET)
@@ -129,6 +141,8 @@ final class WiFiDiscovery {
         return targets
     }
 
+    /// Parse a "LEDA <hostname> <name>" reply and queue the device (with its
+    /// source IP) to be added on the main thread. Ignores anything else.
     private func handleReply(_ line: String, from addr: sockaddr_in) {
         guard line.hasPrefix("LEDA ") else { return }
         let rest = line.dropFirst("LEDA ".count)
@@ -146,6 +160,7 @@ final class WiFiDiscovery {
         DispatchQueue.main.async { [weak self] in self?.add(device) }
     }
 
+    /// Upsert a device by hostname and stamp its last-seen time (main thread).
     private func add(_ device: DiscoveredWiFiDevice) {
         lastSeen[device.hostname] = Date()
         if let i = devices.firstIndex(where: { $0.hostname == device.hostname }) {
@@ -155,6 +170,7 @@ final class WiFiDiscovery {
         }
     }
 
+    /// Format a sockaddr's IPv4 address as a dotted-quad string.
     private func ipString(_ addr: sockaddr_in) -> String {
         var a = addr
         var buf = [CChar](repeating: 0, count: Int(INET_ADDRSTRLEN))

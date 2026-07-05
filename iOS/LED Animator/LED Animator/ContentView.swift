@@ -5,9 +5,15 @@
 
 import SwiftUI
 
+/// App root. Owns the three long-lived controllers (BLE, Wi-Fi/TCP, Bonjour
+/// discovery) and hands them to the platform-appropriate layout: a split-view
+/// sidebar on macOS, a push-navigation stack on iOS.
 struct ContentView: View {
+    /// Bluetooth scanning + connection/session for BLE devices.
     @State private var ble = BLEController()
+    /// TCP transport used once connected over Wi-Fi (also handles uploads).
     @State private var wifi = TCPController()
+    /// Bonjour browser that surfaces devices reachable on the local network.
     @State private var discovery = WiFiDiscovery()
 
     var body: some View {
@@ -32,8 +38,11 @@ struct MacRootView: View {
     let wifi: TCPController
     let discovery: WiFiDiscovery
 
+    /// The selected sidebar row, keyed by `UnifiedDevice.id`; changing it drives
+    /// `connect(to:)`. nil means nothing selected (detail shows the placeholder).
     @State private var selection: String?   // UnifiedDevice.id
 
+    /// BLE + Wi-Fi discoveries collapsed into one row per physical device.
     private var devices: [UnifiedDevice] {
         mergeUnifiedDevices(ble: ble.devices, wifi: discovery.devices)
     }
@@ -65,6 +74,8 @@ struct MacRootView: View {
 
     // MARK: Sidebar
 
+    /// The device list column: selectable rows, a "Searching…" overlay (with a
+    /// Bluetooth-off hint) when empty, and a toolbar rescan button.
     private var sidebar: some View {
         List(selection: $selection) {
             ForEach(devices) { device in
@@ -104,6 +115,8 @@ struct MacRootView: View {
 
     // MARK: Detail
 
+    /// The detail pane: live controls for the connected session, a "Connecting…"
+    /// spinner mid-connect, or an unavailable placeholder when nothing's selected.
     @ViewBuilder
     private var detail: some View {
         if let session = activeSession {
@@ -124,12 +137,17 @@ struct MacRootView: View {
 
     // MARK: Connection
 
+    /// The live session from whichever transport is connected (only one is at a time).
     private var activeSession: DeviceSession? { ble.session ?? wifi.session }
 
+    /// True while either transport is mid-connect.
     private var isConnecting: Bool {
         ble.connectionState == .connecting || wifi.connectionState == .connecting
     }
 
+    /// Switch the connection to the newly-selected device: tear down any current
+    /// link first, then connect over Wi-Fi if available, else BLE. Called from
+    /// `onChange(of: selection)`.
     private func connect(to id: String?) {
         // Tear down any current connection before opening a new one.
         ble.disconnect()
@@ -142,6 +160,8 @@ struct MacRootView: View {
         }
     }
 
+    /// Whether this row's device is the one currently connecting (drives its
+    /// per-row spinner). BLE matches by name; Wi-Fi matches the selected row.
     private func connecting(_ device: UnifiedDevice) -> Bool {
         if let b = device.ble, ble.connectionState == .connecting, ble.connectingName == b.name { return true }
         if device.wifi != nil, wifi.connectionState == .connecting, selection == device.id { return true }
@@ -150,10 +170,13 @@ struct MacRootView: View {
 
     // MARK: Failure alert
 
+    /// True when a connection state is `.failed` (its message is unused here).
     private func isFailed(_ state: ConnectionState) -> Bool {
         if case .failed = state { true } else { false }
     }
 
+    /// Presentation binding for the "Couldn't Connect" alert: on when either
+    /// transport failed, and dismissing clears both failures.
     private var failedBinding: Binding<Bool> {
         Binding(
             get: { isFailed(ble.connectionState) || isFailed(wifi.connectionState) },
@@ -161,6 +184,7 @@ struct MacRootView: View {
         )
     }
 
+    /// The failure text to show in the alert, from whichever transport failed.
     private var failureMessage: String {
         if case let .failed(message) = ble.connectionState { message }
         else if case let .failed(message) = wifi.connectionState { message }

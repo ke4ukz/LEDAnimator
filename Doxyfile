@@ -1,0 +1,40 @@
+# Doxyfile for the LED Animator iOS/macOS companion app (Swift).
+#
+#   doxygen Doxyfile      # from the repo root; output → docs/doxygen/html/index.html
+#
+# Only non-default settings are listed; Doxygen supplies defaults for the rest.
+#
+# Note: Doxygen's Swift parser is limited (it's built for C-family/Java). It will
+# extract the `///` doc comments and produce browsable HTML, but for fully
+# Swift-aware docs, Xcode's native DocC ("Product > Build Documentation") reads
+# the same comments and models Swift declarations properly. This Doxyfile is the
+# cross-toolchain option; DocC is the native one.
+
+PROJECT_NAME           = "LED Animator — iOS/macOS companion"
+PROJECT_BRIEF          = "Discover and control RP2040 LED devices over BLE and Wi-Fi"
+OUTPUT_DIRECTORY       = docs/doxygen
+
+# --- Inputs -----------------------------------------------------------------
+INPUT                  = "iOS/LED Animator/LED Animator"
+RECURSIVE              = YES
+FILE_PATTERNS          = *.swift
+# Best-effort: parse Swift with the Java-family engine (closest OO model).
+EXTENSION_MAPPING      = swift=Java
+OPTIMIZE_OUTPUT_JAVA   = YES
+
+# --- What to extract --------------------------------------------------------
+EXTRACT_ALL            = YES
+EXTRACT_PRIVATE        = YES
+EXTRACT_STATIC         = YES
+EXTRACT_LOCAL_METHODS  = YES
+JAVADOC_AUTOBRIEF      = YES
+MARKDOWN_SUPPORT       = YES
+SOURCE_BROWSER         = YES
+INLINE_SOURCES         = YES
+
+# --- Output -----------------------------------------------------------------
+GENERATE_HTML          = YES
+GENERATE_LATEX         = NO
+GENERATE_TREEVIEW      = YES
+QUIET                  = YES
+WARN_IF_UNDOCUMENTED   = NO

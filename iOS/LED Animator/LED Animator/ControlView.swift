@@ -21,10 +21,18 @@ private enum PlaybackMode: Hashable {
 private enum InspectorPanel { case info, wifi }
 #endif
 
+/// The main per-device control screen: playback mode, brightness/speed sliders,
+/// solid-color picker, and the pattern list (select/upload/delete). Binds to the
+/// transport-agnostic `DeviceSession`, so it's identical over BLE and Wi-Fi.
+/// iOS presents Info/Wi-Fi as sheets; macOS as a trailing inspector column and
+/// adds Finder drag-and-drop / file-import upload (TCP only).
 struct ControlView: View {
+    /// The connected device's observed state + command API (see DeviceSession).
     let session: DeviceSession
     #if os(iOS)
+    /// Presents the Device Info sheet (iOS).
     @State private var showInfo = false
+    /// Presents the Wi-Fi provisioning sheet (iOS).
     @State private var showWifi = false
     #endif
     @State private var showImporter = false      // macOS pattern upload
@@ -32,13 +40,23 @@ struct ControlView: View {
     #if os(macOS)
     @State private var inspectorPanel: InspectorPanel?   // open Info/Wi-Fi panel (nil = none)
     #endif
+    /// The selected playback mode, mirrored to the device via `apply`. Kept as
+    /// local @State (not read straight from `session.mode`) so the segmented
+    /// picker stays snappy; seeded/echoed from the device in `onAppear`/`onChange`.
     @State private var playback: PlaybackMode = .play
+    /// The solid-color picker's value; pushed to the device and seeded from
+    /// `session.solid`. SwiftUI `Color` (resolved to RGB only when sending).
     @State private var solidColor: Color = .white
+    /// Environment used to resolve `solidColor` to sRGB components without UIKit.
     @Environment(\.self) private var environment
 
     /// The Wi-Fi transport, when this session is over Wi-Fi (upload is TCP-only).
     private var uploader: TCPController? { session.transport as? TCPController }
 
+    /// The scrollable control surface: Playback (mode + optional color), the
+    /// Brightness and Speed sections (bump buttons + slider), the Patterns
+    /// section (loading/error/empty/rows, plus macOS reload+upload header), and a
+    /// trailing error section. On macOS also the Finder drag-and-drop target.
     private var patternList: some View {
         List {
             Section("Playback") {
@@ -201,6 +219,8 @@ struct ControlView: View {
         #endif
     }
 
+    /// Wraps `layout` with the title, Info/Wi-Fi toolbar buttons, the iOS sheets,
+    /// the control-seeding hooks, and (macOS) the file importer.
     var body: some View {
         layout
         .navigationTitle(session.connectedName)
@@ -273,6 +293,7 @@ struct ControlView: View {
         .animation(.snappy(duration: 0.22), value: inspectorPanel)
     }
 
+    /// Resolves an `InspectorPanel` case to its view (macOS inspector column).
     @ViewBuilder
     private func panelView(_ panel: InspectorPanel) -> some View {
         switch panel {
@@ -281,6 +302,7 @@ struct ControlView: View {
         }
     }
     #else
+    /// iOS layout is just the control list (Info/Wi-Fi come up as sheets).
     private var layout: some View { patternList }
     #endif
 
@@ -320,6 +342,7 @@ struct ControlView: View {
     }
 
     #if os(macOS)
+    /// The `.leda` pattern file type used by the importer/drop target.
     private var ledaType: UTType { UTType(filenameExtension: "leda") ?? .data }
 
     /// Handle a Finder drag-and-drop: upload the first dropped .leda file.
@@ -361,6 +384,7 @@ struct ControlView: View {
         min(hi, (v / step + 1) * step)
     }
 
+    /// Map the device's mode string (`session.mode`) to the local picker enum.
     private func mapMode(_ m: String) -> PlaybackMode {
         switch m {
         case "off": return .off
@@ -369,6 +393,7 @@ struct ControlView: View {
         }
     }
 
+    /// Convert the device's 0–255 `RGB` into a SwiftUI `Color` for the picker.
     private func color(from rgb: RGB) -> Color {
         Color(red: Double(rgb.r) / 255, green: Double(rgb.g) / 255, blue: Double(rgb.b) / 255)
     }
@@ -409,6 +434,7 @@ private struct MacPatternRow: View {
     let canDelete: Bool
     let onActivate: () -> Void
     let onDelete: () -> Void
+    /// Whether the pointer is over the row; reveals the trash button.
     @State private var hovering = false
 
     var body: some View {

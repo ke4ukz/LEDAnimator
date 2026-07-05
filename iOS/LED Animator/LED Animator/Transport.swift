@@ -8,6 +8,8 @@
 
 import Foundation
 
+/// A connection that carries the text control protocol to/from one device.
+/// `DeviceSession` talks only to this, so it's identical over BLE or Wi‑Fi/TCP.
 protocol DeviceTransport: AnyObject {
     /// Send one command line. `expectResponse` maps to the BLE write type; other
     /// transports can ignore it.

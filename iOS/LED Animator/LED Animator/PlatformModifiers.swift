@@ -8,6 +8,7 @@
 
 import SwiftUI
 
+/// Autocapitalization choice for the cross-platform `autocap(_:)` shim below.
 enum TextAutocap { case words, never }
 
 extension View {

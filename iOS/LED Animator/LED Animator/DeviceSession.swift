@@ -11,20 +11,36 @@
 import Foundation
 import Observation
 
+/// The transport-agnostic control session for one connected device.
+///
+/// Holds the observed device state, sends commands, and parses replies. It is
+/// driven by any `DeviceTransport` (BLE now, TCP later) and never touches
+/// CoreBluetooth or sockets directly, so control views bind to this one object
+/// regardless of link. `@Observable` so SwiftUI re-renders on any state change.
 @Observable
 final class DeviceSession {
     // MARK: Observed state
+
+    /// The device's advertised/display name; updated on a successful rename.
     var connectedName: String
+    /// Pattern filenames on the device, sorted, shown once a LIST finishes.
     var patterns: [String] = []
+    /// True while a LIST stream is in flight (drives the loading indicator).
     var isLoadingPatterns = false
+    /// True if the LIST stream stalled and the watchdog gave up.
     var listFailed = false
+    /// Expected pattern count from LISTLEN, for a determinate progress bar.
     var listTotal = 0
+    /// FILE lines received so far in the current LIST stream.
     var listReceived = 0
+    /// The pattern currently playing, or nil when none/off.
     var currentPattern: String?
+    /// Live control state, mirrored to the sliders.
     var brightness = 100   // 0–100, seeded from INFO
     var speed = 100        // 10–400 percent, seeded from INFO
     var mode = "play"      // "play", "solid", or "off" — seeded/echoed by the device
     var solid = RGB(r: 255, g: 255, b: 255)   // last solid color the device reported (INFO)
+    // MOREINFO details for the Info tab (nil until that batch streams in).
     var firmwareVersion: String?
     var platform: String?
     var ledCount: Int?
@@ -36,14 +52,19 @@ final class DeviceSession {
     var vsysMillivolts: Int?     // VSYS in mV; nil when the board can't measure it
     var dataPin: Int?            // GP pin the strip data line is on (from MOREINFO / PIN)
     var moreInfoLoaded = false   // true once the MOREINFO batch (ENDINFO) has arrived
+    /// Last "ERR…" reply, surfaced for debugging/UI feedback.
     var lastError: String?
     // Wi-Fi provisioning
     var wifiState = "off"          // off / connecting / connected / failed
     var wifiDetail = ""            // IP when connected, short reason when failed
+    /// Networks from the most recent WIFISCAN, strongest first.
     var wifiNetworks: [WiFiNetwork] = []
+    /// True while a WIFISCAN is streaming (drives the scan spinner).
     var isScanningWifi = false
 
     // MARK: Transport + internals (not observed)
+
+    /// The active link (BLE/TCP). Weak: the transport owns the session's lifetime.
     @ObservationIgnored weak var transport: DeviceTransport?
     /// Per-channel rate limiter state (keyed by channel id), so fast drags on the
     /// sliders / color spectrum don't flood the link. See `throttle`.
@@ -55,6 +76,7 @@ final class DeviceSession {
     @ObservationIgnored private var wifiScanTimeoutWork: DispatchWorkItem?
     @ObservationIgnored private var moreInfoTimeoutWork: DispatchWorkItem?   // fallback if ENDINFO is dropped
 
+    /// - Parameter name: the device name known at connect time (from the advert).
     init(name: String) {
         connectedName = name
     }
@@ -69,6 +91,8 @@ final class DeviceSession {
 
     // MARK: Commands
 
+    /// Serialize a command to its text form and hand it to the transport.
+    /// `expectResponse: false` for fire-and-forget writes (dragged controls).
     private func send(_ command: LEDCommand, expectResponse: Bool = true) {
         transport?.send(command.text, expectResponse: expectResponse)
     }
@@ -86,6 +110,7 @@ final class DeviceSession {
         armListTimeout()
     }
 
+    /// Switch the device to the named pattern (confirmed by OK SELECT).
     func select(_ name: String) { send(.select(name)) }
 
     /// Delete a pattern file. The device refuses to delete the active one
@@ -204,6 +229,7 @@ final class DeviceSession {
 
     // MARK: Wi-Fi provisioning
 
+    /// Ask the device for its current Wi-Fi state (reply arrives as "WIFI …").
     func requestWifiStatus() { send(.wifiStatus) }
 
     /// Scan for nearby networks; results stream as WIFINET… and land in
@@ -228,8 +254,12 @@ final class DeviceSession {
         send(.wifiConnect)
     }
 
+    /// Clear saved credentials and disconnect (confirmed by OK WIFIFORGET).
     func forgetWifi() { send(.wifiForget) }
 
+    /// Fallback for the WIFISCAN stream: after ~6s, commit whatever networks
+    /// arrived and drop the spinner even if WIFISCANEND never came. Reset on
+    /// each WIFINET so a slow scan won't trip it early.
     private func armWifiScanTimeout() {
         wifiScanTimeoutWork?.cancel()
         let work = DispatchWorkItem { [weak self] in

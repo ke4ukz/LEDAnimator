@@ -11,17 +11,22 @@ import Foundation
 import Network
 import Observation
 
+/// Wi-Fi/TCP transport: runs the same text protocol as `BLEController` over an
+/// `NWConnection`, and adds a TCP-only file upload path (see `upload`).
 @Observable
 final class TCPController: DeviceTransport {
     var connectionState: ConnectionState = .disconnected
     var session: DeviceSession?
     // Upload (TCP-only) state, observed by the UI.
+    /// True while a pattern-file upload is mid-flight.
     var uploadInProgress = false
+    /// User-facing message when an upload is rejected or fails; nil otherwise.
     var uploadError: String?
 
     /// The device's control port (matches the firmware's CONTROL_PORT).
     @ObservationIgnored private let port: NWEndpoint.Port = 4550
     @ObservationIgnored private var connection: NWConnection?
+    /// Accumulates received bytes until a full newline-framed line is available.
     @ObservationIgnored private var buffer = Data()
     @ObservationIgnored private var pendingUpload: Data?   // bytes to stream once the device says OK UPLOAD
 
@@ -41,6 +46,7 @@ final class TCPController: DeviceTransport {
         receive(on: conn)
     }
 
+    /// Cancel the socket and reset connection state.
     func disconnect() {
         connection?.cancel()
         connection = nil
@@ -48,12 +54,15 @@ final class TCPController: DeviceTransport {
         if connectionState != .disconnected { connectionState = .disconnected }
     }
 
+    /// Dismiss a `.failed` state after the user acknowledges the error.
     func clearFailure() {
         if case .failed = connectionState { connectionState = .disconnected }
     }
 
     // MARK: DeviceTransport
 
+    /// Send one command, newline-framed. `expectResponse` is irrelevant over
+    /// TCP (no per-write ack semantics), so it's ignored.
     func send(_ line: String, expectResponse: Bool) {
         guard let data = (line + "\n").data(using: .utf8) else { return }
         connection?.send(content: data, completion: .contentProcessed { _ in })
@@ -61,6 +70,8 @@ final class TCPController: DeviceTransport {
 
     // MARK: Connection lifecycle
 
+    /// React to `NWConnection` state changes, mapping them onto
+    /// `connectionState` and starting a session once `.ready`.
     private func handleState(_ state: NWConnection.State, name: String) {
         switch state {
         case .ready:
@@ -87,6 +98,8 @@ final class TCPController: DeviceTransport {
         }
     }
 
+    /// Read one chunk and re-arm; on error or clean close, tear the session
+    /// down. Self-reschedules to keep a continuous read loop going.
     private func receive(on conn: NWConnection) {
         conn.receive(minimumIncompleteLength: 1, maximumLength: 8192) { [weak self] data, _, isComplete, error in
             guard let self else { return }
@@ -148,6 +161,9 @@ final class TCPController: DeviceTransport {
         return false
     }
 
+    /// Send the buffered file bytes after the device grants "OK UPLOAD". Only a
+    /// send *error* is terminal here; success just means we wait for the device
+    /// to confirm with "OK UPLOADED".
     private func streamPendingUpload() {
         guard let data = pendingUpload, let conn = connection else {
             uploadInProgress = false

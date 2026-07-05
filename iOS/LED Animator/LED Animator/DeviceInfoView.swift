@@ -8,12 +8,21 @@
 
 import SwiftUI
 
+/// Read-mostly device details (platform, firmware, LEDs, power, network) plus
+/// the two writable knobs: rename and the strip's data GP pin. iOS presents it
+/// as a sheet with its own nav chrome; macOS drops the chrome and renders the
+/// bare list as an inspector panel.
 struct DeviceInfoView: View {
+    /// The connected device whose reported state we display.
     let session: DeviceSession
     @Environment(\.dismiss) private var dismiss
+    /// Drives the rename alert.
     @State private var showRename = false
+    /// Scratch text for the rename alert's field.
     @State private var editingName = ""
 
+    /// Bare list on macOS (inspector); wrapped in a NavigationStack with a Done
+    /// button on iOS (sheet).
     var body: some View {
         #if os(macOS)
         infoList   // rendered as an inspector panel
@@ -32,6 +41,9 @@ struct DeviceInfoView: View {
         #endif
     }
 
+    /// The shared list body (name/details/output/power/network sections). Split
+    /// out so both the iOS sheet and the macOS inspector can reuse it. On appear
+    /// it requests MOREINFO and starts a slow power-poll for the panel's lifetime.
     private var infoList: some View {
         List {
             Section("Name") {
@@ -134,6 +146,8 @@ struct DeviceInfoView: View {
         }
     }
 
+    /// The power row's label; "Loading…" until MOREINFO lands, then "N/A" if the
+    /// board never reported a source.
     private var powerText: String {
         switch session.powerSource {
         case "usb": return "Plugged in"
@@ -156,12 +170,15 @@ struct DeviceInfoView: View {
         return session.moreInfoLoaded ? "N/A" : "Loading…"
     }
 
+    /// Apply the rename, ignoring an empty or unchanged name. (The session does
+    /// its own ASCII filtering and 26-char cap.)
     private func commitRename() {
         let trimmed = editingName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, trimmed != session.connectedName else { return }
         session.rename(trimmed)
     }
 
+    /// Human-readable free space (e.g. "1.2 MB") for the raw byte count.
     private func formatBytes(_ bytes: Int) -> String {
         ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file)
     }

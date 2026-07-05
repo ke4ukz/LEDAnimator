@@ -9,12 +9,21 @@
 
 import SwiftUI
 
+/// Wi-Fi provisioning UI: shows connection status, lets you scan for or type a
+/// network, join it, and forget it. Credentials are entered here but sent (and
+/// persisted) by the device over the BLE control link. iOS presents it as a
+/// sheet; macOS renders the bare list as an inspector panel.
 struct WiFiView: View {
+    /// The connected device being provisioned.
     let session: DeviceSession
     @Environment(\.dismiss) private var dismiss
+    /// Editable SSID — seeded by tapping a scanned network, or typed directly.
     @State private var ssid = ""
+    /// Editable password (blank = open network).
     @State private var password = ""
 
+    /// Bare list on macOS (inspector); wrapped in a NavigationStack with a Done
+    /// button on iOS (sheet).
     var body: some View {
         #if os(macOS)
         wifiList   // rendered as an inspector panel
@@ -33,6 +42,9 @@ struct WiFiView: View {
         #endif
     }
 
+    /// The shared list body (status / join form / nearby networks / forget),
+    /// reused by both the iOS sheet and the macOS inspector. Requests current
+    /// Wi-Fi status on appear.
     private var wifiList: some View {
         List {
             Section("Status") {
@@ -105,10 +117,12 @@ struct WiFiView: View {
         .onAppear { session.requestWifiStatus() }
     }
 
+    /// Send the entered credentials for the device to join and persist.
     private func connect() {
         session.connectWifi(ssid: ssid, password: password)
     }
 
+    /// The status row's headline for the current `wifiState`.
     private var statusText: String {
         switch session.wifiState {
         case "connected": return "Connected"
@@ -132,6 +146,7 @@ struct WiFiView: View {
         }
     }
 
+    /// SF Symbol matching the current Wi-Fi state.
     private var statusIcon: String {
         switch session.wifiState {
         case "connected": return "wifi"
@@ -141,6 +156,7 @@ struct WiFiView: View {
         }
     }
 
+    /// Tint for the status icon: green connected, orange failed, muted otherwise.
     private var statusTint: Color {
         switch session.wifiState {
         case "connected": return .green
