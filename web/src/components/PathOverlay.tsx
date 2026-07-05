@@ -51,7 +51,14 @@ interface Handle {
  * HTML elements (so they stay circular over a non-square preview); the path
  * itself is an SVG polyline. Edits the selected track's path live.
  */
-export function PathOverlay({ track }: { track: Track }) {
+export function PathOverlay({
+  track,
+  onHover,
+}: {
+  track: Track
+  /** Reports the cursor's normalized position over the texture (null on leave). */
+  onHover?: (p: { u: number; v: number } | null) => void
+}) {
   const updateTrack = useStore((s) => s.updateTrack)
   const showSamples = useStore((s) => s.showSamples)
   // Only track `frame` when markers are on, so playback doesn't re-render this
@@ -209,9 +216,15 @@ export function PathOverlay({ track }: { track: Track }) {
         else pts.push({ x: u, y: v })
         setPath({ ...path, pts })
       }}
-      onPointerMove={onMove}
+      onPointerMove={(e) => {
+        onMove(e)
+        onHover?.(fromEvent(e))
+      }}
       onPointerUp={() => (drag.current = null)}
-      onPointerLeave={() => (drag.current = null)}
+      onPointerLeave={() => {
+        drag.current = null
+        onHover?.(null)
+      }}
     >
       {showArrow && (
         <div

@@ -8,7 +8,13 @@ import { PathOverlay } from './PathOverlay'
  * focused (so nodes/handles are easier to place precisely). A corner button
  * toggles that focus.
  */
-export function TexturePreview({ large = false }: { large?: boolean }) {
+export function TexturePreview({
+  large = false,
+  onHover,
+}: {
+  large?: boolean
+  onHover?: (p: { u: number; v: number } | null) => void
+}) {
   const project = useStore((s) => s.project)
   const selectedTrack = useStore((s) => s.selectedTrack)
   const toggleFocus = useStore((s) => s.toggleFocusGradient)
@@ -24,7 +30,7 @@ export function TexturePreview({ large = false }: { large?: boolean }) {
   return (
     <div className={`preview-wrap${large ? ' large' : ''}`}>
       <GradientPreview gradient={source.gradient} post={source.post} width={res} height={res} />
-      <PathOverlay track={track} />
+      <PathOverlay track={track} onHover={onHover} />
       {/* Only the small (sidebar) preview gets the enlarge button; enlarging it
           shrinks the 3D view. The large one is collapsed from the 3D preview. */}
       {!large && (

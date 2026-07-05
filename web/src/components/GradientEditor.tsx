@@ -12,6 +12,7 @@ import type { PathDef } from '../project'
 import { PRESETS, instantiateGradient } from '../presets'
 import { TexturePreview } from './TexturePreview'
 import { RampEditor } from './RampEditor'
+import { GradientFocusView } from './GradientFocusView'
 
 const DEG = 180 / Math.PI
 const TYPES: { value: Gradient['type']; label: string }[] = [
@@ -56,11 +57,11 @@ export function GradientEditor({ place = 'panel' }: { place?: 'panel' | 'focus' 
 
   const track = project.tracks.find((t) => t.id === selectedTrack)
   const source = project.sources.find((s) => s.id === track?.sourceId)
-  const gradient = source?.gradient
 
-  if (!track || !gradient) return <p className="placeholder">Select a track to edit its source.</p>
+  if (!track || !source) return <p className="placeholder">Select a track to edit its source.</p>
 
-  const post = source?.post ?? {}
+  const gradient = source.gradient
+  const post = source.post ?? {}
   const setPath = (p: PathDef) => updateTrack(track.id, { path: p })
   // Spread-and-cast patch: the discriminated union keeps the active variant.
   const patch = (p: Partial<Gradient>) => setGradient({ ...gradient, ...p } as Gradient)
@@ -80,16 +81,10 @@ export function GradientEditor({ place = 'panel' }: { place?: 'panel' | 'focus' 
       <RampEditor stops={gradient.stops} interp={gradient.interp} onChange={(stops) => patch({ stops })} large={place === 'focus'} />
     )
 
-  // Center focus surface: only the large texture (with its sampling path) and
-  // the full-width ramp — the precise-editing bits.
+  // Center focus surface: the large texture (with its sampling path), a
+  // magnifier + color readout, and the full-width ramp — the precise bits.
   if (place === 'focus') {
-    return (
-      <div className="grad-editor focus">
-        <TexturePreview large />
-        <span className="muted preview-hint">Drag the path handles and the stop nodes below.</span>
-        {rampOrCorners}
-      </div>
-    )
+    return <GradientFocusView source={source} ramp={rampOrCorners} />
   }
 
   // The normal panel. While focused, the texture + ramp are shown large in the
