@@ -29,18 +29,24 @@ export function instantiateGradient(spec: GradientSpec): Gradient {
   return spec as Gradient
 }
 
-// Red → … → red. The six sRGB primaries, but positioned by their OKLCH hue
-// angle (not evenly) and interpolated in OKLCH, so the hue sweeps at a constant
-// perceptual rate — a visually uniform rainbow (e.g. as a conic). Evenly-spaced
-// positions look lopsided because these colors' hues aren't evenly distributed.
+// Red → … → red: all twelve named hues (primaries + the intermediates orange,
+// chartreuse, azure, violet, rose…) at even positions, so every color gets its
+// own node and roughly equal width — a conic reads evenly and the transitions
+// are distinct. Interpolated in OKLCH for smooth, perceptual blends.
 const RAINBOW: StopSpec[] = [
-  { pos: 0, color: [255, 0, 0] }, //   red     OKLCH ~29°
-  { pos: 0.224, color: [255, 255, 0] }, // yellow  ~110°
-  { pos: 0.315, color: [0, 255, 0] }, //   green   ~143°
-  { pos: 0.46, color: [0, 255, 255] }, //  cyan    ~195°
-  { pos: 0.652, color: [0, 0, 255] }, //   blue    ~264°
-  { pos: 0.831, color: [255, 0, 255] }, // magenta ~328°
-  { pos: 1, color: [255, 0, 0] }, //   red (wrap)
+  { pos: 0 / 12, color: [255, 0, 0] }, //     red
+  { pos: 1 / 12, color: [255, 128, 0] }, //   orange
+  { pos: 2 / 12, color: [255, 255, 0] }, //   yellow
+  { pos: 3 / 12, color: [128, 255, 0] }, //   chartreuse
+  { pos: 4 / 12, color: [0, 255, 0] }, //     green
+  { pos: 5 / 12, color: [0, 255, 128] }, //   spring green
+  { pos: 6 / 12, color: [0, 255, 255] }, //   cyan
+  { pos: 7 / 12, color: [0, 128, 255] }, //   azure
+  { pos: 8 / 12, color: [0, 0, 255] }, //     blue
+  { pos: 9 / 12, color: [128, 0, 255] }, //   violet
+  { pos: 10 / 12, color: [255, 0, 255] }, //  magenta
+  { pos: 11 / 12, color: [255, 0, 128] }, //  rose
+  { pos: 1, color: [255, 0, 0] }, //          red (wrap)
 ]
 
 // The startup gradient, defined independently of PRESETS so editing/removing
