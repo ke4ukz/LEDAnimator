@@ -111,6 +111,7 @@ export function GradientEditor({ place = 'panel' }: { place?: 'panel' | 'focus' 
           <option value="ellipse">Ellipse</option>
           <option value="spiral">Spiral</option>
           <option value="polygon">Polygon</option>
+          <option value="poly">Poly (draw)</option>
         </select>
         <button className="btn" title="Reset this path to its defaults" onClick={() => setPath(pathOfType(track.path.type))}>
           Reset
@@ -158,6 +159,26 @@ export function GradientEditor({ place = 'panel' }: { place?: 'panel' | 'focus' 
           <Num label="Size" value={track.path.size} onChange={(size) => setPath({ ...track.path, size } as PathDef)} />
           <Num label="Sides" value={track.path.sides} min={3} max={12} step={1} onChange={(sides) => setPath({ ...track.path, sides: Math.round(sides) } as PathDef)} />
           <Num label="Angle°" value={track.path.rot ?? 0} min={-360} max={360} step={5} onChange={(rot) => setPath({ ...track.path, rot } as PathDef)} />
+        </>
+      )}
+      {track.path.type === 'poly' && (
+        <>
+          <Row label="Curviness">
+            <input
+              type="range" min={0} max={1} step={0.02}
+              value={track.path.curviness}
+              onChange={(e) => setPath({ ...track.path, curviness: Number(e.target.value) } as PathDef)}
+            />
+            <span className="muted num">{Math.round(track.path.curviness * 100)}</span>
+          </Row>
+          <Row label="Closed loop">
+            <input
+              type="checkbox"
+              checked={track.path.closed}
+              onChange={(e) => setPath({ ...track.path, closed: e.target.checked } as PathDef)}
+            />
+          </Row>
+          <span className="muted">Click the preview to add points; drag to move; double-click a point to remove.</span>
         </>
       )}
 
@@ -321,6 +342,8 @@ function pathOfType(type: PathDef['type']): PathDef {
     case 'ellipse': return { type, cx: 0.5, cy: 0.5, rx: 0.4, ry: 0.4, rot: 0 }
     case 'spiral': return { type, cx: 0.5, cy: 0.5, r0: 0.05, r1: 0.45, turns: 3, rot: 0 }
     case 'polygon': return { type, cx: 0.5, cy: 0.5, size: 0.4, sides: 3, rot: 0 }
+    case 'poly':
+      return { type, pts: [{ x: 0.25, y: 0.3 }, { x: 0.25, y: 0.7 }, { x: 0.75, y: 0.7 }], curviness: 0.5, closed: false }
   }
 }
 

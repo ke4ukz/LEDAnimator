@@ -1,6 +1,6 @@
 import { useRef } from 'react'
 import { useStore } from '../store'
-import { type PathDef, type Track, pathPoint, trackParamAt, trackPhaseAt } from '../project'
+import { type PathDef, type Track, pathPoint, polyOutline, trackParamAt, trackPhaseAt } from '../project'
 
 const clamp01 = (x: number) => (x < 0 ? 0 : x > 1 ? 1 : x)
 const clamp = (x: number, lo: number, hi: number) => (x < lo ? lo : x > hi ? hi : x)
@@ -89,6 +89,12 @@ export function PathOverlay({ track }: { track: Track }) {
         // Vertex 0 sits at (rot − 90°); recover both size and angle from the drag.
         setPath({ ...p, size: Math.hypot(du, dv), rot: Math.atan2(dv, du) / DEG + 90 })
       }
+    } else if (p.type === 'poly') {
+      const m = /^p(\d+)$/.exec(id)
+      if (m) {
+        const i = Number(m[1])
+        setPath({ ...p, pts: p.pts.map((pt, j) => (j === i ? { x: u, y: v } : pt)) })
+      }
     } else {
       // sine: bias node sets vertical (midV) and horizontal (phase);
       // amplitude is signed so dragging past the midline flips the wave.
@@ -131,34 +137,51 @@ export function PathOverlay({ track }: { track: Track }) {
         { id: 'vtx', u: clamp01(path.cx + path.size * Math.cos(a)), v: clamp01(path.cy + path.size * Math.sin(a)) },
       ]
     }
+    if (path.type === 'poly') {
+      return path.pts.map((pt, i) => ({ id: `p${i}`, u: clamp01(pt.x), v: clamp01(pt.y), start: i === 0 }))
+    }
     return [{ id: 'mid', u: clamp01(path.phase), v: path.midV }, { id: 'amp', u: 0.25, v: clamp01(path.midV - path.amp) }]
   })()
 
-  const pts = Array.from({ length: 65 }, (_, i) => {
-    const [u, v] = pathPoint(path, i / 64)
-    return [u * 100, v * 100] as [number, number]
-  })
+  // Trace the curve. A poly path uses its exact flattened outline (crisp corners
+  // and true beziers); the analytic paths are sampled uniformly.
+  const pts: [number, number][] =
+    path.type === 'poly'
+      ? polyOutline(path).map(([u, v]) => [u * 100, v * 100])
+      : Array.from({ length: 65 }, (_, i) => {
+          const [u, v] = pathPoint(path, i / 64)
+          return [u * 100, v * 100] as [number, number]
+        })
   const curve = pts.map((p) => `${p[0]},${p[1]}`).join(' ')
 
   // Arrowhead direction at the path end. Rendered as a fixed-size DOM element
   // (like the handles), not an SVG polygon, so it doesn't balloon when the
-  // preview is enlarged.
-  const a1 = pts[pts.length - 2]
-  const a2 = pts[pts.length - 1]
+  // preview is enlarged. Hidden on a closed loop, where there's no single "end".
+  const showArrow = pts.length >= 2 && !(path.type === 'poly' && path.closed)
+  const a1 = pts[pts.length - 2] ?? pts[0]
+  const a2 = pts[pts.length - 1] ?? pts[0]
   const arrowDeg = (Math.atan2(a2[1] - a1[1], a2[0] - a1[0]) * 180) / Math.PI
 
   return (
     <div
       ref={ref}
       className="path-overlay"
+      onPointerDown={(e) => {
+        // Clicking empty preview space (not a handle) drops a new poly point.
+        if (path.type !== 'poly' || e.target !== ref.current) return
+        const { u, v } = fromEvent(e)
+        setPath({ ...path, pts: [...path.pts, { x: u, y: v }] })
+      }}
       onPointerMove={onMove}
       onPointerUp={() => (drag.current = null)}
       onPointerLeave={() => (drag.current = null)}
     >
-      <div
-        className="path-arrow-el"
-        style={{ left: `${a2[0]}%`, top: `${a2[1]}%`, transform: `translate(-50%, -50%) rotate(${arrowDeg}deg)` }}
-      />
+      {showArrow && (
+        <div
+          className="path-arrow-el"
+          style={{ left: `${a2[0]}%`, top: `${a2[1]}%`, transform: `translate(-50%, -50%) rotate(${arrowDeg}deg)` }}
+        />
+      )}
       <svg className="path-svg" viewBox="0 0 100 100" preserveAspectRatio="none">
         <polyline points={curve} className="path-curve" />
         {samplePts.map((p, i) => (
@@ -169,7 +192,7 @@ export function PathOverlay({ track }: { track: Track }) {
         <button
           key={h.id}
           className={`path-handle${h.start ? ' start' : ''}`}
-          title={h.start ? 'Start' : undefined}
+          title={path.type === 'poly' ? 'Drag to move · double-click to remove' : h.start ? 'Start' : undefined}
           style={{ left: `${h.u * 100}%`, top: `${h.v * 100}%` }}
           onPointerDown={(e) => {
             e.stopPropagation()
@@ -178,6 +201,13 @@ export function PathOverlay({ track }: { track: Track }) {
           }}
           onPointerMove={onMove}
           onPointerUp={() => (drag.current = null)}
+          onDoubleClick={(e) => {
+            // Double-click removes a poly point (keeping at least two).
+            if (path.type !== 'poly' || path.pts.length <= 2) return
+            e.stopPropagation()
+            const m = /^p(\d+)$/.exec(h.id)
+            if (m) setPath({ ...path, pts: path.pts.filter((_, j) => j !== Number(m[1])) })
+          }}
         />
       ))}
     </div>

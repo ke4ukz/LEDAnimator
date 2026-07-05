@@ -346,7 +346,7 @@ export const useStore = create<AppState>((set, get) => {
         id: newId('trk'),
         name: `${src.name} copy`,
         sourceId: newSource.id,
-        path: { ...src.path },
+        path: structuredClone(src.path),
         automations: src.automations ? structuredClone(src.automations) : undefined,
       }
       set({ selectedTrack: newTrack.id })

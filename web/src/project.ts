@@ -36,6 +36,12 @@ export type PathDef =
   | { type: 'ellipse'; cx: number; cy: number; rx: number; ry: number; rot: number }
   | { type: 'spiral'; cx: number; cy: number; r0: number; r1: number; turns: number; rot: number }
   | { type: 'polygon'; cx: number; cy: number; size: number; sides: number; rot: number }
+  // Free-drawn point sequence connected by straight segments, with every corner
+  // rounded uniformly by `curviness` (0 = sharp, 1 = fullest sweep). `closed`
+  // joins the last point back to the first (and rounds that corner too).
+  | { type: 'poly'; pts: { x: number; y: number }[]; curviness: number; closed: boolean }
+
+export type PolyPath = Extract<PathDef, { type: 'poly' }>
 
 /** Easing of the segment leaving a keyframe toward the next one. */
 export type EaseType = 'linear' | 'smooth' | 'hold'
@@ -108,7 +114,128 @@ export function pathPoint(path: PathDef, s: number): [number, number] {
       const [x1, y1] = vert(edge + 1)
       return [x0 + (x1 - x0) * local, y0 + (y1 - y0) * local]
     }
+    case 'poly': {
+      const f = polyFlat(path)
+      if (f.total === 0) return [f.xs[0] ?? 0.5, f.ys[0] ?? 0.5]
+      const target = (path.closed ? s - Math.floor(s) : Math.min(1, Math.max(0, s))) * f.total
+      // Binary search the cumulative-length table for the containing segment.
+      let lo = 0
+      let hi = f.cum.length - 1
+      while (hi - lo > 1) {
+        const mid = (lo + hi) >> 1
+        if (f.cum[mid] <= target) lo = mid
+        else hi = mid
+      }
+      const seg = f.cum[hi] - f.cum[lo]
+      const t = seg > 0 ? (target - f.cum[lo]) / seg : 0
+      return [f.xs[lo] + (f.xs[hi] - f.xs[lo]) * t, f.ys[lo] + (f.ys[hi] - f.ys[lo]) * t]
+    }
   }
+}
+
+// ---- poly path: corner rounding + arc-length sampling -------------------
+
+interface PolyFlat {
+  xs: number[]
+  ys: number[]
+  /** Cumulative arc length at each flattened point (cum[0] = 0). */
+  cum: number[]
+  total: number
+}
+
+// Cache the flattened outline per path object. The store replaces the path
+// object on every edit, so a stale entry can never be read.
+const polyCache = new WeakMap<object, PolyFlat>()
+
+function polyFlat(path: PolyPath): PolyFlat {
+  let f = polyCache.get(path)
+  if (!f) {
+    f = buildPolyFlat(path)
+    polyCache.set(path, f)
+  }
+  return f
+}
+
+const BEZIER_STEPS = 12
+
+/** Flatten the (optionally closed) rounded polyline into a dense point list. */
+function buildPolyFlat(path: PolyPath): PolyFlat {
+  const V = path.pts
+  const xs: number[] = []
+  const ys: number[] = []
+  const push = (x: number, y: number) => {
+    const n = xs.length
+    if (n && Math.abs(xs[n - 1] - x) < 1e-9 && Math.abs(ys[n - 1] - y) < 1e-9) return
+    xs.push(x)
+    ys.push(y)
+  }
+
+  if (V.length === 0) return { xs: [0.5], ys: [0.5], cum: [0], total: 0 }
+  if (V.length === 1) return { xs: [V[0].x], ys: [V[0].y], cum: [0], total: 0 }
+
+  const n = V.length
+  const curv = Math.min(1, Math.max(0, path.curviness))
+
+  // A rounded corner at vertex i: two cut points on the adjacent edges joined by
+  // a quadratic Bézier whose control point is the vertex. Returns null for a
+  // degenerate (zero-length) edge, meaning "leave this corner sharp".
+  const corner = (i: number): { pin: [number, number]; pout: [number, number] } | null => {
+    const B = V[i]
+    const A = V[(i - 1 + n) % n]
+    const C = V[(i + 1) % n]
+    const abx = A.x - B.x
+    const aby = A.y - B.y
+    const cbx = C.x - B.x
+    const cby = C.y - B.y
+    const lab = Math.hypot(abx, aby)
+    const lcb = Math.hypot(cbx, cby)
+    if (lab < 1e-6 || lcb < 1e-6) return null
+    const cut = curv * 0.5 * Math.min(lab, lcb)
+    return {
+      pin: [B.x + (abx / lab) * cut, B.y + (aby / lab) * cut],
+      pout: [B.x + (cbx / lcb) * cut, B.y + (cby / lcb) * cut],
+    }
+  }
+
+  const emitCorner = (i: number) => {
+    const B = V[i]
+    const c = corner(i)
+    if (!c || curv <= 0) {
+      push(B.x, B.y)
+      return
+    }
+    push(c.pin[0], c.pin[1])
+    for (let m = 1; m <= BEZIER_STEPS; m++) {
+      const t = m / BEZIER_STEPS
+      const mt = 1 - t
+      // Quadratic Bézier pin → B (control) → pout.
+      push(
+        mt * mt * c.pin[0] + 2 * mt * t * B.x + t * t * c.pout[0],
+        mt * mt * c.pin[1] + 2 * mt * t * B.y + t * t * c.pout[1],
+      )
+    }
+  }
+
+  if (path.closed) {
+    for (let i = 0; i < n; i++) emitCorner(i)
+    push(xs[0], ys[0]) // close the loop
+  } else {
+    push(V[0].x, V[0].y) // start endpoint stays sharp
+    for (let i = 1; i < n - 1; i++) emitCorner(i)
+    push(V[n - 1].x, V[n - 1].y) // end endpoint stays sharp
+  }
+
+  const cum = [0]
+  for (let k = 1; k < xs.length; k++) {
+    cum.push(cum[k - 1] + Math.hypot(xs[k] - xs[k - 1], ys[k] - ys[k - 1]))
+  }
+  return { xs, ys, cum, total: cum[cum.length - 1] }
+}
+
+/** The exact flattened outline of a poly path (normalized), for crisp drawing. */
+export function polyOutline(path: PolyPath): [number, number][] {
+  const f = polyFlat(path)
+  return f.xs.map((x, i) => [x, f.ys[i]])
 }
 
 /** Apply post-processing (invert / brightness / contrast / saturation) to a
