@@ -37,16 +37,14 @@ export function instantiateGradient(spec: GradientSpec): Gradient {
 const RAINBOW: StopSpec[] = [
   { pos: 0, color: [255, 0, 0] }, //     red        (narrow)
   { pos: 0.05, color: [255, 128, 0] }, //  orange
-  { pos: 0.22, color: [255, 255, 0] }, //  yellow     (wide)
-  { pos: 0.37, color: [128, 255, 0] }, //  chartreuse
-  { pos: 0.44, color: [0, 255, 0] }, //    green      (narrow)
-  { pos: 0.5, color: [0, 255, 128] }, //   spring
-  { pos: 0.58, color: [0, 255, 255] }, //  cyan
-  { pos: 0.65, color: [0, 128, 255] }, //  azure
-  { pos: 0.71, color: [0, 0, 255] }, //    blue       (narrow)
-  { pos: 0.77, color: [128, 0, 255] }, //  violet
-  { pos: 0.83, color: [255, 0, 255] }, //  magenta    (narrow)
-  { pos: 0.92, color: [255, 0, 128] }, //  rose
+  { pos: 0.25, color: [255, 255, 0] }, //  yellow     (wide)
+  { pos: 0.34, color: [0, 255, 0] }, //    green      (narrow: tight between yellow & cyan)
+  { pos: 0.44, color: [0, 255, 255] }, //  cyan
+  { pos: 0.54, color: [0, 128, 255] }, //  azure
+  { pos: 0.62, color: [0, 0, 255] }, //    blue       (narrow)
+  { pos: 0.72, color: [128, 0, 255] }, //  violet
+  { pos: 0.81, color: [255, 0, 255] }, //  magenta    (narrow)
+  { pos: 0.93, color: [255, 0, 128] }, //  rose
   { pos: 1, color: [255, 0, 0] }, //       red
 ]
 
