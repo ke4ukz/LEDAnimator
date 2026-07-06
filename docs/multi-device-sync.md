@@ -20,17 +20,23 @@ authoring and controlling the whole thing as one.
   **dropped** — if every device already talks BLE, a wired clock is extra code
   for no real-world benefit. (If a future install has serious RF-noise problems,
   e.g. a stadium, revisit then as a special case.)
-- **BT roles are strict and consistent (revised 2026-07-05).** Bluetooth does
-  exactly two things: **phone ↔ device WiFi provisioning**, and the **device ↔
-  device sync beacon**. The phone app **only ever controls over WiFi** (program,
-  brightness, pattern, role/group assignment — everything). There is no
-  phone-facing BLE *control* channel, in any mode, so behavior is consistent.
-  *Why:* on the Pico W a device advertising its beacon **cannot also hold a BLE
-  GATT connection** (measured on hardware 2026-07-05 — advertising stops while a
-  central is connected), so BLE control in a sync role isn't reliably possible.
-  Making BLE provisioning-only avoids "works over BT here but not there."
-  Consequence (accepted): a standalone strip with **no WiFi at all** is
-  provision-only — live control needs a network to exist.
+- **BLE control is a conscious, warned fallback — Wi-Fi is preferred (revised
+  2026-07-06).** The app **prefers Wi-Fi** for all control (program, brightness,
+  pattern, role/group assignment) and **never silently falls back** to BLE. But
+  BLE control **is** available as a deliberate action — the user has to tap a
+  BT-marked item to use it. *Why the nuance:* on the Pico W a device advertising
+  its beacon **stops advertising while a BLE central is connected** (measured
+  2026-07-05 — re-confirm sometime, given the ~20 ms→~1 ms beacon surprise), so a
+  BLE session on a **group leader pauses its beacon for the connection's
+  duration**. Followers free-run through that gap and re-lock instantly (validated
+  ±0.05–0.7 frame), and the firmware **resumes advertising on disconnect** (the
+  `_IRQ_DISCONNECT` re-advertise), so the pause is bounded and self-healing.
+  Therefore: when the user intentionally connects over BLE to a device the app
+  knows is a **group leader**, show a warning that **the group will pause for the
+  duration**. Standalone devices and followers are unaffected (they don't beacon).
+  This keeps a **no-reboot recovery path** for a leader whose Wi-Fi went bad
+  (connect over BLE, fix Wi-Fi) without the power-cycle ritual. Purely app-side —
+  the firmware already supports BLE control + resume-on-disconnect.
 - **Recovery is a power-cycle ritual (no boot delay).** To rescue a device whose
   AP vanished (WiFi points at a ghost, BT is busy syncing): **5 interrupted
   power-cycles → standalone** (un-group, keep WiFi); **10 → also clear WiFi
