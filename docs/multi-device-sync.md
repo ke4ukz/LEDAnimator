@@ -171,15 +171,17 @@ draft table below is superseded.
   player at 30 fps **and** advertising device-info + serving GATT. So a follower stays
   fully app-discoverable/provisionable while it syncs.
 
-### Follower — implemented, NOT yet validated
+### Follower — VALIDATED on hardware (2026-07-06)
 
-The follower PLL is ported and committed but **hung a Pico W on first integrated run**
-(hard fault; USB CDC unresponsive, needed a power-cycle). Best hypothesis: a **CYW43
-radio bring-up clash** — a continuous BLE scan started at the same time as the Wi-Fi
-station bring-up. Fix applied (needs on-device retest): the follower starts scanning
-**only after Wi-Fi has settled**, at low duty; plus defensive hardening (no `import`
-in the scan IRQ; `_show_grb` guards short reads). See [`led0-status.md`](led0-status.md)
-for the acquiring/searching indicators. **Next session: power-cycle, flash, retest.**
+The follower PLL is ported, and after fixing a **CYW43 radio bring-up clash** (the
+first run hard-faulted the board — a continuous BLE scan started at the same moment
+as the Wi-Fi station bring-up), it **locks cleanly**: Pico follower ← Pi leader holds
+`locked=True` at **±0.05–0.7 frame** drift with the rate tracking the leader (~30.0
+fps). The fix: the follower starts scanning **only after Wi-Fi has settled**
+(`_follower_start_scan`), at low duty; plus hardening (no `import` in the scan IRQ,
+`_show_grb` short-read guard). Boot order confirmed: Wi-Fi connects, *then* the scan
+starts, no hang. See [`led0-status.md`](led0-status.md) for the acquiring/searching
+indicators. Whole multi-device sync path is now proven end-to-end on real firmware.
 
 ## Core concepts (earlier model — see REVISED above)
 
