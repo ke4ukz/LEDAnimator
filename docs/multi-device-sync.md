@@ -34,13 +34,17 @@ authoring and controlling the whole thing as one.
 - **Recovery is a power-cycle ritual (no boot delay).** To rescue a device whose
   AP vanished (WiFi points at a ghost, BT is busy syncing): **5 interrupted
   power-cycles → standalone** (un-group, keep WiFi); **10 → also clear WiFi
-  config**. Mechanism: each boot bumps a flash counter; after the device runs
-  ~4 s ("commit") the counter resets to 0 — so a normal single glitch never
-  counts and the pattern plays **instantly** every boot. The reset is applied
-  when the user stops cycling and lets it boot for real (so 5 vs 10 is
-  distinguishable). 5-minimum guards against accidental double-boots; flash the
-  strip at the 5/10 marks for tactile confirmation. A one-drag "recovery UF2"
-  (forces standalone) is the ultimate backstop.
+  config**. Mechanism: bump a flash counter **very early in boot** (before BLE, so
+  it sticks even if init hangs); the pattern plays **instantly** every boot; once
+  the device has run ~5 s ("commit") the counter resets to 0 — so a normal single
+  glitch never counts. The criterion is simply *"did you let it run past the
+  commit window before pulling power."* The action fires **at the threshold boot
+  itself**: the 5th short boot comes up standalone and **flashes the strip**; a
+  10th also clears WiFi; only the ~5 s commit resets the counter, so 5 vs 10 stay
+  distinguishable and you get immediate "keep cycling until it flashes" feedback.
+  File ops are trivial (~tens of ms); 5-minimum guards against accidental
+  double-boots. A one-drag "recovery UF2" (forces standalone) is the ultimate
+  backstop.
 - **Reboot = straight back to work, no recovery period.** A device boots directly
   into its saved role and starts its pattern immediately. A follower free-runs
   its pattern at once and scans for its leader in the *background*, locking on
