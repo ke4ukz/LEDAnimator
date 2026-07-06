@@ -147,33 +147,84 @@ class S:
     beacon_at = 0            # time.ticks_ms() of the last beacon advert
 
 
-_buf = None
+# WS2812 output via DMA-fed PIO: the PIO clocks the strip out and DMA feeds it
+# from a RAM buffer, so the ~30us/LED shift-out costs ZERO cpu — housekeeping and
+# the sync beacon run DURING it while the strip latches/holds the frame. Double-
+# buffered (fill the back buffer while the front streams). Buffer prep (brightness
+# scale + GRB reorder) is @micropython.viper: native, sub-millisecond.
+_PIO0_TXF0 = 0x50200010    # PIO0 TX FIFO 0 (state machine 0): the DMA write target
+_dma = rp2.DMA()
+_dma_ctrl = _dma.pack_ctrl(size=2, inc_read=True, inc_write=False, treq_sel=0)  # 32-bit words, DREQ_PIO0_TX0
+_b0 = None
+_b1 = None
+_back = None    # buffer we fill next
+_front = None   # buffer the DMA is (or was last) streaming
+
+
+def _ensure_bufs(n):
+    global _b0, _b1, _back, _front
+    if n <= 0:
+        n = 1
+    if _b0 is None or len(_b0) != n:
+        _b0 = array.array("I", bytes(4 * n))
+        _b1 = array.array("I", bytes(4 * n))
+        _back, _front = _b0, _b1
+
+
+@micropython.viper
+def _fill_grb(src: ptr8, dst: ptr32, n: int, bright: int):
+    # RGB bytes -> GRB-in-the-top-24-bits words with brightness scale (0-256).
+    i = 0
+    while i < n:
+        j = i * 3
+        r = (int(src[j]) * bright) >> 8
+        g = (int(src[j + 1]) * bright) >> 8
+        b = (int(src[j + 2]) * bright) >> 8
+        dst[i] = (g << 24) | (r << 16) | (b << 8)
+        i += 1
+
+
+@micropython.viper
+def _fill_word(dst: ptr32, n: int, word: int):
+    i = 0
+    while i < n:
+        dst[i] = word
+        i += 1
+
+
+def _bri():
+    # Brightness as a 0-256 integer multiplier (256 = full; (v*256)>>8 == v).
+    b = int(S.bright * 256)
+    return 256 if b > 256 else (0 if b < 0 else b)
+
+
+def _dma_kick(buf, n):
+    # Wait out any still-running shift-out (normally long done during the frame
+    # sleep), then stream this buffer. Async: the DMA runs while we do other work.
+    while _dma.active():
+        pass
+    _dma.config(read=buf, write=_PIO0_TXF0, count=n, ctrl=_dma_ctrl, trigger=True)
 
 
 def _show_grb(frame, n):
-    global _buf
-    if _buf is None or len(_buf) != n:
-        _buf = array.array("I", bytes(4 * n))
-    b = S.bright
-    for i in range(n):
-        r = int(frame[i * 3] * b)
-        g = int(frame[i * 3 + 1] * b)
-        bl = int(frame[i * 3 + 2] * b)
-        _buf[i] = (g << 16) | (r << 8) | bl   # WS2812 wants GRB
-    sm.put(_buf, 8)
+    # Fill the back buffer from an RGB frame and stream it (see _dma_kick).
+    global _back, _front
+    _ensure_bufs(n)
+    _fill_grb(frame, _back, n, _bri())
+    _dma_kick(_back, n)
+    _back, _front = _front, _back
 
 
 def _show_solid(rgb, n):
-    global _buf
+    global _back, _front
     if n <= 0:
         return
-    if _buf is None or len(_buf) != n:
-        _buf = array.array("I", bytes(4 * n))
-    b = S.bright
-    v = (int(rgb[1] * b) << 16) | (int(rgb[0] * b) << 8) | int(rgb[2] * b)
-    for i in range(n):
-        _buf[i] = v
-    sm.put(_buf, 8)
+    _ensure_bufs(n)
+    b = _bri()
+    word = (((int(rgb[1]) * b) >> 8) << 24) | (((int(rgb[0]) * b) >> 8) << 16) | (((int(rgb[2]) * b) >> 8) << 8)
+    _fill_word(_back, n, word)
+    _dma_kick(_back, n)
+    _back, _front = _front, _back
 
 
 def _set_pin(arg):
@@ -1437,11 +1488,13 @@ def main():
                 break
             t0 = time.ticks_us()
             S.frame = i
-            _tick()
+            # Kick the DMA shift-out FIRST, then run housekeeping + the beacon
+            # DURING it (the strip holds the latched frame), then sleep the
+            # remainder. So per-frame jitter (e.g. the ~20ms beacon stop/start on
+            # a leader) overlaps the shift-out and is absorbed within budget — the
+            # actual fps holds at nominal.
             _show_grb(f.read(fb), S.n)
-            # Sleep the REMAINDER of the frame period, not a fixed delay on top of
-            # the work — so per-frame jitter (e.g. the beacon refresh) is absorbed
-            # within budget and the actual fps holds at nominal.
+            _tick()
             period = base_delay / S.speed if S.speed > 0 else base_delay
             slack = int(period * 1000000) - time.ticks_diff(time.ticks_us(), t0)
             if slack > 0:
