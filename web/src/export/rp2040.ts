@@ -153,6 +153,7 @@ class S:
     role = "standalone"      # "standalone" | "leader" | "leader-only" | "follower"
     group = 0                # sync group id 0-255 (leaders broadcast it; followers filter on it)
     device = 0               # render-slice id 0-255 (which device's slice this file is)
+    loss_policy = 0          # follower on-sync-loss: 0 indicate / 1 silent / 2 blackout (header byte 17)
     program = 0              # program number carried in the sync beacon (0-255)
     frame = 0                # running frame index, for the leader beacon
     beacon_seq = 0           # beacon sequence, increments each advert
@@ -446,6 +447,7 @@ def _apply_role_header(h):
     S.role = _ROLE_NAMES[h[14]] if h[14] < len(_ROLE_NAMES) else "standalone"
     S.group = h[15]
     S.device = h[16]
+    S.loss_policy = h[17] & 0x03   # sync flags: on-sync-loss behavior
 
 
 def _program_from_name(name):
@@ -1639,11 +1641,18 @@ def _follower_loop(f, nf, fps, fb):
         # false positive, still prompt on an actual loss.
         lost = time.ticks_diff(time.ticks_ms(), S.fol_last_ms) > 2500
         S.fol_locked = (not lost) and abs(drift) <= LOCK_TOL
-        _set_overlay("searching" if lost else None)   # LED0 amber blink while free-running
-        frame = int(S.fol_phase) % nf
-        S.frame = frame
-        f.seek(HEADER_SIZE + frame * fb)
-        _show_grb(f.read(fb), S.n)
+        if lost and S.loss_policy == 2:
+            # blackout policy: go dark until the leader returns (the PLL keeps
+            # free-running underneath, so it re-locks the instant a beacon lands).
+            _set_overlay(None)
+            _show_solid((0, 0, 0), S.n)
+        else:
+            # indicate (amber LED0) or silent — both keep free-running the show.
+            _set_overlay("searching" if (lost and S.loss_policy == 0) else None)
+            frame = int(S.fol_phase) % nf
+            S.frame = frame
+            f.seek(HEADER_SIZE + frame * fb)
+            _show_grb(f.read(fb), S.n)
         _tick()
         slack = period_us - time.ticks_diff(time.ticks_us(), t0)
         if slack > 0:

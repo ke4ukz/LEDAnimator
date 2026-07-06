@@ -22,6 +22,17 @@ export interface DeviceDefaults {
   brightness?: number
 }
 
+/** Installation-level sync settings, stamped into every exported device header
+ *  when the project spans more than one device. */
+export interface MultiDevice {
+  /** Sync group / installation id (0-255); followers filter on it. */
+  group?: number
+  /** The device id designated leader (leader + controller). */
+  leader?: number
+  /** Follower behavior on sync loss: 0 indicate, 1 silent, 2 blackout (see LOSS). */
+  lossPolicy?: number
+}
+
 export interface ProjectFile {
   format: 'led-animator-project'
   version: number
@@ -40,6 +51,8 @@ export interface ProjectFile {
   devices?: Record<string, DeviceSettings>
   /** Shared pin/brightness + the "set all at once" toggle for multi-device export. */
   deviceDefaults?: DeviceDefaults
+  /** Installation-level sync settings (group / leader / on-loss policy). */
+  multiDevice?: MultiDevice
   // `labelMode` is current; `showLabels` is read from older files for back-compat.
   display: { ledScale: number; ledShape: 'sphere' | 'cube'; labelMode?: LabelMode; showLabels?: boolean }
 }

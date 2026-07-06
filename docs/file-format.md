@@ -38,7 +38,8 @@ followed by the pixel data.
 | 14 | 1 | **role** | `0` standalone · `1` leader · `2` leader-only · `3` follower |
 | 15 | 1 | **group id** | `uint8` — sync group / installation (leaders broadcast it; followers filter on it) |
 | 16 | 1 | **device id** | `uint8` — render-slice id (which device's slice this file is) |
-| 17 | 3 | **reserved** | `0` |
+| 17 | 1 | **sync flags** | bits 0–1 = follower on-sync-loss: `0` indicate · `1` silent · `2` blackout |
+| 18 | 2 | **reserved** | `0` |
 
 The **sync fields (role / group / device)** make the file its own role config:
 the file a device plays *is* what tells it whether it's a standalone, a leader, or
@@ -81,7 +82,8 @@ for frame in 0 .. numFrames-1:
 0x0E  00                     role      = 0 (standalone)
 0x0F  00                     group id  = 0
 0x10  00                     device id = 0
-0x11  00 00 00               reserved
+0x11  00                     sync flags (on-loss policy)
+0x12  00 00                  reserved
 0x14  R G B R G B ...        frame 0: 60 LEDs × 3 = 180 bytes
       R G B R G B ...        frame 1: 180 bytes
       ...                    (120 frames total)
@@ -124,8 +126,8 @@ device_id  = h[16]
   check `version` and `pixel format` and refuse values it doesn't understand
   (rather than misinterpreting bytes).
 - The **`version`** byte covers structural changes; the **`pixel format`** byte
-  covers pixel encoding; the three **reserved** bytes (17–19) are for future
-  flags/fields.
+  covers pixel encoding; byte 17 holds **sync flags** and the two **reserved**
+  bytes (18–19) are for future flags/fields.
 - **Planned formats** (see [`STATUS.md`](STATUS.md)) will use the pixel-format
   byte: e.g. RGB565 (2 B/pixel) or **indexed color** (1 B index + a palette
   section). Those add a new `pixel format` value — and, for indexed, a palette

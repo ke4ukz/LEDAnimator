@@ -3,7 +3,7 @@ import { useStore } from '../store'
 import { InfoDot } from './InfoDot'
 import { partitionByDevice } from '../bake'
 import { DEVICES, checkLimits } from '../export/devices'
-import { encodeRaster, estimateBytes } from '../export/format'
+import { encodeRaster, estimateBytes, ROLE, LOSS, type LedaMeta } from '../export/format'
 import { rp2040MainPy, rp2040Readme, rp2040SettingsFiles } from '../export/rp2040'
 import { serializeProjectFile } from '../export/projectFile'
 import { downloadBytes, zipProject } from '../export/download'
@@ -41,6 +41,8 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
   const setDeviceSettings = useStore((s) => s.setDeviceSettings)
   const deviceDefaults = useStore((s) => s.deviceDefaults)
   const setDeviceDefaults = useStore((s) => s.setDeviceDefaults)
+  const multiDevice = useStore((s) => s.multiDevice)
+  const setMultiDevice = useStore((s) => s.setMultiDevice)
 
   // Remember the last target platform + format across sessions.
   const [deviceId, setDeviceId] = useState(() => {
@@ -56,6 +58,21 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
   const [building, setBuilding] = useState(false)
 
   const multi = devices.length > 1
+  const deviceIds = devices.map((d) => d.device)
+  // The leader is one of the exported devices (leader + controller); if the saved
+  // choice isn't present (e.g. it got disabled), fall back to the lowest device.
+  const effectiveLeader = multi ? (deviceIds.includes(multiDevice.leader) ? multiDevice.leader : deviceIds[0]) : -1
+  // Sync metadata stamped into each device's .leda header. Single-device → a plain
+  // standalone; multi → the leader is leader+controller, everyone else a follower.
+  const metaFor = (device: number): LedaMeta =>
+    !multi
+      ? { role: ROLE.standalone, device }
+      : {
+          role: device === effectiveLeader ? ROLE.leader : ROLE.follower,
+          group: multiDevice.group,
+          device,
+          lossPolicy: multiDevice.lossPolicy,
+        }
   const base = sanitizeName(projectName)
   const progNum = String(program).padStart(2, '0')
   const progBase = `${progPrefix(program)}${base}` // e.g. 07-aurora
@@ -124,11 +141,11 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
 
   const exportLeda = () => {
     if (!multi) {
-      downloadBytes(ledaName(devices[0].device), encodeRaster(devices[0].raster, { device: devices[0].device }), 'application/octet-stream')
+      downloadBytes(ledaName(devices[0].device), encodeRaster(devices[0].raster, metaFor(devices[0].device)), 'application/octet-stream')
       return
     }
     const files: Record<string, string | Uint8Array> = {}
-    for (const { device, raster } of devices) files[ledaName(device)] = encodeRaster(raster, { device })
+    for (const { device, raster } of devices) files[ledaName(device)] = encodeRaster(raster, metaFor(device))
     files['manifest.txt'] = buildManifest(ledaName, 'File', 'file')
     downloadBytes(`${progBase}.zip`, zipProject(files), 'application/zip')
   }
@@ -141,7 +158,7 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
       const pf = ledaName(device)
       const dir = multi ? `device-${device}/` : '' // one folder per board when split
       files[`${dir}main.py`] = rp2040MainPy(FW_BUILD)
-      files[`${dir}${pf}`] = encodeRaster(raster, { device })
+      files[`${dir}${pf}`] = encodeRaster(raster, metaFor(device))
       for (const [n, v] of Object.entries(rp2040SettingsFiles(s.pin, Number(s.brightness.toFixed(2)), s.name, pf))) {
         files[`${dir}${n}`] = v
       }
@@ -161,7 +178,7 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
       const { buildRp2040CombinedUf2 } = await import('../export/combinedUf2')
       const buildOne = (device: number, r: typeof raster) => {
         const s = settingsFor(device)
-        return buildRp2040CombinedUf2(r, s.pin, Number(s.brightness.toFixed(2)), ledaName(device), s.name, FW_BUILD)
+        return buildRp2040CombinedUf2(r, s.pin, Number(s.brightness.toFixed(2)), ledaName(device), s.name, FW_BUILD, metaFor(device))
       }
       if (!multi) {
         const uf2 = await buildOne(devices[0].device, devices[0].raster)
@@ -247,6 +264,38 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
                 <option value="leda">Pattern data (.leda)</option>
               </select>
             </label>
+
+            {multi && (
+              <fieldset className="device-block">
+                <legend>Multi-device sync</legend>
+                <label className="field-row">
+                  <span title="This installation's sync group id (0-255), stamped into every device here. Followers only lock to a leader broadcasting this same group.">Group ID</span>
+                  <input
+                    type="number"
+                    min={0}
+                    max={255}
+                    value={multiDevice.group}
+                    onChange={(e) => setMultiDevice({ group: Math.max(0, Math.min(255, Math.floor(Number(e.target.value)) || 0)) })}
+                  />
+                </label>
+                <label className="field-row">
+                  <span title="Which device runs the master clock and broadcasts the sync beacon. It still drives its own strip (leader + controller); every other device becomes a follower.">Leader</span>
+                  <select value={effectiveLeader} onChange={(e) => setMultiDevice({ leader: Number(e.target.value) })}>
+                    {devices.map(({ device }) => (
+                      <option key={device} value={device}>Device {device} — {settingsFor(device).name}</option>
+                    ))}
+                  </select>
+                </label>
+                <label className="field-row">
+                  <span title="What a follower does if it loses the leader's beacon. Either way it keeps its own clock running and re-locks the instant the leader returns.">On sync loss</span>
+                  <select value={multiDevice.lossPolicy} onChange={(e) => setMultiDevice({ lossPolicy: Number(e.target.value) })}>
+                    <option value={LOSS.indicate}>Keep playing · amber LED 0</option>
+                    <option value={LOSS.silent}>Keep playing · silent</option>
+                    <option value={LOSS.blackout}>Blackout until leader returns</option>
+                  </select>
+                </label>
+              </fieldset>
+            )}
 
             {needsSettings && (
               <div className="device-settings">

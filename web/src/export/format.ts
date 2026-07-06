@@ -13,7 +13,8 @@ import type { Raster } from '../types'
 //   14  1    role      (0 standalone, 1 leader, 2 leader-only, 3 follower)
 //   15  1    group id  (0-255 sync group / installation)
 //   16  1    device id (0-255 render-slice: which device this file is for)
-//   17  3    reserved
+//   17  1    sync flags (bits 0-1 = follower on-sync-loss: 0 indicate, 1 silent, 2 blackout)
+//   18  2    reserved
 //   20  ...  for each frame: numLeds × (R,G,B)
 //
 // A leader-only file is a header with role=2 and NO pixel data (numFrames+fps
@@ -29,12 +30,20 @@ export const ROLE = {
   follower: 3,
 } as const
 
+/** A follower's behavior when it loses its leader (header byte 17, bits 0-1). */
+export const LOSS = {
+  indicate: 0, // keep playing (free-run) + amber LED0 "searching" indicator
+  silent: 1, // keep playing (free-run), no on-strip indication
+  blackout: 2, // go dark until the leader returns
+} as const
+
 /** Per-file sync metadata stamped into the header (all default to a plain
  *  standalone device). */
 export interface LedaMeta {
   role?: number
   group?: number
   device?: number
+  lossPolicy?: number
 }
 
 /** Bytes a raster will occupy as a LEDA file (no allocation). */
@@ -62,7 +71,8 @@ function writeHeader(
   dv.setUint8(14, (meta.role ?? ROLE.standalone) & 0xff)
   dv.setUint8(15, (meta.group ?? 0) & 0xff)
   dv.setUint8(16, (meta.device ?? 0) & 0xff)
-  // 17-19 reserved (0)
+  dv.setUint8(17, (meta.lossPolicy ?? LOSS.indicate) & 0x03) // sync flags
+  // 18-19 reserved (0)
 }
 
 /** Encode a raster to the LEDA binary, stamping the sync metadata into the header. */

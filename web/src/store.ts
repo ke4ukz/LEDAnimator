@@ -20,7 +20,7 @@ import {
 import { reserveStopIds } from './gradient'
 import { bakeProject } from './bake'
 import { setTextureReadyListener } from './texture'
-import type { DeviceDefaults, DeviceSettings, ProjectFile } from './export/projectFile'
+import type { DeviceDefaults, DeviceSettings, MultiDevice, ProjectFile } from './export/projectFile'
 
 /** Shared pin/brightness applied to every device when `uniform` is on. */
 type DeviceDefaultsState = { uniform: boolean; pin: number; brightness: number }
@@ -28,6 +28,16 @@ const initialDeviceDefaults = (d?: DeviceDefaults): DeviceDefaultsState => ({
   uniform: d?.uniform ?? true,
   pin: d?.pin ?? 0,
   brightness: d?.brightness ?? 1,
+})
+
+/** Installation-level sync settings for multi-device export (see MultiDevice).
+ *  `leader` is a device id; if it isn't among the exported devices the dialog
+ *  falls back to the lowest present one. */
+type MultiDeviceState = { group: number; leader: number; lossPolicy: number }
+const initialMultiDevice = (m?: MultiDevice): MultiDeviceState => ({
+  group: m?.group ?? 0,
+  leader: m?.leader ?? 0,
+  lossPolicy: m?.lossPolicy ?? 0,
 })
 import { loadSavedProjectFile, loadSavedDirty, loadSavedName, saveProjectFile, clearSavedProject, enforceStorageVersion } from './persistence'
 import { saveProjectToLibrary, listLibrary } from './export/library'
@@ -49,6 +59,8 @@ interface AppState {
   deviceSettings: Record<number, DeviceSettings>
   /** Shared pin/brightness + the "set all devices at once" export toggle. */
   deviceDefaults: DeviceDefaultsState
+  /** Installation-level sync settings (group / leader / on-loss) for export. */
+  multiDevice: MultiDeviceState
   raster: Raster
   frame: number
   playing: boolean
@@ -124,6 +136,7 @@ interface AppState {
   setDeviceSettings: (device: number, patch: Partial<DeviceSettings>) => void
   /** Merge a patch into the shared device defaults (uniform / pin / brightness). */
   setDeviceDefaults: (patch: Partial<DeviceDefaultsState>) => void
+  setMultiDevice: (patch: Partial<MultiDeviceState>) => void
   /** Append LEDs to the arrangement (assigned to the first track; re-bakes). */
   addLeds: (leds: LedPosition[]) => void
   /** Remove LEDs by index (compacts assignments, remaps selection; re-bakes). */
@@ -224,6 +237,7 @@ interface Init {
   program: number
   deviceSettings: Record<number, DeviceSettings>
   deviceDefaults: DeviceDefaultsState
+  multiDevice: MultiDeviceState
   raster: Raster
   selectedTrack: string | null
   ledScale: number
@@ -258,6 +272,7 @@ function initialState(): Init {
       program: saved.program ?? 1,
       deviceSettings: saved.devices ?? {},
       deviceDefaults: initialDeviceDefaults(saved.deviceDefaults),
+      multiDevice: initialMultiDevice(saved.multiDevice),
       raster: bakeProject(project, saved.leds.length, saved.numFrames, saved.fps, saved.leds),
       selectedTrack: saved.tracks[0]?.id ?? null,
       ledScale: saved.display?.ledScale ?? 1,
@@ -276,6 +291,7 @@ function initialState(): Init {
     program: 1,
     deviceSettings: {},
     deviceDefaults: initialDeviceDefaults(),
+    multiDevice: initialMultiDevice(),
     raster: bakeProject(project, 0),
     selectedTrack: null,
     ledScale: 1,
@@ -325,6 +341,7 @@ export const useStore = create<AppState>((set, get) => {
     program: init.program,
     deviceSettings: init.deviceSettings,
     deviceDefaults: init.deviceDefaults,
+    multiDevice: init.multiDevice,
     raster: init.raster,
     frame: 0,
     playing: true,
@@ -567,6 +584,8 @@ export const useStore = create<AppState>((set, get) => {
 
     setDeviceDefaults: (patch) => set((s) => ({ deviceDefaults: { ...s.deviceDefaults, ...patch } })),
 
+    setMultiDevice: (patch) => set((s) => ({ multiDevice: { ...s.multiDevice, ...patch } })),
+
     addLeds: (newLeds) => {
       const { leds, project, raster } = get()
       const fallback = project.tracks[0]?.id ?? ''
@@ -705,6 +724,7 @@ export const useStore = create<AppState>((set, get) => {
         program: s.program,
         devices: s.deviceSettings,
         deviceDefaults: s.deviceDefaults,
+        multiDevice: s.multiDevice,
         display: { ledScale: s.ledScale, ledShape: s.ledShape, labelMode: s.labelMode },
       }
     },
@@ -740,6 +760,7 @@ export const useStore = create<AppState>((set, get) => {
         program: f.program ?? 1,
         deviceSettings: f.devices ?? {},
         deviceDefaults: initialDeviceDefaults(f.deviceDefaults),
+        multiDevice: initialMultiDevice(f.multiDevice),
         ledScale: f.display?.ledScale ?? 1,
         ledShape: f.display?.ledShape ?? 'cube',
         labelMode: labelModeFrom(f.display),
@@ -764,6 +785,7 @@ export const useStore = create<AppState>((set, get) => {
         program: 1,
         deviceSettings: {},
         deviceDefaults: initialDeviceDefaults(),
+        multiDevice: initialMultiDevice(),
         raster: bakeProject(project, 0),
         frame: 0,
         selection: [],
@@ -792,6 +814,7 @@ export const useStore = create<AppState>((set, get) => {
         program: 1,
         deviceSettings: {},
         deviceDefaults: initialDeviceDefaults(),
+        multiDevice: initialMultiDevice(),
         raster: bakeProject(project, 0),
         frame: 0,
         selection: [],

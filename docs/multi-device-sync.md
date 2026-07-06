@@ -376,9 +376,19 @@ name; pin 0; brightness 100%.
   (program/brightness/play/teardown), hold-dark-until-first-beacon, no timeout.
   Hung the board on first run (CYW43 bring-up clash hypothesis); scan now
   sequenced after Wi-Fi. See "Follower — implemented, NOT yet validated" above.
-- **TODO** — role-assignment export UI (which device is leader / leader-only, and
-  the installation group id) + stamping it into headers; power-cycle recovery
-  ritual (5→standalone, 10→clear Wi-Fi) with the recovery flashes.
+- **DONE** — **on-sync-loss policy** (header byte 17, bits 0–1): a follower that
+  loses its leader does one of `indicate` (amber LED 0), `silent` (free-run, no
+  indicator), or `blackout` (dark until the leader returns). Set per-installation
+  in the export UI.
+- **DONE** — **role/group/loss export UI**: the Export dialog's *Multi-device sync*
+  section (shown when >1 device is in the export) sets the Group ID, picks the
+  **Leader** (one of the devices → leader+controller; the rest follow), and the
+  on-sync-loss policy — all stamped into every device's header. A device is only
+  in the export if it has an enabled LED, so disabling every other strip exports
+  the remaining one as plain **standalone**.
+- **TODO** — **dedicated leader-only** export option (a coordinator Pico with no
+  strip = a header-only file across all formats incl. a header-only UF2); the
+  power-cycle recovery ritual (5→standalone, 10→clear Wi-Fi) + recovery flashes.
 
 ## Explicitly out of scope
 
@@ -405,7 +415,8 @@ name; pin 0; brightness 100%.
    PROGRAM/TEARDOWN; LED-0 status.~~ **DONE (2026-07-06).**
 3. **Firmware: follower scan + phase-lock — retest & finish** (code committed, hung
    on first run; fix applied, needs on-device confirmation).
-4. Web: role-assignment export UI (leader / leader-only / follower per device) +
-   installation group id, stamped into headers.
-5. Firmware: power-cycle recovery ritual (5→standalone, 10→clear Wi-Fi) + flashes.
-6. iOS/macOS: group view, batch upload, consistency check, provisioning-only BLE.
+4. ~~Web: role/group/on-loss export UI (leader picker + group id, stamped into
+   headers).~~ **DONE (2026-07-06)** — except the *dedicated leader-only* option.
+5. Web: dedicated leader-only export (header-only coordinator file, all formats).
+6. Firmware: power-cycle recovery ritual (5→standalone, 10→clear Wi-Fi) + flashes.
+7. iOS/macOS: group view, batch upload, consistency check, provisioning-only BLE.
