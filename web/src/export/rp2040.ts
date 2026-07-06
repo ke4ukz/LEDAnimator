@@ -1533,7 +1533,7 @@ def _follower_start_scan():
     if S.wifi_configured and S.wifi_state not in ("connected", "failed"):
         return   # a Wi-Fi connect is still in flight — wait it out
     try:
-        S.ble.gap_scan(0, 100000, 30000, False)   # indefinite, 100ms interval, 30ms window, passive
+        S.ble.gap_scan(0, 50000, 30000, False)   # indefinite, 50ms interval / 30ms window (~60% duty), passive
         S.scan_started = True
         print("follower scan started (wifi", S.wifi_state, ")")
     except Exception as e:
@@ -1624,7 +1624,11 @@ def _follower_loop(f, nf, fps, fb):
             time.sleep_ms(20)
             continue
 
-        lost = time.ticks_diff(time.ticks_ms(), S.fol_last_ms) > 1000
+        # Followers are built to free-run through beacon gaps SILENTLY — only flag
+        # "searching" after a long gap (a real leader loss), not a normal missed
+        # advert or two. 2.5s is ~25 missed 10Hz beacons: essentially never a
+        # false positive, still prompt on an actual loss.
+        lost = time.ticks_diff(time.ticks_ms(), S.fol_last_ms) > 2500
         S.fol_locked = (not lost) and abs(drift) <= LOCK_TOL
         _set_overlay("searching" if lost else None)   # LED0 amber blink while free-running
         frame = int(S.fol_phase) % nf
