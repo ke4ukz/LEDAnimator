@@ -1255,9 +1255,8 @@ def _adv_beacon():
 
 
 def _restart_adv():
-    # Full (re)start of advertising for the current role — used on role change /
-    # disconnect / BLE start. The stop+start is heavy, so it is NOT used for the
-    # periodic beacon refresh (see _beacon_step). Guarded if BLE is down.
+    # (Re)advertise the current role's payload. Leaders beacon; everyone else
+    # advertises device info. Guarded so it is harmless if BLE is down.
     if S.ble is None:
         return
     try:
@@ -1269,30 +1268,18 @@ def _restart_adv():
         pass
 
 
-# How often the leader rewrites the beacon payload. Kept low (not the ~100ms
-# advertising interval) because the follower's PLL extrapolates frame/ts between
-# updates, so infrequent refreshes still hold tight lock — and each refresh costs
-# player-loop time, so fewer is better for playback.
-_BEACON_REFRESH_MS = 500
-
-
 def _beacon_step():
-    # Leader: rewrite the beacon payload (fresh frame/ts/seq) in place — NO
-    # stop/start — so it doesn't stall the WS2812 player loop. Runs even while a
-    # phone is connected (CYW43 advertise-while-connected is validated on HW).
+    # Leader: refresh the beacon (fresh frame/ts/seq) a few Hz, even while a phone
+    # is connected. advertise-while-connected on the CYW43 is the coexistence case
+    # to validate on hardware; guarded so any failure is harmless.
     if S.role != "leader" or S.ble is None:
         return
-    if time.ticks_diff(time.ticks_ms(), S.beacon_at) < _BEACON_REFRESH_MS:
+    now = time.ticks_ms()
+    if time.ticks_diff(now, S.beacon_at) < 150:
         return
-    S.beacon_at = time.ticks_ms()
+    S.beacon_at = now
     S.beacon_seq = (S.beacon_seq + 1) & 0xFF
-    try:
-        # Update adv data in place: gap_advertise with new data while already
-        # advertising, without the heavy gap_advertise(None) stop first.
-        rsp = _ad(0x09, S.name.encode()[:26])
-        S.ble.gap_advertise(100000, adv_data=_adv_beacon(), resp_data=rsp)
-    except Exception:
-        pass
+    _restart_adv()
 
 
 def _load_role():
