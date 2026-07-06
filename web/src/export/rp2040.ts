@@ -1435,10 +1435,17 @@ def main():
         for i in range(frames):
             if S.reload or S.mode != "play" or S.uploading:
                 break
+            t0 = time.ticks_us()
             S.frame = i
             _tick()
             _show_grb(f.read(fb), S.n)
-            time.sleep(base_delay / S.speed if S.speed > 0 else base_delay)
+            # Sleep the REMAINDER of the frame period, not a fixed delay on top of
+            # the work — so per-frame jitter (e.g. the beacon refresh) is absorbed
+            # within budget and the actual fps holds at nominal.
+            period = base_delay / S.speed if S.speed > 0 else base_delay
+            slack = int(period * 1000000) - time.ticks_diff(time.ticks_us(), t0)
+            if slack > 0:
+                time.sleep_us(slack)
 
 
 main()

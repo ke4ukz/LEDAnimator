@@ -54,7 +54,59 @@ authoring and controlling the whole thing as one.
   devices only need to agree on *which frame index is now*. We fight jitter and
   drift, not latency; periodic beacons phase-lock free-running counters.
 
-## Core concepts
+## REVISED model (2026-07-06) — roles in the file, auto-discovery, DMA runtime
+
+This supersedes the pairing flow and the separate role.txt/GROUP config below; the
+beacon wire format and the follower PLL are unchanged.
+
+- **Role / group / device-id / timeline live in the `.leda` header, not separate
+  config.** A device's role IS the file it's playing: **standalone**, **follower**,
+  **leader+controller**, or **leader-only** — each header carries the device id +
+  group id + numFrames + fps. Switching role = loading a different file. No
+  role.txt, no pairing state. Per-device export already emits device-specific files,
+  so it just stamps role/group/id into each header.
+- **leader-only = a header-only `.leda`** (numFrames + fps + role + group, *no* pixel
+  data). Same load-and-run code path — it runs the master clock + beacon and skips
+  the strip. **leader+controller** is the identical path *with* real pixel data
+  (drives its strip AND beacons).
+- **Followers auto-discover their leader by group id — no manual pairing.** "Hear a
+  group-X beacon → sync to it." Different installations use different group ids to
+  avoid cross-sync. Hobby-grade trust (a rogue group-X beacon would be obeyed —
+  optional `AUTH` later); two leaders on one group is a misconfig (tie-break by
+  seq/signal, or just document "don't").
+- **Followers stay app-reachable over Wi-Fi** for management (status, file upload,
+  config) — receiving the beacon is a cheap BLE interrupt and the DMA/viper player
+  frees the CPU, so a follower syncs AND serves the app. Live *animation* switching
+  is a group action (leader's program #); per-device file management is individual.
+
+## Runtime & performance (2026-07-06)
+
+- **DMA-fed PIO for WS2812, on every device.** The PIO clocks the strip out
+  independently; DMA feeds it from a RAM buffer with ZERO CPU during the
+  ~30 ms/1000-LED shift-out (double-buffer: fill next while current streams). Buffer
+  prep (flash read + brightness scale + GRB reorder) in `@micropython.viper` (native,
+  ~ms). This is the right architecture regardless of sync — smoother standalone,
+  higher ceiling, less CPU heat.
+- **Because the CPU is free during shift-out, the ~20 ms beacon stall hides in that
+  idle window** → **leader+controller is viable for modest strips on ONE core**
+  (rough: ~several hundred LEDs @30 fps, ~1000 @15 fps), no custom firmware. BLE
+  (CYW43/SPI) and the LED pin (PIO/DMA) are separate hardware, so they overlap.
+- **Sleep the remainder, not a fixed delay (DONE 2026-07-06).** The player loop sleeps
+  `period − elapsed` (was a fixed `base_delay` on top of the work), so jitter incl.
+  the beacon is absorbed within budget and actual fps holds at nominal.
+- **Auto-scale fps to strip length.** Max fps is bounded by shift-out (~30 µs/LED) +
+  prep; cap the authored fps per strip (build on `ws2812MaxFps`/device profiles). For
+  a sync group, group fps = the slowest (longest) device's ceiling — all share one
+  timeline.
+- **~500-LED soft limit in the editor** → nudge to split across devices (trivial now:
+  per-LED device ids + per-device export). Dedicated leader only forced near the
+  ~1000-LED single-device ceiling.
+- **Optional, later: core-1 renderer** for max single-device performance — needs a C
+  module that releases the GIL, or a custom-firmware core-1 loop (a bespoke UF2).
+  `_thread`/viper alone share the GIL, so no free parallelism there. Back-pocket
+  once DMA+viper is in.
+
+## Core concepts (earlier model — see REVISED above)
 
 ### Roles
 
