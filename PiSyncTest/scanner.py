@@ -62,41 +62,62 @@ def parse_ads(data):
     return out
 
 
-def main():
-    hci = HCI(0)
+def decode_advert(d):
+    """Decode one HCI LE Advertising Report packet into an LED Animator advert
+    dict (or None if it isn't ours). Shared by the scanner and the follower."""
+    if len(d) < 5 or d[0] != HCI_EVENT_PKT or d[1] != EVT_LE_META or d[3] != 0x02:
+        return None  # not an LE Advertising Report
+    idx = 5  # skip pkt(1) evt(1) plen(1) subevent(1) num_reports(1)
+    addr = d[idx + 2:idx + 8]
+    dlen = d[idx + 8]
+    adv = d[idx + 9:idx + 9 + dlen]
+    rssi = d[idx + 9 + dlen]
+    rssi = rssi - 256 if rssi > 127 else rssi
+    ads = parse_ads(adv)
+    if not any(v == b'\xda\x1e' for v in ads.get(0x03, [])):
+        return None  # not our 16-bit UUID
+    a = ':'.join('%02X' % b for b in addr[::-1])
+    for m in ads.get(0xFF, []):
+        if len(m) < 5 or m[0:2] != b'\xff\xff' or m[2:4] != b'LD':
+            continue  # magic check
+        typ = m[4]
+        if typ == 0x02 and len(m) >= 5 + 13:
+            g, fr, ts, pr, br, fl, sq = struct.unpack('<BIIBBBB', m[5:5 + 13])
+            return {'kind': 'beacon', 'addr': a, 'rssi': rssi, 'group': g, 'frame': fr,
+                    'ts': ts, 'program': pr, 'bright': br, 'flags': fl, 'seq': sq}
+        if typ == 0x01:
+            return {'kind': 'device', 'addr': a, 'rssi': rssi, 'id': m[5:8].hex()}
+    return None
+
+
+def open_scanner(dev=0, timeout=5):
+    """Open the HCI USER channel and start passive scanning; return the HCI."""
+    hci = HCI(dev)
     hci.cmd(OP_RESET)
-    # passive scan, interval/window 0x0030 (~30ms), public addr, no filter
-    hci.cmd(OP_SCAN_PARAMS, struct.pack('<BHHBB', 0x00, 0x0030, 0x0030, 0x00, 0x00))
+    hci.cmd(OP_SCAN_PARAMS, struct.pack('<BHHBB', 0x00, 0x0030, 0x0030, 0x00, 0x00))  # passive ~30ms
     hci.cmd(OP_SCAN_ENABLE, struct.pack('<BB', 0x01, 0x00))  # enable, keep duplicates
+    hci.s.settimeout(timeout)
+    return hci
+
+
+def main():
+    hci = open_scanner(timeout=5)
     print('scanning for 0x1EDA / "LD" adverts...')
     sys.stdout.flush()
-    hci.s.settimeout(5)
     while True:
         try:
             d = hci.s.recv(258)
         except socket.timeout:
             continue
-        if len(d) < 5 or d[0] != HCI_EVENT_PKT or d[1] != EVT_LE_META or d[3] != 0x02:
-            continue  # not an LE Advertising Report
-        idx = 5  # skip pkt(1) evt(1) plen(1) subevent(1) num_reports(1)
-        et = d[idx]; at = d[idx + 1]; addr = d[idx + 2:idx + 8]; dlen = d[idx + 8]  # noqa: F841
-        adv = d[idx + 9:idx + 9 + dlen]
-        rssi = d[idx + 9 + dlen] - 256 if d[idx + 9 + dlen] > 127 else d[idx + 9 + dlen]
-        ads = parse_ads(adv)
-        if not any(v == b'\xda\x1e' for v in ads.get(0x03, [])):
-            continue  # not our 16-bit UUID
-        a = ':'.join('%02X' % b for b in addr[::-1])
-        for m in ads.get(0xFF, []):
-            if len(m) < 5 or m[0:2] != b'\xff\xff' or m[2:4] != b'LD':
-                continue  # magic check
-            typ = m[4]
-            if typ == 0x02 and len(m) >= 5 + 13:
-                g, fr, ts, pr, br, fl, sq = struct.unpack('<BIIBBBB', m[5:5 + 13])
-                print('BEACON %s rssi=%d grp=%d frame=%d ts=%d prog=%d bright=%d flags=%d seq=%d'
-                      % (a, rssi, g, fr, ts, pr, br, fl, sq))
-            elif typ == 0x01:
-                print('DEVICE %s rssi=%d id=%s' % (a, rssi, m[5:8].hex()))
-            sys.stdout.flush()
+        b = decode_advert(d)
+        if not b:
+            continue
+        if b['kind'] == 'beacon':
+            print('BEACON %(addr)s rssi=%(rssi)d grp=%(group)d frame=%(frame)d ts=%(ts)d '
+                  'prog=%(program)d bright=%(bright)d flags=%(flags)d seq=%(seq)d' % b)
+        else:
+            print('DEVICE %(addr)s rssi=%(rssi)d id=%(id)s' % b)
+        sys.stdout.flush()
 
 
 if __name__ == '__main__':

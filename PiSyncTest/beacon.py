@@ -26,18 +26,24 @@ OP_ADV_PARAMS = _op(0x08, 0x0006)
 OP_ADV_DATA = _op(0x08, 0x0008)
 OP_ADV_ENABLE = _op(0x08, 0x000A)
 
-GROUP_DEFAULT = b'LEDA'
+GROUP_DEFAULT = 0
+UUID16 = b'\xda\x1e'   # 0x1EDA, little-endian on air
+MAGIC = b'LD'
 
 
 def pack_payload(group=GROUP_DEFAULT, frame=0, ts=0, program=7, bright=255, flags=1, seq=0):
-    """group(4 raw) + frame(u32 LE) + ts_ms(u32 LE) + program + bright + flags + seq = 16 bytes."""
-    return group[:4].ljust(4, b'\x00') + struct.pack(
-        '<IIBBBB', frame & 0xFFFFFFFF, ts & 0xFFFFFFFF, program & 0xFF, bright & 0xFF, flags & 0xFF, seq & 0xFF)
+    """Type 0x02 beacon payload (see docs/sync-beacon.md):
+    group(u8) frame(u32) ts_ms(u32) program(u8) bright(u8) flags(u8) seq(u8) = 13 bytes."""
+    return struct.pack('<BIIBBBB', group & 0xFF, frame & 0xFFFFFFFF, ts & 0xFFFFFFFF,
+                       program & 0xFF, bright & 0xFF, flags & 0xFF, seq & 0xFF)
 
 
 def _adv_data(payload):
-    mfg = bytes([1 + 2 + len(payload), 0xFF, 0xFF, 0xFF]) + payload  # len, 0xFF type, company 0xFFFF, payload
-    ad = b'\x02\x01\x06' + mfg                                       # Flags AD + manufacturer AD
+    # Flags + 16-bit UUID (0x1EDA) + manufacturer(0xFFFF + magic + type 0x02 + payload).
+    mfg = b'\xff\xff' + MAGIC + b'\x02' + payload
+    ad = (b'\x02\x01\x06'
+          + bytes([1 + len(UUID16), 0x03]) + UUID16
+          + bytes([1 + len(mfg), 0xFF]) + mfg)
     return bytes([len(ad)]) + ad + b'\x00' * (31 - len(ad))
 
 

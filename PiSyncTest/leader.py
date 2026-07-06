@@ -15,7 +15,7 @@ import beacon
 
 FPS = 30
 NUMFRAMES = 300           # 10 s loop
-GROUP = b'LEDA'
+GROUP = 0                 # sync group id (u8)
 BEACON_HZ = 10
 DRAW_HZ = 6
 
@@ -58,7 +58,7 @@ def build_frame(st, under):
     d.text((12, 6), 'LEADER', font=font(30), fill=(120, 230, 140))
     d.ellipse((300, 15, 312, 27), fill=(90, 200, 255))
     d.text((318, 8), 'BLE', font=font(18), fill=(150, 200, 240))
-    d.text((392, 8), f'grp {GROUP.decode()}', font=font(16), fill=(170, 180, 200))
+    d.text((392, 8), f'grp {GROUP}', font=font(16), fill=(170, 180, 200))
 
     centered(d, (0, 40, 480, 138), f'{int(st.frame_f):04d}', font(76), (235, 240, 255))
     d.text((330, 104), f'/{NUMFRAMES}', font=font(18), fill=(120, 130, 150))
