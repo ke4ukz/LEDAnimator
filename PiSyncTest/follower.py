@@ -18,9 +18,11 @@ from scanner import open_scanner, decode_advert
 
 FPS = float(sys.argv[1]) if len(sys.argv) > 1 and sys.argv[1].replace('.', '').isdigit() else 30.0
 NUMFRAMES = int(sys.argv[2]) if len(sys.argv) > 2 and sys.argv[2].isdigit() else 300
-LOCK_TOL = 4.0     # |drift| under this (frames) = LOCKED
-SNAP_TOL = 25.0    # |drift| over this = hard resync
-GAIN = 0.15        # proportional nudge toward the leader per beacon
+LOCK_TOL = 2.0     # |drift| under this (frames) = LOCKED
+KP = 0.25          # PLL phase gain (fraction of error corrected per beacon)
+KI = 0.03          # PLL rate gain (frames/s of rate per frame of error, per beacon)
+R_MIN, R_MAX = 1.0, 240.0
+OFF_DECAY = 2.0    # clock-offset filter decay, ms/s (tracks crystal skew, rejects noise)
 
 
 def wrap_err(target, local, n):
@@ -57,10 +59,13 @@ def main():
     print(f'follower running (initial fps={FPS} numframes={NUMFRAMES}; both auto-adapt)')
     sys.stdout.flush()
 
-    fps_est = FPS          # adapts to the measured leader rate
-    nf = NUMFRAMES         # auto-detected from a wrap
-    local = 0.0
-    prev = time.monotonic()
+    # PLL state: a virtual "leader clock" — a phase (frame) advancing at rate R.
+    phase = 0.0            # current displayed frame (float)
+    R = FPS               # rate (frames/sec); the PLL's integral term tunes it
+    nf = NUMFRAMES        # loop length, auto-detected from a wrap
+    off = None            # clock offset (leader_ms - local_ms), max-filtered
+    seeded = False
+    local_prev = time.monotonic()
     last_beacon = last_draw = last_print = 0.0
     drift = 0.0
     prev_frame = prev_ts = None
@@ -69,10 +74,11 @@ def main():
 
     while True:
         now = time.monotonic()
-        dt = now - prev
-        prev = now
+        nowms = now * 1000.0
+        dt = now - local_prev
+        local_prev = now
         if st['playing']:
-            local = (local + dt * fps_est) % nf
+            phase = (phase + dt * R) % nf   # free-run at the current estimated rate
 
         try:
             b = decode_advert(hci.s.recv(258))
@@ -82,36 +88,46 @@ def main():
                 st.update(group=b['group'], program=b['program'], rssi=b['rssi'], lframe=b['frame'],
                           bright_pct=round(b['bright'] / 255 * 100), playing=bool(b['flags'] & 1))
 
-                # Measure the leader's rate; on a wrap, solve for the loop length.
+                # Clock offset: max of (leader_ts - local) rejects packet-age noise
+                # (older packets read lower), slow decay tracks crystal skew.
+                osamp = b['ts'] - nowms
+                off = osamp if off is None else max(osamp, off - OFF_DECAY * dt)
+
+                # Rate seed + loop-length detection from consecutive beacons.
                 if prev_frame is not None:
-                    dts = (b['ts'] - prev_ts) & 0xFFFFFFFF
+                    dts = (b['ts'] - prev_ts)
                     if 0 < dts < 5000:
                         if b['frame'] >= prev_frame:
                             dfr = b['frame'] - prev_frame
-                        else:  # wrapped: true frames elapsed ~= rate*dt, so nf = prev - now + elapsed
-                            elapsed = fps_est * dts / 1000.0
-                            nf_est = int(round(prev_frame - b['frame'] + elapsed))
+                        else:  # wrapped: nf = prev - now + (frames elapsed ~= R*dt)
+                            nf_est = int(round(prev_frame - b['frame'] + R * dts / 1000.0))
                             if 10 < nf_est < 100000:
                                 nf = nf_est
                             dfr = b['frame'] + nf - prev_frame
-                        inst = dfr / (dts / 1000.0)
-                        if 1 < inst < 240:
-                            fps_est = 0.85 * fps_est + 0.15 * inst
-                            st['lfps'] = fps_est
+                        meas = dfr / (dts / 1000.0)
+                        if 1 < meas < 240 and not seeded:
+                            R = meas   # seed once for a fast initial lock
+                            seeded = True
                 prev_frame, prev_ts = b['frame'], b['ts']
 
-                lf = b['frame'] % nf
-                drift = wrap_err(lf, local % nf, nf)
+                # Predict the leader's CURRENT frame: its frame at ts_leader, plus
+                # what it has advanced since (age = leader-time-now - ts_leader).
+                age = max(0.0, nowms + off - b['ts'])
+                target = (b['frame'] + R * age / 1000.0) % nf
                 if not st['playing']:
-                    local = lf                         # paused: mirror the leader's frame
-                elif abs(drift) > SNAP_TOL:
-                    local = lf                         # too far off: hard resync
+                    phase = target
                 else:
-                    local = (local + drift * GAIN) % nf  # gentle phase-lock
+                    drift = wrap_err(target, phase, nf)
+                    if abs(drift) > nf * 0.3:      # big jump (restart / new program): resync
+                        phase = target
+                    else:                          # PLL: correct phase (P) and rate (I)
+                        phase = (phase + KP * drift) % nf
+                        R = min(R_MAX, max(R_MIN, R + KI * drift))
+                st['lfps'] = R
         except socket.timeout:
             pass
 
-        st['local'] = local % nf
+        st['local'] = phase % nf
         st['drift'] = drift
         st['nf'] = nf
         st['searching'] = (now - last_beacon) > 1.0 or st['bcount'] == 0
@@ -121,8 +137,8 @@ def main():
             render(disp, st)
             last_draw = now
         if now - last_print > 1.0:
-            print('local=%.0f leader=%d drift=%+.1f fps=%.1f nf=%d locked=%s search=%s beacons=%d'
-                  % (local, st['lframe'], drift, fps_est, nf, st['locked'], st['searching'], st['bcount']))
+            print('phase=%.1f leader=%d drift=%+.2f R=%.2f nf=%d off=%.0f locked=%s beacons=%d'
+                  % (phase, st['lframe'], drift, R, nf, (off or 0), st['locked'], st['bcount']))
             sys.stdout.flush()
             last_print = now
 
