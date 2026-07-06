@@ -106,18 +106,34 @@ export interface DeviceRaster {
 
 /**
  * Split the full raster into one stream per device id (see `LedPosition.device`),
- * ordered by ascending device id. Unassigned LEDs are dropped (not wired); each
- * device keeps its LEDs in chain order. This is `compactRaster` generalized: a
- * project that never sets a device id yields a single entry for device 0.
+ * ordered by ascending device id. This is `compactRaster` generalized: a project
+ * that never sets a device id yields a single entry for device 0.
  *
- * Always returns at least one entry (device 0, possibly empty) so callers can
- * treat single- and multi-device projects uniformly.
+ * A device is included **only if it has at least one *enabled* LED** (assigned and
+ * not disabled). A device whose LEDs are all unassigned or disabled is dark, so it
+ * is left out of the export entirely — e.g. disable every *other* strip to export
+ * and test just one, and that lone strip exports on its own (the caller then treats
+ * a single-device export as **standalone**, even if its device id isn't 0). Within
+ * a kept device, disabled LEDs are still included (they hold real chain slots) and
+ * emit black; unassigned LEDs are always dropped (not wired).
+ *
+ * Always returns at least one entry (device 0, possibly empty) so callers can treat
+ * single- and multi-device projects uniformly.
  */
 export function partitionByDevice(raster: Raster, leds: LedPosition[]): DeviceRaster[] {
+  // First pass: which devices have anything lit (≥1 enabled LED)?
+  const lit = new Set<number>()
+  for (let i = 0; i < raster.numLeds; i++) {
+    if (leds[i]?.unassigned || leds[i]?.disabled) continue
+    lit.add(leds[i]?.device ?? 0)
+  }
+  // Second pass: build each lit device's slice from ALL its assigned LEDs (the
+  // disabled ones are real chain slots, just black).
   const groups = new Map<number, number[]>()
   for (let i = 0; i < raster.numLeds; i++) {
     if (leds[i]?.unassigned) continue
     const d = leds[i]?.device ?? 0
+    if (!lit.has(d)) continue
     let arr = groups.get(d)
     if (!arr) groups.set(d, (arr = []))
     arr.push(i)
