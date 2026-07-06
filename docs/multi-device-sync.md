@@ -137,6 +137,50 @@ beacon wire format and the follower PLL are unchanged.
   `_thread`/viper alone share the GIL, so no free parallelism there. Back-pocket
   once DMA+viper is in.
 
+## Status & decisions (2026-07-06)
+
+Ratified decisions (supersede the earlier-model sections below):
+
+1. **The `.leda` header is the single source of truth for role / group / device-id.**
+   No `role.txt` / `group.txt`, no pairing state. Changing a device's role = loading
+   a different file. `ROLE` / `GROUP` / `DEVICE` are **read-only** report commands.
+2. **`PROGRAM <n>` is the group jukebox verb** — a leader loads its own `NN` slice and
+   stamps `n` into the beacon; followers hear it and load their own `NN` slice.
+   Program # is the file's `NN-` name prefix, not a header field.
+3. **`TEARDOWN` is best-effort** — the leader broadcasts the teardown flag for ~2 s
+   then silences the beacon; an operator stop over Wi-Fi mops up any straggler.
+4. **A follower trusts its own header's fps/numFrames** — no auto-detection (unlike the
+   Pi bench rig, which had no file). The PLL only phase-locks + trims rate.
+5. **On a program-# change a follower hard-seeks** — reload the slice, jump to the
+   beacon frame (the PLL's big-jump branch). No crossfade.
+
+Group id is **1 byte** (0–255), matching the on-air beacon; the "4 bytes" in the old
+draft table below is superseded.
+
+### What's built & hardware-validated (Pico W, MicroPython 1.28)
+
+- **DMA-fed PIO WS2812 player + viper buffer prep.** ~30 µs/LED shift-out costs zero
+  CPU; a 200-LED leader frame (incl. beacon) peaks at **1.7 ms** work vs a 33 ms
+  budget. The `gap_advertise` stop/start is only **~1 ms** (not the ~20 ms the
+  pre-DMA player suffered) — so **leader+controller holds nominal fps on one core**
+  for modest strips, with large headroom. Core-1 stays a back-pocket item.
+- **Header roles + `PROGRAM`/`TEARDOWN`/read-only `ROLE`/`GROUP`/`DEVICE`** — verified
+  over Wi-Fi/TCP (`PROGRAM 7` loads the follower slice; the firmware re-reads role/
+  group/device from its header).
+- **BLE coexistence** — a device can `gap_scan` for beacons **while** running the DMA
+  player at 30 fps **and** advertising device-info + serving GATT. So a follower stays
+  fully app-discoverable/provisionable while it syncs.
+
+### Follower — implemented, NOT yet validated
+
+The follower PLL is ported and committed but **hung a Pico W on first integrated run**
+(hard fault; USB CDC unresponsive, needed a power-cycle). Best hypothesis: a **CYW43
+radio bring-up clash** — a continuous BLE scan started at the same time as the Wi-Fi
+station bring-up. Fix applied (needs on-device retest): the follower starts scanning
+**only after Wi-Fi has settled**, at low duty; plus defensive hardening (no `import`
+in the scan IRQ; `_show_grb` guards short reads). See [`led0-status.md`](led0-status.md)
+for the acquiring/searching indicators. **Next session: power-cycle, flash, retest.**
+
 ## Core concepts (earlier model — see REVISED above)
 
 ### Roles
@@ -209,37 +253,31 @@ so the system works with or without WiFi.
 
 ## Follower state machine
 
-- **Discover:** scan for leader beacons; the app (or on-device UI) lists leaders;
-  user picks one → store its group id + role=follower (persisted).
-- **Lock-in:** once a leader is selected, the follower goes **listen-only** — all
-  it does is scan for its group's beacons and apply them (frame phase-lock,
-  program, brightness, flags). No WiFi control, minimal radio contention.
-- **Phase-lock:** on each beacon, note local time, compare beacon frame to local
-  free-running frame, nudge the local counter/rate (small PLL). Free-run between
-  beacons. Drift is tens of ppm, so a beacon every ~0.25–1 s is plenty.
-- **Teardown:** leader broadcasts a teardown flag → followers return to standalone
-  (and become individually controllable again, e.g. for re-upload).
+- **Discover:** a follower (role from its file header) **auto-discovers** its leader
+  by group id — "hear a group-X beacon → lock to it." No manual pairing.
+- **Phase-lock:** on each beacon, predict the leader's current frame (beacon frame +
+  rate × age) and nudge a free-running counter's phase + rate (a small PLL). Free-run
+  between beacons. Drift is tens of ppm, so a beacon every ~0.1–1 s is plenty. The
+  follower stays Wi-Fi-controllable throughout (scan + Wi-Fi coexist on the CYW43).
+- **Teardown:** leader broadcasts the teardown flag → followers **stop** (go dark) and
+  await an operator command; they remain individually reachable over Wi-Fi.
 
-### Failure / reboot behavior
+### Failure / reboot behavior (see the REVISED model — no timeout)
 
-Persist **role** and **bound group id**.
+Role + group come from the played file's header, so nothing extra is persisted.
 
-- **Rebooted follower:** boot as follower → search for *its* group → if not found
-  within N seconds, fall back to **standalone** (so it isn't stuck dark forever).
-- **Running follower, leader vanishes:** keep waiting patiently (accept clock
-  drift) — do *not* give up. The reboot-search timeout is the only give-up path.
+- **Rebooted follower:** holds **dark** (LED0 `acquiring`) until its first beacon,
+  then starts already in sync — never a visible catch-up snap, never a standalone
+  fallback. (The old "search N seconds → standalone" branch is **removed**.)
+- **Running follower, leader vanishes:** keeps free-running (LED0 `searching`
+  overlay) and re-locks when the leader returns. The only stops are an explicit
+  operator command or a graceful `TEARDOWN`.
 
-## Pairing indicator (LED 0)
+## Status indicator (LED 0)
 
-While pairing, use LED 0 as a status light driven by the **synced frame counter**:
-
-- Pulse once per second and fade out, generated from each device's synced clock —
-  so a locked group pulses **in unison** and a straggler is obvious (off-phase or
-  dark).
-- Color-code role/state: leader / in-sync follower / searching-unsynced are three
-  distinct colors. One glance reads the whole group's state.
-
-LED 0 returns to normal pattern output after pairing / teardown.
+Auto-discovery replaced manual pairing, so there is no "pairing mode." LED 0 is a
+general status light — `acquiring` / `searching` / `nofile` and the whole-strip
+recovery flashes — specified in **[`led0-status.md`](led0-status.md)**.
 
 ## Workflows
 
@@ -323,13 +361,16 @@ name; pin 0; brightness 100%.
 
 ## Firmware changes
 
-- Role config (standalone/leader/follower) + device id + bound group id,
-  persisted.
-- Program library: scan files, parse numeric filename prefix, index by program #.
-- Leader: broadcast state beacon; accept phone control; teardown message.
-- Follower: discover/scan, lock-in listen-only, phase-lock, apply state,
-  reboot-search-timeout → standalone fallback.
-- Pairing-mode LED-0 indicator driven by the synced clock.
+- **DONE** — DMA+viper player; role/group/device read from the `.leda` header;
+  program library by `NN-` filename prefix; leader beacon; `PROGRAM`/`TEARDOWN`;
+  read-only `ROLE`/`GROUP`/`DEVICE`; LED-0 status (`led0-status.md`).
+- **DONE (code) / NEEDS RETEST** — follower scan + PLL phase-lock + apply state
+  (program/brightness/play/teardown), hold-dark-until-first-beacon, no timeout.
+  Hung the board on first run (CYW43 bring-up clash hypothesis); scan now
+  sequenced after Wi-Fi. See "Follower — implemented, NOT yet validated" above.
+- **TODO** — role-assignment export UI (which device is leader / leader-only, and
+  the installation group id) + stamping it into headers; power-cycle recovery
+  ritual (5→standalone, 10→clear Wi-Fi) with the recovery flashes.
 
 ## Explicitly out of scope
 
@@ -340,19 +381,23 @@ name; pin 0; brightness 100%.
 
 ## To validate on hardware
 
-- MicroPython Pico W BLE doing the roles we need **simultaneously**: leader =
-  advertise + phone-connected; follower = scan (listen-only). The leader/follower
-  split is chosen specifically to avoid needing advertise + scan + connect all at
-  once on one device.
-- Beacon cadence vs. achievable phase-lock tightness in practice.
+- ~~BLE scan + advertise + GATT + DMA-player coexistence on one Pico W.~~
+  **DONE (2026-07-06)** — all coexist at 30 fps; beacons received while playing.
+- **Follower integrated run** — the outstanding one: retest after the scan-after-
+  Wi-Fi fix (the first attempt hard-faulted the board). Power-cycle → flash → run a
+  follower file against a group-matched leader (the Pi `~/ledrig/leader_headless.py`
+  is a ready bench leader).
+- Beacon cadence vs. phase-lock tightness with the *firmware* follower (the Pi
+  bench follower already showed ±0.2–0.5 frame).
 
 ## Suggested implementation order
 
-1. ~~Web: per-LED `device` id + per-device export + program number (foundation).~~
-   **DONE (2026-07-05).**
-2. Firmware: program library by numbered filename; single-device program select.
-3. Firmware: leader beacon + follower scan/phase-lock (bench test, 2 devices).
-4. Firmware: role config, group binding, teardown, reboot-search fallback.
-5. Firmware: LED-0 pairing indicator.
-6. iOS: device-id/role config, leader discovery, pairing, group view.
-7. iOS: batch upload + consistency check.
+1. ~~Web foundation (per-LED device id, per-device export, program #).~~ **DONE.**
+2. ~~Firmware: DMA+viper player; program library; header roles; leader beacon;
+   PROGRAM/TEARDOWN; LED-0 status.~~ **DONE (2026-07-06).**
+3. **Firmware: follower scan + phase-lock — retest & finish** (code committed, hung
+   on first run; fix applied, needs on-device confirmation).
+4. Web: role-assignment export UI (leader / leader-only / follower per device) +
+   installation group id, stamped into headers.
+5. Firmware: power-cycle recovery ritual (5→standalone, 10→clear Wi-Fi) + flashes.
+6. iOS/macOS: group view, batch upload, consistency check, provisioning-only BLE.
