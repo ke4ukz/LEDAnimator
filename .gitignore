@@ -25,3 +25,10 @@ dist-ssr
 
 # Vite cache (stray, if any at repo level)
 .vite
+
+# Python bytecode cache (PiSyncTest local py_compile runs)
+__pycache__/
+*.pyc
+
+# Firmware generation scratch (web/gen-firmware.ts output)
+/tmp/leda_main.py
