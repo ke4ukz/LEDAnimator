@@ -42,6 +42,18 @@ different colors so you never have to count cycles:
 | `standalone` | white | The 5th interrupted boot **un-grouped** the device (kept Wi-Fi). |
 | `wifi-cleared` | magenta | The 10th interrupted boot **also cleared** the Wi-Fi config. |
 
+## Strip length is never tracked for status
+
+A device only knows its strip length from the pattern file, which may be missing,
+corrupt, or (for a follower) a program it doesn't have. Rather than track a "last
+known length," the **boot-clear** and every **full-strip status/flash** state simply
+write a fixed **1000 LEDs** (`STATUS_BLANK_LEDS`): LED 0 (or all, for a recovery
+flash) shows the status, the rest go black. This clears power-on garbage *and* any
+previous longer pattern's tail with no bookkeeping. Overshooting a shorter strip is
+harmless — the extra data falls off the end of the WS2812 chain. It's ~30 ms of
+shift-out, but DMA-driven, so the CPU stays free for BLE/Wi-Fi. (Actual playback
+always uses the real per-file LED count — only these status writes blank the max.)
+
 ## Notes
 
 - The envelope is derived from the wall clock (`time.ticks_ms`), so a group of

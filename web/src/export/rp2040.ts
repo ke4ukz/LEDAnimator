@@ -63,11 +63,12 @@ DATA_PIN = _load_pin()
 PATTERN_EXT = ".leda"
 HEADER_SIZE = 20               # LEDA header bytes (see docs/file-format.md)
 _ROLE_NAMES = ("standalone", "leader", "leader-only", "follower")  # header role byte -> name
-# When a status/error state (nofile, un-loadable program) doesn't know the real
-# strip length — a device that has never loaded a valid pattern — blank this many
-# LEDs so no stale/power-on garbage shows behind LED 0. Overshooting a shorter
-# strip is harmless (extra data falls off the end of the chain); the REAL length
-# is used whenever it's known (S.n is sticky across a file going missing).
+# The boot-clear and every status/flash state write this many LEDs regardless of
+# the real strip length — clearing power-on garbage AND any previous longer
+# pattern's tail (no need to track the last length). Overshooting a shorter strip
+# is harmless: the extra data just falls off the end of the chain. 1000 is our
+# per-device ceiling; at ~30us/LED that's ~30ms of shift-out, but it's DMA so the
+# CPU stays free for BT/Wi-Fi command handling.
 STATUS_BLANK_LEDS = 1000
 DEVICE_NAME = "LED Animator"   # default; devicename.txt / NAME command override
 FW_VERSION = ${JSON.stringify(build)}   # build identifier (no real release yet)
@@ -194,6 +195,8 @@ def _ensure_bufs(n):
     if n <= 0:
         n = 1
     if _b0 is None or len(_b0) != n:
+        while _dma.active():   # never free/realloc a buffer the DMA is still reading
+            pass
         _b0 = array.array("I", bytes(4 * n))
         _b1 = array.array("I", bytes(4 * n))
         _back, _front = _b0, _b1
@@ -308,7 +311,7 @@ def _show_status(state):
     # Drive LED 0 with a status color/pattern and hold the rest of the strip dark.
     global _back, _front
     color = _STATUS[state]
-    n = S.n if S.n > 0 else STATUS_BLANK_LEDS
+    n = STATUS_BLANK_LEDS   # blank the whole (possible) strip: clears any old/longer frame
     _ensure_bufs(n)
     _fill_word(_back, n, 0)
     _back[0] = _status_word((color[0][0], color[0][1], color[0][2], color[1]))
@@ -331,7 +334,7 @@ def _flash_strip(kind, ms):
     # the recovery color so the ritual gives immediate "keep cycling" feedback.
     global _back, _front
     color = _RECOVERY[kind]
-    n = S.n if S.n > 0 else STATUS_BLANK_LEDS
+    n = STATUS_BLANK_LEDS
     _ensure_bufs(n)
     on = (color[1] << 24) | (color[0] << 16) | (color[2] << 8)
     end = time.ticks_ms() + ms
@@ -1725,6 +1728,7 @@ def _start_ble():
 
 
 def main():
+    _show_solid((0, 0, 0), STATUS_BLANK_LEDS)   # clear power-on garbage before init draws anything
     S.name = _load_name()
     S.file = _load_current()
     S.bright = _load_bright()
