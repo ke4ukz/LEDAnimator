@@ -20,9 +20,32 @@ authoring and controlling the whole thing as one.
   **dropped** — if every device already talks BLE, a wired clock is extra code
   for no real-world benefit. (If a future install has serious RF-noise problems,
   e.g. a stadium, revisit then as a special case.)
-- **Control channel is unchanged:** WiFi-first (shared AP/router, mDNS — the
-  setup iOS is happy with), BLE as fallback. Sync is a *separate layer* beneath
-  control, so no Pico ever needs to be an AP.
+- **BT roles are strict and consistent (revised 2026-07-05).** Bluetooth does
+  exactly two things: **phone ↔ device WiFi provisioning**, and the **device ↔
+  device sync beacon**. The phone app **only ever controls over WiFi** (program,
+  brightness, pattern, role/group assignment — everything). There is no
+  phone-facing BLE *control* channel, in any mode, so behavior is consistent.
+  *Why:* on the Pico W a device advertising its beacon **cannot also hold a BLE
+  GATT connection** (measured on hardware 2026-07-05 — advertising stops while a
+  central is connected), so BLE control in a sync role isn't reliably possible.
+  Making BLE provisioning-only avoids "works over BT here but not there."
+  Consequence (accepted): a standalone strip with **no WiFi at all** is
+  provision-only — live control needs a network to exist.
+- **Recovery is a power-cycle ritual (no boot delay).** To rescue a device whose
+  AP vanished (WiFi points at a ghost, BT is busy syncing): **5 interrupted
+  power-cycles → standalone** (un-group, keep WiFi); **10 → also clear WiFi
+  config**. Mechanism: each boot bumps a flash counter; after the device runs
+  ~4 s ("commit") the counter resets to 0 — so a normal single glitch never
+  counts and the pattern plays **instantly** every boot. The reset is applied
+  when the user stops cycling and lets it boot for real (so 5 vs 10 is
+  distinguishable). 5-minimum guards against accidental double-boots; flash the
+  strip at the 5/10 marks for tactile confirmation. A one-drag "recovery UF2"
+  (forces standalone) is the ultimate backstop.
+- **Reboot = straight back to work, no recovery period.** A device boots directly
+  into its saved role and starts its pattern immediately. A follower free-runs
+  its pattern at once and scans for its leader in the *background*, locking on
+  when it hears the beacon (no "search then fall back to standalone" delay — the
+  power-cycle ritual is the deliberate exit).
 - **Sync clocks, not frames.** The runtime is a deterministic fixed-rate loop, so
   devices only need to agree on *which frame index is now*. We fight jitter and
   drift, not latency; periodic beacons phase-lock free-running counters.
