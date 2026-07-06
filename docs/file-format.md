@@ -1,4 +1,4 @@
-# Pattern file format — LEDA v1 (`.leda`)
+# Pattern file format — LEDA (`.leda`)
 
 The `.leda` file is the **baked animation**: a small header followed by raw RGB
 pixels, one value per LED per frame. It is the single contract shared by the web
@@ -22,10 +22,10 @@ read of `numLeds × 3` bytes.
 
 ## Layout
 
-All multi-byte integers are **little-endian**. A file is a **16-byte header**
+All multi-byte integers are **little-endian**. A file is a **20-byte header**
 followed by the pixel data.
 
-### Header (16 bytes)
+### Header (20 bytes)
 
 | Offset | Size | Field | Value / notes |
 |---:|---:|---|---|
@@ -35,7 +35,21 @@ followed by the pixel data.
 | 6 | 2 | **numLeds** | `uint16` — LEDs per frame |
 | 8 | 4 | **numFrames** | `uint32` — frames in the loop |
 | 12 | 2 | **fps** | `uint16` — frames per second |
-| 14 | 2 | **reserved** | `0` (room for flags / future fields) |
+| 14 | 1 | **role** | `0` standalone · `1` leader · `2` leader-only · `3` follower |
+| 15 | 1 | **group id** | `uint8` — sync group / installation (leaders broadcast it; followers filter on it) |
+| 16 | 1 | **device id** | `uint8` — render-slice id (which device's slice this file is) |
+| 17 | 3 | **reserved** | `0` |
+
+The **sync fields (role / group / device)** make the file its own role config:
+the file a device plays *is* what tells it whether it's a standalone, a leader, or
+a follower, and of which group — there is no separate role/group config on the
+device (see [`multi-device-sync.md`](multi-device-sync.md)). The **program number**
+is *not* in the header — it's the file's zero-padded `NN-` **name prefix**
+(`07-aurora.leda` → program 7), the group's jukebox selection id.
+
+A **leader-only** file (role `2`) is a header **with no pixel data** (`numLeds`
+`0`, no body): the device runs the master clock + beacon from `numFrames`/`fps`
+and drives no strip, so a group has a reference even where no strip is wired.
 
 ### Pixel data (starts at offset 16)
 
@@ -48,7 +62,7 @@ for frame in 0 .. numFrames-1:
 ```
 
 - **Body size** = `numFrames × numLeds × 3` bytes.
-- **Total file size** = `16 + numFrames × numLeds × 3`.
+- **Total file size** = `20 + numFrames × numLeds × 3`.
 - **LED order** is the physical **chain order** (wiring order). LEDs marked
   *unassigned* in the editor are dropped before encoding (they aren't wired), so
   index `l` here is the l-th wired LED, not the l-th LED in the 3D scene.
@@ -64,13 +78,16 @@ for frame in 0 .. numFrames-1:
 0x06  3C 00                  numLeds   = 60
 0x08  78 00 00 00            numFrames = 120
 0x0C  1E 00                  fps       = 30
-0x0E  00 00                  reserved
-0x10  R G B R G B ...        frame 0: 60 LEDs × 3 = 180 bytes
+0x0E  00                     role      = 0 (standalone)
+0x0F  00                     group id  = 0
+0x10  00                     device id = 0
+0x11  00 00 00               reserved
+0x14  R G B R G B ...        frame 0: 60 LEDs × 3 = 180 bytes
       R G B R G B ...        frame 1: 180 bytes
       ...                    (120 frames total)
 ```
 
-Total = `16 + 120 × 60 × 3` = **21,616 bytes**.
+Total = `20 + 120 × 60 × 3` = **21,620 bytes**.
 
 ## How each side uses it
 
@@ -88,14 +105,17 @@ Total = `16 + 120 × 60 × 3` = **21,616 bytes**.
 
 ```python
 # MicroPython-ish
-h = f.read(16)
+h = f.read(20)
 assert h[0:4] == b"LEDA"
 version = h[4]
 fmt     = h[5]                                   # 0 = RGB888
 num_leds   = h[6]  | (h[7]  << 8)
 num_frames = h[8]  | (h[9]  << 8) | (h[10] << 16) | (h[11] << 24)
 fps        = h[12] | (h[13] << 8)
-# frame N pixels: seek(16 + N * num_leds * 3), read(num_leds * 3)
+role       = h[14]                               # 0 standalone / 1 leader / 2 leader-only / 3 follower
+group_id   = h[15]
+device_id  = h[16]
+# frame N pixels: seek(20 + N * num_leds * 3), read(num_leds * 3)
 ```
 
 ## Versioning & forward compatibility
@@ -104,7 +124,8 @@ fps        = h[12] | (h[13] << 8)
   check `version` and `pixel format` and refuse values it doesn't understand
   (rather than misinterpreting bytes).
 - The **`version`** byte covers structural changes; the **`pixel format`** byte
-  covers pixel encoding; the two **reserved** bytes are for flags/fields.
+  covers pixel encoding; the three **reserved** bytes (17–19) are for future
+  flags/fields.
 - **Planned formats** (see [`STATUS.md`](STATUS.md)) will use the pixel-format
   byte: e.g. RGB565 (2 B/pixel) or **indexed color** (1 B index + a palette
   section). Those add a new `pixel format` value — and, for indexed, a palette

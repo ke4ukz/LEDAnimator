@@ -124,11 +124,11 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
 
   const exportLeda = () => {
     if (!multi) {
-      downloadBytes(ledaName(devices[0].device), encodeRaster(devices[0].raster), 'application/octet-stream')
+      downloadBytes(ledaName(devices[0].device), encodeRaster(devices[0].raster, { device: devices[0].device }), 'application/octet-stream')
       return
     }
     const files: Record<string, string | Uint8Array> = {}
-    for (const { device, raster } of devices) files[ledaName(device)] = encodeRaster(raster)
+    for (const { device, raster } of devices) files[ledaName(device)] = encodeRaster(raster, { device })
     files['manifest.txt'] = buildManifest(ledaName, 'File', 'file')
     downloadBytes(`${progBase}.zip`, zipProject(files), 'application/zip')
   }
@@ -141,7 +141,7 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
       const pf = ledaName(device)
       const dir = multi ? `device-${device}/` : '' // one folder per board when split
       files[`${dir}main.py`] = rp2040MainPy(FW_BUILD)
-      files[`${dir}${pf}`] = encodeRaster(raster)
+      files[`${dir}${pf}`] = encodeRaster(raster, { device })
       for (const [n, v] of Object.entries(rp2040SettingsFiles(s.pin, Number(s.brightness.toFixed(2)), s.name, pf))) {
         files[`${dir}${n}`] = v
       }

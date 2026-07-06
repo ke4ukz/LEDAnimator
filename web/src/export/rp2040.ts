@@ -61,6 +61,8 @@ def _load_pin():
 
 DATA_PIN = _load_pin()
 PATTERN_EXT = ".leda"
+HEADER_SIZE = 20               # LEDA header bytes (see docs/file-format.md)
+_ROLE_NAMES = ("standalone", "leader", "leader-only", "follower")  # header role byte -> name
 DEVICE_NAME = "LED Animator"   # default; devicename.txt / NAME command override
 FW_VERSION = ${JSON.stringify(build)}   # build identifier (no real release yet)
 CONTROL_PORT = 4550            # TCP port for the (same) text control protocol over Wi-Fi
@@ -138,13 +140,18 @@ class S:
     tcp_srv = None           # listening socket (once Wi-Fi is up); None = no server
     tcp_clients = []         # list of [sock, buf] - one per connected TCP client
     udp_sock = None          # UDP discovery socket (replies to LEDADISCOVER probes)
-    # Multi-device sync (see docs/sync-beacon.md).
-    role = "standalone"      # "standalone" | "leader" | "follower"
-    group = 0                # sync group id 0-255 (leaders broadcast it)
+    # Multi-device sync (see docs/sync-beacon.md). role/group/device come from the
+    # active pattern's LEDA header — the file a device plays IS its role config.
+    role = "standalone"      # "standalone" | "leader" | "leader-only" | "follower"
+    group = 0                # sync group id 0-255 (leaders broadcast it; followers filter on it)
+    device = 0               # render-slice id 0-255 (which device's slice this file is)
     program = 0              # program number carried in the sync beacon (0-255)
     frame = 0                # running frame index, for the leader beacon
     beacon_seq = 0           # beacon sequence, increments each advert
     beacon_at = 0            # time.ticks_ms() of the last beacon advert
+    tearing_down = False     # TEARDOWN in progress: beacon carries the teardown flag
+    teardown_at = 0          # time.ticks_ms() the teardown window started
+    beacon_off = False       # beacon silenced after a completed teardown (until reboot)
 
 
 # WS2812 output via DMA-fed PIO: the PIO clocks the strip out and DMA feeds it
@@ -404,18 +411,60 @@ def _load_state():
         pass
 
 
-def _prime_led_count():
-    # Read the selected pattern's LED count so a solid/off restored at boot can
-    # cover the whole strip before any pattern frame is played.
+def _apply_role_header(h):
+    # Set role / group id / device-slice id from a LEDA header's sync bytes.
+    S.role = _ROLE_NAMES[h[14]] if h[14] < len(_ROLE_NAMES) else "standalone"
+    S.group = h[15]
+    S.device = h[16]
+
+
+def _program_from_name(name):
+    # A pattern's program number is its zero-padded "NN-" filename prefix (the
+    # group's jukebox selection id), e.g. "07-aurora.leda" -> 7. Else 0.
+    if name and len(name) >= 3 and name[2] == "-" and "0" <= name[0] <= "9" and "0" <= name[1] <= "9":
+        return int(name[0:2])
+    return 0
+
+
+def _select_program(n):
+    # Group verb: play program N. Set the beacon program # and load THIS device's
+    # own "NN-*.leda" slice. On a leader this propagates to the whole group via
+    # the beacon; a leader-only device just advances the beacon # (no local slice
+    # needed). Every device plays its own slice of the same program.
+    S.program = n & 0xFF
+    prefix = "%02d-" % S.program
+    for name in list_patterns():
+        if name.startswith(prefix):
+            S.file = name
+            S.mode = "play"
+            S.reload = True
+            _mark_state()
+            try:
+                with open("selected.txt", "w") as fh:
+                    fh.write(name)
+            except Exception:
+                pass
+            return "OK PROGRAM %d %s" % (S.program, name)
+    # No local slice for this program (e.g. a leader-only device): still carry the
+    # new program # in the beacon so followers switch; nothing to play here.
+    return "OK PROGRAM %d" % S.program
+
+
+def _prime_header():
+    # Read the selected pattern's header at boot so the LED count (a restored
+    # solid/off covers the whole strip before any frame plays) AND the sync
+    # role/group/device are set before the player loop and the beacon start.
     if not S.file:
         return
     try:
         with open(S.file, "rb") as fh:
-            h = fh.read(16)
-        if h[0:4] == b"LEDA":
-            S.n = h[6] | (h[7] << 8)
+            h = fh.read(HEADER_SIZE)
     except OSError:
-        pass
+        return
+    if len(h) >= HEADER_SIZE and h[0:4] == b"LEDA":
+        S.n = h[6] | (h[7] << 8)
+        _apply_role_header(h)
+        S.program = _program_from_name(S.file)
 
 
 def _mark_state():
@@ -1173,6 +1222,7 @@ def dispatch(line, origin=None):
             fields.append("PIN %d" % DATA_PIN)
             fields.append("ROLE " + S.role)
             fields.append("GROUP %d" % S.group)
+            fields.append("DEVICE %d" % S.device)
             fields.append("PROGRAM %d" % S.program)
             fields.append(_power_status())   # "POWER usb|batt|unknown <mv>"
             # A field with no hardware is OMITTED (not sent as a placeholder); the
@@ -1218,42 +1268,34 @@ def dispatch(line, origin=None):
                 pass
             return "OK NAME " + new
         if c == "ROLE":
-            # No arg reports the role; "ROLE <standalone|leader|follower>" sets it,
-            # persists it, and switches the advertisement (device info <-> beacon).
-            if len(p) < 2:
-                return "ROLE " + S.role
-            r = p[1].lower()
-            if r not in ("standalone", "leader", "follower"):
-                return "ERR args"
-            S.role = r
-            try:
-                with open("role.txt", "w") as fh:
-                    fh.write(r)
-            except Exception:
-                pass
-            _restart_adv()
-            return "OK ROLE " + r
+            # Read-only: role lives in the active pattern's LEDA header (the file a
+            # device plays IS its role config). Change it by loading a different
+            # file, not with a command.
+            return "ROLE " + S.role
         if c == "GROUP":
-            if len(p) < 2:
-                return "GROUP %d" % S.group
-            try:
-                S.group = int(p[1]) & 0xFF
-            except Exception:
-                return "ERR args"
-            try:
-                with open("group.txt", "w") as fh:
-                    fh.write(str(S.group))
-            except Exception:
-                pass
-            return "OK GROUP %d" % S.group
+            # Read-only: group id lives in the header (see ROLE).
+            return "GROUP %d" % S.group
+        if c == "DEVICE":
+            # Read-only: render-slice id, from the header.
+            return "DEVICE %d" % S.device
         if c == "PROGRAM":
+            # The group jukebox verb: "PROGRAM <n>" plays program n (loads this
+            # device's own NN slice + sets the beacon #); no arg reports it.
             if len(p) < 2:
                 return "PROGRAM %d" % S.program
             try:
-                S.program = int(p[1]) & 0xFF
+                n = int(p[1])
             except Exception:
                 return "ERR args"
-            return "OK PROGRAM %d" % S.program
+            return _select_program(n)
+        if c == "TEARDOWN":
+            # Graceful end of the group: broadcast the teardown flag for a short
+            # window so followers stop, then silence the beacon. Leader-only path.
+            if S.role not in ("leader", "leader-only"):
+                return "ERR not-leader"
+            S.tearing_down = True
+            S.teardown_at = time.ticks_ms()
+            return "OK TEARDOWN"
         if c == "LIST":
             # Streamed by the player loop: "LISTLEN <n>", then one "FILE <name>"
             # per notification, then "ENDLIST". Avoids the single-notification
@@ -1384,6 +1426,8 @@ def _adv_beacon():
     ts = time.ticks_ms() & 0xFFFFFFFF
     br = int(S.bright * 255) & 0xFF
     fl = 0x01 if S.mode == "play" else 0x00
+    if S.tearing_down:
+        fl |= 0x02   # teardown: followers stop when they see this
     payload = struct.pack(
         "<BIIBBBB", S.group & 0xFF, S.frame & 0xFFFFFFFF, ts, S.program & 0xFF, br, fl, S.beacon_seq & 0xFF
     )
@@ -1396,7 +1440,7 @@ def _restart_adv():
     if S.ble is None:
         return
     try:
-        adv = _adv_beacon() if S.role == "leader" else _adv_device()
+        adv = _adv_beacon() if (S.role in ("leader", "leader-only") and not S.beacon_off) else _adv_device()
         rsp = _ad(0x09, S.name.encode()[:26])
         S.ble.gap_advertise(None)
         S.ble.gap_advertise(100000, adv_data=adv, resp_data=rsp)
@@ -1408,29 +1452,21 @@ def _beacon_step():
     # Leader: refresh the beacon (fresh frame/ts/seq) a few Hz, even while a phone
     # is connected. advertise-while-connected on the CYW43 is the coexistence case
     # to validate on hardware; guarded so any failure is harmless.
-    if S.role != "leader" or S.ble is None:
+    if S.role not in ("leader", "leader-only") or S.ble is None or S.beacon_off:
         return
     now = time.ticks_ms()
+    if S.tearing_down and time.ticks_diff(now, S.teardown_at) >= 2000:
+        # Teardown window elapsed: followers have seen the flag — silence the
+        # beacon (revert to a plain device-info advert) until reboot.
+        S.tearing_down = False
+        S.beacon_off = True
+        _restart_adv()
+        return
     if time.ticks_diff(now, S.beacon_at) < 150:
         return
     S.beacon_at = now
     S.beacon_seq = (S.beacon_seq + 1) & 0xFF
     _restart_adv()
-
-
-def _load_role():
-    try:
-        with open("role.txt") as fh:
-            r = fh.read().strip()
-        if r in ("standalone", "leader", "follower"):
-            S.role = r
-    except Exception:
-        pass
-    try:
-        with open("group.txt") as fh:
-            S.group = int(fh.read().strip()) & 0xFF
-    except Exception:
-        pass
 
 
 def _start_ble():
@@ -1505,9 +1541,8 @@ def main():
     S.file = _load_current()
     S.bright = _load_bright()
     _load_state()          # restore play/solid/off + the solid color
-    _prime_led_count()     # so a restored solid/off covers the strip at boot
+    _prime_header()        # LED count + role/group/device from the selected file's header
     _load_networks()       # queue a Wi-Fi auto-connect if provisioned
-    _load_role()           # standalone / leader / follower + group id
     try:
         _start_ble()
         print("BLE control active:", S.name)
@@ -1555,8 +1590,8 @@ def main():
                 # The selected file vanished - go idle rather than freeze.
                 S.file = None
                 continue
-            h = f.read(16)
-            if h[0:4] != b"LEDA":
+            h = f.read(HEADER_SIZE)
+            if len(h) < HEADER_SIZE or h[0:4] != b"LEDA":
                 # Not a valid pattern - drop it and go idle.
                 f.close()
                 f = None
@@ -1565,11 +1600,29 @@ def main():
             S.n = h[6] | (h[7] << 8)
             frames = h[8] | (h[9] << 8) | (h[10] << 16) | (h[11] << 24)
             fps = h[12] | (h[13] << 8)
+            _apply_role_header(h)   # role / group / device-id live in the header
+            S.program = _program_from_name(S.file)   # program # = the "NN-" filename prefix
             base_delay = 1.0 / fps if fps else 0.03
             S.reload = False
-            print("playing", S.file, "leds", S.n, "frames", frames, "fps", fps)
+            print("playing", S.file, "leds", S.n, "frames", frames, "fps", fps,
+                  "role", S.role, "grp", S.group, "dev", S.device)
+        if S.role == "leader-only":
+            # Dedicated leader (header-only file): run the master clock + beacon,
+            # drive no strip. Advance the frame at the authored rate so followers
+            # have a reference; the beacon rides _tick().
+            for i in range(frames):
+                if S.reload or S.mode != "play" or S.uploading:
+                    break
+                t0 = time.ticks_us()
+                S.frame = i
+                _tick()
+                period = base_delay / S.speed if S.speed > 0 else base_delay
+                slack = int(period * 1000000) - time.ticks_diff(time.ticks_us(), t0)
+                if slack > 0:
+                    time.sleep_us(slack)
+            continue
         fb = S.n * 3
-        f.seek(16)
+        f.seek(HEADER_SIZE)
         for i in range(frames):
             if S.reload or S.mode != "play" or S.uploading:
                 break
@@ -1577,8 +1630,8 @@ def main():
             S.frame = i
             # Kick the DMA shift-out FIRST, then run housekeeping + the beacon
             # DURING it (the strip holds the latched frame), then sleep the
-            # remainder. So per-frame jitter (e.g. the ~20ms beacon stop/start on
-            # a leader) overlaps the shift-out and is absorbed within budget — the
+            # remainder. So per-frame jitter (e.g. the ~1ms beacon stop/start on a
+            # leader) overlaps the shift-out and is absorbed within budget — the
             # actual fps holds at nominal.
             _show_grb(f.read(fb), S.n)
             _tick()

@@ -97,6 +97,21 @@ argument usually *queries* the value.
 | `NAME [new name]` | No arg reports the device name; with an arg, renames + persists. |
 | `PIN [n]` | No arg reports the strip's data GP pin; `PIN <n>` re-points it live (0–29) + persists. |
 
+### Multi-device sync
+
+| Command | Meaning |
+|---|---|
+| `PROGRAM [n]` | The group **jukebox** verb. `PROGRAM <n>` plays program *n*: loads this device's own `NN-*.leda` slice and sets the beacon program #; on a leader this switches the whole group. No arg reports the current program #. |
+| `ROLE` | **Read-only.** Reports `standalone` / `leader` / `leader-only` / `follower`. Role lives in the played file's [header](file-format.md) — change it by loading a different file, not with a command. |
+| `GROUP` | **Read-only.** Reports the sync group id (also from the header). |
+| `DEVICE` | **Read-only.** Reports the render-slice id (also from the header). |
+| `TEARDOWN` | Leader-only. Gracefully ends the group: broadcasts the teardown flag for ~2 s so followers stop, then silences the beacon until reboot. `ERR not-leader` otherwise. |
+
+Role / group / device-id are **not** set by command — they come from the `.leda`
+header, so the file a device plays *is* its sync config (see
+[`multi-device-sync.md`](multi-device-sync.md)). Program # is the file's `NN-`
+name prefix.
+
 ### Wi‑Fi provisioning (Pico W)
 
 | Command | Meaning |
