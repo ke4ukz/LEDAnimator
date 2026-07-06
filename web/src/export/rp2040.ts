@@ -207,10 +207,14 @@ def _dma_kick(buf, n):
 
 
 def _show_grb(frame, n):
-    # Fill the back buffer from an RGB frame and stream it (see _dma_kick).
+    # Fill the back buffer from an RGB frame and stream it (see _dma_kick). If a
+    # status overlay is set (e.g. a follower free-running while its leader is
+    # lost), paint it on LED 0 over the animation.
     global _back, _front
     _ensure_bufs(n)
     _fill_grb(frame, _back, n, _bri())
+    if _status_overlay is not None:
+        _back[0] = _status_word(_status_overlay)
     _dma_kick(_back, n)
     _back, _front = _front, _back
 
@@ -225,6 +229,87 @@ def _show_solid(rgb, n):
     _fill_word(_back, n, word)
     _dma_kick(_back, n)
     _back, _front = _front, _back
+
+
+# ---- LED 0 status indicator -------------------------------------------------
+# LED 0 doubles as a status light in states where the strip isn't showing the
+# real animation (acquiring / nofile), or as a single-pixel overlay on top of it
+# (searching). Colors are picked to be unmistakable at a glance — no counting
+# blinks, no distinguishing near-shades. Patterns: pulse (breathe ~1Hz), blink
+# (on/off ~1Hz), solid. Recovery events flash the WHOLE strip in a distinct
+# color. Status is shown at a fixed visibility, independent of master brightness,
+# so it stays readable even at BRIGHT 0. See docs/led0-status.md.
+_STATUS = {
+    #  state         (r,   g,   b)     pattern
+    "acquiring":    ((0,   40,  255), "pulse"),   # follower up, awaiting first beacon (strip dark)
+    "searching":    ((255, 90,  0),   "blink"),   # follower free-running, leader lost (overlay)
+    "nofile":       ((255, 0,   0),   "pulse"),   # nothing selected/playable (strip dark)
+}
+# Whole-strip recovery flashes — shown briefly at boot when the power-cycle
+# ritual fires. Distinct colors so 5-cycle vs 10-cycle is obvious without counting.
+_RECOVERY = {
+    "standalone":   (120, 120, 120),   # 5th interrupted boot: device un-grouped
+    "wifi-cleared": (200, 0,   200),   # 10th interrupted boot: Wi-Fi config also cleared
+}
+_status_overlay = None   # (r,g,b,mode) painted on LED 0 over a playing animation, or None
+
+
+def _status_env(mode):
+    # 0-256 brightness envelope from a ~1Hz phase off the wall clock.
+    ph = time.ticks_ms() % 1000
+    if mode == "solid":
+        return 256
+    if mode == "blink":
+        return 256 if ph < 500 else 0
+    return int((ph if ph < 500 else 1000 - ph) * 256 // 500)   # pulse: triangle
+
+
+def _status_word(spec):
+    # spec = (r, g, b, mode) -> a GRB<<8 word for LED 0 at the pattern's envelope.
+    e = _status_env(spec[3])
+    return (((spec[1] * e) >> 8) << 24) | (((spec[0] * e) >> 8) << 16) | (((spec[2] * e) >> 8) << 8)
+
+
+def _show_status(state):
+    # Drive LED 0 with a status color/pattern and hold the rest of the strip dark.
+    global _back, _front
+    color = _STATUS[state]
+    n = S.n if S.n > 0 else 1
+    _ensure_bufs(n)
+    _fill_word(_back, n, 0)
+    _back[0] = _status_word((color[0][0], color[0][1], color[0][2], color[1]))
+    _dma_kick(_back, n)
+    _back, _front = _front, _back
+
+
+def _set_overlay(state):
+    # Enable/clear the LED-0 overlay painted over a playing animation (searching).
+    global _status_overlay
+    if state is None:
+        _status_overlay = None
+    else:
+        c = _STATUS[state]
+        _status_overlay = (c[0][0], c[0][1], c[0][2], c[1])
+
+
+def _flash_strip(kind, ms):
+    # Blocking whole-strip recovery flash (brief, boot-only). Blinks the strip in
+    # the recovery color so the ritual gives immediate "keep cycling" feedback.
+    global _back, _front
+    color = _RECOVERY[kind]
+    n = S.n if S.n > 0 else 8
+    _ensure_bufs(n)
+    on = (color[1] << 24) | (color[0] << 16) | (color[2] << 8)
+    end = time.ticks_ms() + ms
+    while time.ticks_diff(end, time.ticks_ms()) > 0:
+        _fill_word(_back, n, on)
+        _dma_kick(_back, n)
+        _back, _front = _front, _back
+        time.sleep_ms(140)
+        _fill_word(_back, n, 0)
+        _dma_kick(_back, n)
+        _back, _front = _front, _back
+        time.sleep_ms(140)
 
 
 def _set_pin(arg):
@@ -1450,13 +1535,15 @@ def main():
             time.sleep_ms(40)
             continue
         if S.file is None:
-            # Nothing selected (or the selection is gone): idle without driving
-            # the strip. No default pattern is assumed.
+            # Nothing selected (or the selection is gone): pulse LED 0 red so the
+            # device reads as alive-but-empty rather than dead. No pattern is
+            # played (no default is assumed).
             if f:
                 f.close()
                 f = None
             _tick()
-            time.sleep_ms(100)
+            _show_status("nofile")
+            time.sleep_ms(40)
             continue
         if S.reload or f is None:
             if f:
