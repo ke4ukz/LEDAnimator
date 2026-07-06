@@ -79,6 +79,37 @@ beacon wire format and the follower PLL are unchanged.
   frees the CPU, so a follower syncs AND serves the app. Live *animation* switching
   is a group action (leader's program #); per-device file management is individual.
 
+### Show vs installation, and the follower lifecycle (2026-07-06)
+
+- **Program # = which show; group id = which installation.** Switching shows is a
+  **program-# change** broadcast in the beacon (jukebox — each device loads its own
+  `NN-*.leda` slice); it never changes the group. **Group id is a per-installation
+  value the editor manages** (assigned once, stamped identically into every program's
+  files for that installation), so a designer never hand-picks group ids per file and
+  switching shows can't accidentally orphan the group. Changing the group id = a
+  deliberate repurposing of the devices, not a show switch.
+- **A follower keeps playing unless it gets an EXPLICIT stop.** The only stops are:
+  (a) a **graceful teardown** — the leader was deliberately switched off leader duty,
+  so it broadcasts the teardown flag → followers stop (orphan / LED-0); or (b) an
+  **operator command** (app). Everything else keeps playing:
+  - Leader **crashes / BT jammed** (no teardown ever arrives) → followers **free-run**
+    and re-lock if it returns. Since they were all last corrected by the same beacon,
+    they stay coherent with each other for a long time (drift is tens of ppm →
+    seconds/hour). The show does not die on an ungraceful loss.
+  - **No reboot-search-timeout / standalone fallback** — that branch is removed.
+- **Reboot behavior is role-driven.** Standalone / leader / leader-only files
+  **play (and beacon) immediately** on boot — they are the reference. A **follower**
+  file **holds (dark / "acquiring" indicator) until its first beacon, then starts
+  already in sync** — never a visible catch-up snap. A whole-system power glitch thus
+  resolves to a sub-second dark then clean synced playback. Corner: a fresh follower
+  reboot with the leader genuinely absent sits in the acquiring indicator until a
+  beacon appears (never plays out of sync, never looks dead) — a *running* follower
+  never does this, only a boot with no reference.
+- **No firmware/beacon misconfig guards.** A mismatched program file (wrong content,
+  wrong LED count, wrong group) is visible on the strip and diagnosable in the app
+  (which knows what it uploaded where) — not worth protocol weight. Keeps the beacon
+  at ~27/31 bytes.
+
 ## Runtime & performance (2026-07-06)
 
 - **DMA-fed PIO for WS2812, on every device.** The PIO clocks the strip out
