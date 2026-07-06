@@ -2,6 +2,8 @@
 """Thin display wrapper for the Waveshare 3.5" (F): ST7796S over SPI, landscape
 480x320, correct orientation (MADCTL 0xF8). Wraps the vendor st7796 driver but
 owns the framebuffer blit so the rig code never touches SPI details."""
+import atexit
+import signal
 import numpy as np
 import st7796
 
@@ -15,6 +17,34 @@ class Display:
         self._d = st7796.st7796()
         self.width = WIDTH
         self.height = HEIGHT
+        self._closed = False
+        # Blank the panel on exit rather than leaving the last frame lit. Covers a
+        # normal exit / uncaught exception (atexit), Ctrl-C, and SIGTERM (pkill).
+        # SIGKILL (-9) can't be caught.
+        atexit.register(self.blank)
+        for _sig in (signal.SIGTERM, signal.SIGINT):
+            try:
+                signal.signal(_sig, self._on_signal)
+            except (ValueError, OSError):
+                pass  # signals only settable from the main thread
+
+    def blank(self):
+        """Clear to black and turn the backlight off. Idempotent."""
+        if self._closed:
+            return
+        self._closed = True
+        try:
+            self.show(np.zeros((self.height, self.width, 3), dtype=np.uint8))
+        except Exception:
+            pass
+        try:
+            self.backlight(0)
+        except Exception:
+            pass
+
+    def _on_signal(self, signum, frame):
+        self.blank()
+        raise SystemExit(0)
 
     def show(self, image):
         """Push a 480x320 PIL RGB image to the panel."""
