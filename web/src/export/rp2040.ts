@@ -63,6 +63,12 @@ DATA_PIN = _load_pin()
 PATTERN_EXT = ".leda"
 HEADER_SIZE = 20               # LEDA header bytes (see docs/file-format.md)
 _ROLE_NAMES = ("standalone", "leader", "leader-only", "follower")  # header role byte -> name
+# When a status/error state (nofile, un-loadable program) doesn't know the real
+# strip length — a device that has never loaded a valid pattern — blank this many
+# LEDs so no stale/power-on garbage shows behind LED 0. Overshooting a shorter
+# strip is harmless (extra data falls off the end of the chain); the REAL length
+# is used whenever it's known (S.n is sticky across a file going missing).
+STATUS_BLANK_LEDS = 1000
 DEVICE_NAME = "LED Animator"   # default; devicename.txt / NAME command override
 FW_VERSION = ${JSON.stringify(build)}   # build identifier (no real release yet)
 CONTROL_PORT = 4550            # TCP port for the (same) text control protocol over Wi-Fi
@@ -302,7 +308,7 @@ def _show_status(state):
     # Drive LED 0 with a status color/pattern and hold the rest of the strip dark.
     global _back, _front
     color = _STATUS[state]
-    n = S.n if S.n > 0 else 1
+    n = S.n if S.n > 0 else STATUS_BLANK_LEDS
     _ensure_bufs(n)
     _fill_word(_back, n, 0)
     _back[0] = _status_word((color[0][0], color[0][1], color[0][2], color[1]))
@@ -325,7 +331,7 @@ def _flash_strip(kind, ms):
     # the recovery color so the ritual gives immediate "keep cycling" feedback.
     global _back, _front
     color = _RECOVERY[kind]
-    n = S.n if S.n > 0 else 8
+    n = S.n if S.n > 0 else STATUS_BLANK_LEDS
     _ensure_bufs(n)
     on = (color[1] << 24) | (color[0] << 16) | (color[2] << 8)
     end = time.ticks_ms() + ms
