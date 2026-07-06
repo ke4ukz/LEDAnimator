@@ -46,7 +46,7 @@ export function rp2040MainPy(build = 'dev'): string {
 #   WIFIPASS <password>, WIFICONNECT (joins + saves to networks.txt, auto-joins
 #   on boot), WIFISTATUS, WIFIFORGET. Status arrives async as "WIFI <state> <ip>".
 
-import array, time, os
+import array, time, os, struct
 from machine import Pin, ADC
 import rp2
 
@@ -66,6 +66,7 @@ _ROLE_NAMES = ("standalone", "leader", "leader-only", "follower")  # header role
 DEVICE_NAME = "LED Animator"   # default; devicename.txt / NAME command override
 FW_VERSION = ${JSON.stringify(build)}   # build identifier (no real release yet)
 CONTROL_PORT = 4550            # TCP port for the (same) text control protocol over Wi-Fi
+_FOL_DEBUG = "test" in FW_VERSION   # throttled follower PLL prints on test builds only
 # The CYW43's first connect after boot can return a spurious BADAUTH
 # ("wrong-password") even with correct credentials, so retry a few times (with a
 # short backoff) before reporting failure.
@@ -152,6 +153,20 @@ class S:
     tearing_down = False     # TEARDOWN in progress: beacon carries the teardown flag
     teardown_at = 0          # time.ticks_ms() the teardown window started
     beacon_off = False       # beacon silenced after a completed teardown (until reboot)
+    # Follower phase-lock (PLL): a free-running frame 'phase' advancing at rate
+    # 'R', corrected on each beacon. Clock offset is kept in integer ms (single-
+    # precision floats can't hold a ~1e7 ms clock without losing PLL resolution).
+    rssi = 0                 # last beacon RSSI (debug)
+    beacon_rx = None         # latest beacon from the scan IRQ: (grp,frame,ts,prog,br,fl,seq)
+    fol_phase = 0.0          # current displayed frame (float)
+    fol_R = 30.0             # PLL rate estimate (frames/sec)
+    fol_off = None           # clock offset leader_ms - local_ms (int ms, max-filtered)
+    fol_seen = False         # locked onto at least one beacon since (re)acquire
+    fol_locked = False       # within LOCK_TOL of the target
+    fol_last_ms = 0          # time.ticks_ms() of the last beacon
+    fol_decay_at = 0         # time.ticks_ms() of the last offset decay tick
+    scan_started = False     # follower BLE scan running (started once Wi-Fi settles)
+    wifi_configured = False  # networks.txt had an SSID (so a connect is coming)
 
 
 # WS2812 output via DMA-fed PIO: the PIO clocks the strip out and DMA feeds it
@@ -218,6 +233,12 @@ def _show_grb(frame, n):
     # status overlay is set (e.g. a follower free-running while its leader is
     # lost), paint it on LED 0 over the animation.
     global _back, _front
+    if len(frame) < n * 3:
+        # Short read (truncated file / bad seek): don't let the viper fill read
+        # past the buffer (that would fault). Clamp to whole LEDs present.
+        n = len(frame) // 3
+        if n <= 0:
+            return
     _ensure_bufs(n)
     _fill_grb(frame, _back, n, _bri())
     if _status_overlay is not None:
@@ -688,6 +709,7 @@ def _load_networks():
     ssid = lines[0].strip() if lines else ""
     if ssid:
         S.wifi_ssid = ssid
+        S.wifi_configured = True   # a connect is coming; followers wait for it before scanning
         # Strip trailing CR/LF only (not spaces), in case the file picked up
         # Windows line endings; a real password won't end in a control character.
         S.wifi_pass = (lines[1] if len(lines) > 1 else "").rstrip("\\r\\n")
@@ -1469,6 +1491,152 @@ def _beacon_step():
     _restart_adv()
 
 
+# --- Follower: receive beacons + phase-lock playback (see PiSyncTest/follower.py,
+# the bench PLL this ports). A follower scans for its group's beacon and locks a
+# free-running frame counter to it, displaying frames from its OWN slice. -------
+
+def _rx_beacon(adv, rssi):
+    # Parse a sync-beacon advert; if it's for OUR group, stash it for the follower
+    # loop (which runs the PLL). Runs in the BLE scan IRQ, so keep it light (no
+    # imports/allocation churn here — struct is imported at module load).
+    i = 0
+    n = len(adv)
+    while i + 1 < n:
+        ln = adv[i]
+        if ln == 0:
+            break
+        if adv[i + 1] == 0xFF:   # manufacturer-specific data
+            v = adv[i + 2:i + 1 + ln]
+            if (len(v) >= 18 and v[0] == 0xFF and v[1] == 0xFF and v[2] == 0x4C
+                    and v[3] == 0x44 and v[4] == 0x02):   # 0xFFFF + "LD" + type 0x02
+                b = struct.unpack("<BIIBBBB", bytes(v[5:18]))
+                if b[0] == S.group:
+                    S.beacon_rx = b
+                    S.rssi = rssi
+            return
+        i += 1 + ln
+
+
+def _wrap_err(target, local, n):
+    # Shortest signed distance from local to target on a ring of n frames.
+    e = (target - local) % n
+    return e - n if e > n / 2 else e
+
+
+def _follower_start_scan():
+    # Start the passive beacon scan ONCE, and only after Wi-Fi has settled, so a
+    # continuous scan and the Wi-Fi station don't fight over the shared CYW43
+    # radio during bring-up. Low duty (30ms window / 100ms interval) leaves the
+    # radio time for Wi-Fi. Idempotent — called every follower iteration.
+    if S.scan_started or S.ble is None:
+        return
+    if S.wifi_configured and S.wifi_state not in ("connected", "failed"):
+        return   # a Wi-Fi connect is still in flight — wait it out
+    try:
+        S.ble.gap_scan(0, 100000, 30000, False)   # indefinite, 100ms interval, 30ms window, passive
+        S.scan_started = True
+        print("follower scan started (wifi", S.wifi_state, ")")
+    except Exception as e:
+        print("scan unavailable:", e)
+
+
+def _follower_loop(f, nf, fps, fb):
+    # Phase-lock this follower to its group's leader and display frames from its
+    # own slice. Holds dark (LED0 acquiring) until the first beacon; free-runs +
+    # LED0 "searching" if the leader is lost; hard-seeks on a program change;
+    # stops on teardown. Uses the file's own fps/numframes — no auto-detect.
+    KP = 0.25            # phase gain (fraction of drift corrected per beacon)
+    KI = 0.03            # rate gain (frames/s per frame of drift, per beacon)
+    R_MIN = 1.0
+    R_MAX = 240.0
+    LOCK_TOL = 2.0       # |drift| under this (frames) = locked
+    if not S.fol_seen:
+        S.fol_R = float(fps) if fps else 30.0
+        S.fol_off = None
+    if nf <= 0:
+        nf = 1
+    if _FOL_DEBUG:
+        print("FOLLOWER LOOP nf", nf, "fps", fps, "group", S.group)
+    period_us = int(1000000 / fps) if fps else 33333
+    prev_us = time.ticks_us()
+    last_dbg = time.ticks_ms()
+    drift = 0.0
+    while True:
+        if S.reload or S.mode != "play" or S.uploading:
+            _set_overlay(None)
+            return
+        t0 = time.ticks_us()
+        dt = time.ticks_diff(t0, prev_us) / 1000000.0
+        prev_us = t0
+        _follower_start_scan()   # begins once Wi-Fi has settled (idempotent)
+        if S.fol_seen:
+            S.fol_phase = (S.fol_phase + dt * S.fol_R) % nf
+
+        b = S.beacon_rx
+        if b is not None:
+            S.beacon_rx = None
+            grp, bframe, bts, bprog, bbr, bfl, bseq = b
+            if bfl & 0x02:               # teardown: stop, go dark, await operator
+                S.mode = "off"
+                _mark_state()
+                _set_overlay(None)
+                return
+            if bprog != S.program:       # jukebox switch: load our new slice + reload
+                _set_overlay(None)
+                S.fol_seen = False
+                _select_program(bprog)
+                return
+            S.bright = bbr / 255.0       # adopt the leader's brightness (group jukebox)
+            now_ms = time.ticks_ms()
+            # Clock offset in INTEGER ms: max-filter rejects packet-age noise
+            # (a delayed packet reads a smaller offset), slow decay tracks skew.
+            osamp = bts - now_ms
+            S.fol_off = osamp if S.fol_off is None else (osamp if osamp > S.fol_off else S.fol_off)
+            if time.ticks_diff(now_ms, S.fol_decay_at) >= 500:
+                S.fol_decay_at = now_ms
+                S.fol_off -= 1           # ~2 ms/s downward, tracks crystal drift
+            age = (now_ms - bts) + S.fol_off   # ms the leader has advanced since bts
+            if age < 0:
+                age = 0
+            target = (bframe + S.fol_R * age / 1000.0) % nf
+            if not S.fol_seen:
+                S.fol_phase = target
+                S.fol_seen = True
+            else:
+                drift = _wrap_err(target, S.fol_phase, nf)
+                if abs(drift) > nf * 0.3:      # big jump (restart / resync): snap
+                    S.fol_phase = target
+                else:                          # PLL: correct phase (P) and rate (I)
+                    S.fol_phase = (S.fol_phase + KP * drift) % nf
+                    r = S.fol_R + KI * drift
+                    S.fol_R = R_MIN if r < R_MIN else (R_MAX if r > R_MAX else r)
+            S.fol_last_ms = time.ticks_ms()
+
+        if _FOL_DEBUG and time.ticks_diff(time.ticks_ms(), last_dbg) >= 1000:
+            last_dbg = time.ticks_ms()
+            print("fol seen=%s phase=%.1f drift=%+.2f R=%.2f off=%s locked=%s" % (
+                S.fol_seen, S.fol_phase, drift, S.fol_R, S.fol_off, S.fol_locked))
+
+        if not S.fol_seen:
+            # Acquiring: never play out of sync — hold dark, LED0 blue pulse.
+            _show_status("acquiring")
+            _tick()
+            time.sleep_ms(20)
+            continue
+
+        lost = time.ticks_diff(time.ticks_ms(), S.fol_last_ms) > 1000
+        S.fol_locked = (not lost) and abs(drift) <= LOCK_TOL
+        _set_overlay("searching" if lost else None)   # LED0 amber blink while free-running
+        frame = int(S.fol_phase) % nf
+        S.frame = frame
+        f.seek(HEADER_SIZE + frame * fb)
+        _show_grb(f.read(fb), S.n)
+        _tick()
+        slack = period_us - time.ticks_diff(time.ticks_us(), t0)
+        if slack > 0:
+            time.sleep_us(slack)
+
+
 def _start_ble():
     # Nordic UART Service peripheral. One text command per write to RX; the
     # reply comes back as a notification on TX. Only present on the Pico W.
@@ -1478,6 +1646,7 @@ def _start_ble():
     _IRQ_CONNECT = 1
     _IRQ_DISCONNECT = 2
     _IRQ_WRITE = 3
+    _IRQ_SCAN_RESULT = 5
     _WRITE = bluetooth.FLAG_WRITE | bluetooth.FLAG_WRITE_NO_RESPONSE
     _NOTIFY = bluetooth.FLAG_NOTIFY
     # Custom service UUID = how the app identifies our devices in a scan. The
@@ -1530,9 +1699,18 @@ def _start_ble():
                         ble.gatts_notify(conn, tx, reply.encode())
                     except Exception:
                         pass
+        elif event == _IRQ_SCAN_RESULT:
+            # A follower scans for its group's beacon; advertise + scan coexist on
+            # the CYW43 (validated), so it stays app-discoverable while syncing.
+            _addr_type, _addr, _adv_type, rssi, adv = data
+            _rx_beacon(adv, rssi)
 
     ble.irq(irq)
     advertise()
+    # NB: a follower does NOT start scanning here. Bringing up a continuous BLE
+    # scan and the Wi-Fi station at the same time can wedge the shared CYW43
+    # radio, so the follower loop starts the scan only once Wi-Fi has settled
+    # (see _follower_start_scan). [Root-cause hypothesis — needs on-device retest.]
     return ble
 
 
@@ -1620,6 +1798,11 @@ def main():
                 slack = int(period * 1000000) - time.ticks_diff(time.ticks_us(), t0)
                 if slack > 0:
                     time.sleep_us(slack)
+            continue
+        if S.role == "follower":
+            # Phase-lock to the group leader and play our own slice (runs until a
+            # reload / mode change / program switch / teardown).
+            _follower_loop(f, frames, fps, S.n * 3)
             continue
         fb = S.n * 3
         f.seek(HEADER_SIZE)
