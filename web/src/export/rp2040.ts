@@ -138,6 +138,13 @@ class S:
     tcp_srv = None           # listening socket (once Wi-Fi is up); None = no server
     tcp_clients = []         # list of [sock, buf] - one per connected TCP client
     udp_sock = None          # UDP discovery socket (replies to LEDADISCOVER probes)
+    # Multi-device sync (see docs/sync-beacon.md).
+    role = "standalone"      # "standalone" | "leader" | "follower"
+    group = 0                # sync group id 0-255 (leaders broadcast it)
+    program = 0              # program number carried in the sync beacon (0-255)
+    frame = 0                # running frame index, for the leader beacon
+    beacon_seq = 0           # beacon sequence, increments each advert
+    beacon_at = 0            # time.ticks_ms() of the last beacon advert
 
 
 _buf = None
@@ -946,6 +953,7 @@ def _tick():
     _tcp_step()
     _udp_step()
     _wifi_step()
+    _beacon_step()
 
 
 # --- Power sensing (Pico W) --------------------------------------------------
@@ -1027,6 +1035,9 @@ def dispatch(line, origin=None):
             fields.append("HOSTNAME " + _wifi_hostname())
             fields.append("PLATFORM " + machine)
             fields.append("PIN %d" % DATA_PIN)
+            fields.append("ROLE " + S.role)
+            fields.append("GROUP %d" % S.group)
+            fields.append("PROGRAM %d" % S.program)
             fields.append(_power_status())   # "POWER usb|batt|unknown <mv>"
             # A field with no hardware is OMITTED (not sent as a placeholder); the
             # app shows N/A for anything still missing once ENDINFO arrives.
@@ -1070,6 +1081,43 @@ def dispatch(line, origin=None):
             except Exception:
                 pass
             return "OK NAME " + new
+        if c == "ROLE":
+            # No arg reports the role; "ROLE <standalone|leader|follower>" sets it,
+            # persists it, and switches the advertisement (device info <-> beacon).
+            if len(p) < 2:
+                return "ROLE " + S.role
+            r = p[1].lower()
+            if r not in ("standalone", "leader", "follower"):
+                return "ERR args"
+            S.role = r
+            try:
+                with open("role.txt", "w") as fh:
+                    fh.write(r)
+            except Exception:
+                pass
+            _restart_adv()
+            return "OK ROLE " + r
+        if c == "GROUP":
+            if len(p) < 2:
+                return "GROUP %d" % S.group
+            try:
+                S.group = int(p[1]) & 0xFF
+            except Exception:
+                return "ERR args"
+            try:
+                with open("group.txt", "w") as fh:
+                    fh.write(str(S.group))
+            except Exception:
+                pass
+            return "OK GROUP %d" % S.group
+        if c == "PROGRAM":
+            if len(p) < 2:
+                return "PROGRAM %d" % S.program
+            try:
+                S.program = int(p[1]) & 0xFF
+            except Exception:
+                return "ERR args"
+            return "OK PROGRAM %d" % S.program
         if c == "LIST":
             # Streamed by the player loop: "LISTLEN <n>", then one "FILE <name>"
             # per notification, then "ENDLIST". Avoids the single-notification
@@ -1174,6 +1222,81 @@ def dispatch(line, origin=None):
         return "ERR args"
 
 
+# --- Multi-device sync: advertising + beacon (see docs/sync-beacon.md) -------
+# Fixed 16-bit identity UUID 0x1EDA (little-endian on air) so scanners filter to
+# our devices; the "LD" magic + type byte is the authoritative check.
+_ADV_UUID16 = b"\\xda\\x1e"
+_ADV_MAGIC = b"LD"
+
+
+def _ad(t, v):
+    return bytes((len(v) + 1, t)) + v
+
+
+def _adv_common():
+    return _ad(0x01, b"\\x06") + _ad(0x03, _ADV_UUID16)
+
+
+def _adv_device():
+    # type 0x01: device info (3-byte Wi-Fi MAC suffix) for BLE<->Wi-Fi matching.
+    return _adv_common() + _ad(0xFF, b"\\xff\\xff" + _ADV_MAGIC + b"\\x01" + S.device_id)
+
+
+def _adv_beacon():
+    # type 0x02: leader sync beacon.
+    import struct
+    ts = time.ticks_ms() & 0xFFFFFFFF
+    br = int(S.bright * 255) & 0xFF
+    fl = 0x01 if S.mode == "play" else 0x00
+    payload = struct.pack(
+        "<BIIBBBB", S.group & 0xFF, S.frame & 0xFFFFFFFF, ts, S.program & 0xFF, br, fl, S.beacon_seq & 0xFF
+    )
+    return _adv_common() + _ad(0xFF, b"\\xff\\xff" + _ADV_MAGIC + b"\\x02" + payload)
+
+
+def _restart_adv():
+    # (Re)advertise the current role's payload. Leaders beacon; everyone else
+    # advertises device info. Guarded so it is harmless if BLE is down.
+    if S.ble is None:
+        return
+    try:
+        adv = _adv_beacon() if S.role == "leader" else _adv_device()
+        rsp = _ad(0x09, S.name.encode()[:26])
+        S.ble.gap_advertise(None)
+        S.ble.gap_advertise(100000, adv_data=adv, resp_data=rsp)
+    except Exception:
+        pass
+
+
+def _beacon_step():
+    # Leader: refresh the beacon (fresh frame/ts/seq) a few Hz, even while a phone
+    # is connected. advertise-while-connected on the CYW43 is the coexistence case
+    # to validate on hardware; guarded so any failure is harmless.
+    if S.role != "leader" or S.ble is None:
+        return
+    now = time.ticks_ms()
+    if time.ticks_diff(now, S.beacon_at) < 150:
+        return
+    S.beacon_at = now
+    S.beacon_seq = (S.beacon_seq + 1) & 0xFF
+    _restart_adv()
+
+
+def _load_role():
+    try:
+        with open("role.txt") as fh:
+            r = fh.read().strip()
+        if r in ("standalone", "leader", "follower"):
+            S.role = r
+    except Exception:
+        pass
+    try:
+        with open("group.txt") as fh:
+            S.group = int(fh.read().strip()) & 0xFF
+    except Exception:
+        pass
+
+
 def _start_ble():
     # Nordic UART Service peripheral. One text command per write to RX; the
     # reply comes back as a notification on TX. Only present on the Pico W.
@@ -1210,17 +1333,10 @@ def _start_ble():
         return struct.pack("BB", len(v) + 1, t) + v
 
     def advertise():
-        # Service UUID in the advertisement so central scan-filters (iOS) match
-        # reliably; the user-settable name rides the scan response. ~100ms
-        # interval so discovery and connection initiation are quick (only
-        # advertises while disconnected, so it never competes with playback).
-        adv_data = field(0x01, bytes((6,))) + field(0x07, bytes(_SVC))
-        if S.device_id:
-            # Manufacturer data: 0xFFFF (no company) + the 3-byte device id, so the
-            # app can correlate this device with its Wi-Fi discovery (hostname suffix).
-            adv_data += field(0xFF, b"\\xff\\xff" + S.device_id)
-        rsp = field(0x09, S.name.encode()[:26])
-        ble.gap_advertise(100000, adv_data=adv_data, resp_data=rsp)
+        # Advertise the current role's payload: 16-bit identity UUID + magic +
+        # type (see docs/sync-beacon.md). A leader broadcasts the sync beacon;
+        # anyone else advertises device info. The name rides the scan response.
+        _restart_adv()
 
     def irq(event, data):
         if event == _IRQ_CONNECT:
@@ -1255,6 +1371,7 @@ def main():
     _load_state()          # restore play/solid/off + the solid color
     _prime_led_count()     # so a restored solid/off covers the strip at boot
     _load_networks()       # queue a Wi-Fi auto-connect if provisioned
+    _load_role()           # standalone / leader / follower + group id
     try:
         _start_ble()
         print("BLE control active:", S.name)
@@ -1315,9 +1432,10 @@ def main():
             print("playing", S.file, "leds", S.n, "frames", frames, "fps", fps)
         fb = S.n * 3
         f.seek(16)
-        for _ in range(frames):
+        for i in range(frames):
             if S.reload or S.mode != "play" or S.uploading:
                 break
+            S.frame = i
             _tick()
             _show_grb(f.read(fb), S.n)
             time.sleep(base_delay / S.speed if S.speed > 0 else base_delay)
