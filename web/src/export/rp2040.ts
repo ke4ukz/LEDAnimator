@@ -158,6 +158,9 @@ class S:
     my_mac = b""             # our BLE MAC, for the auto-election lowest-MAC tiebreaker
     rival_mac = b""          # MAC of the last group beacon heard (advertiser address)
     role_locked = False      # once auto-election resolves the role, keep it across reloads
+    leader_mac = b""         # follower: MAC of the leader we're bound to (sticky; empty = unbound)
+    leader_electing = False  # elected leader still in its post-promotion commit window
+    leader_commit_at = 0     # time.ticks_ms() at promotion (commit-window start)
     program = 0              # program number carried in the sync beacon (0-255)
     frame = 0                # running frame index, for the leader beacon
     beacon_seq = 0           # beacon sequence, increments each advert
@@ -1495,18 +1498,30 @@ def _beacon_step():
     # to validate on hardware; guarded so any failure is harmless.
     if S.role not in ("leader", "leader-only") or S.ble is None or S.beacon_off:
         return
-    # Elected leaders keep scanning: if a rival leader with a LOWER MAC is beaconing
-    # our group, step down to follower (lowest MAC wins — resolves double-promotion /
-    # split-brain). Fixed leaders never start a scan, so they never see a rival.
-    if S.beacon_rx is not None:
-        rival = S.rival_mac
-        S.beacon_rx = None
-        if rival and S.my_mac and rival < S.my_mac:
-            print("election: rival leader has lower MAC -> STEP DOWN to follower")
-            S.role = "follower"
-            S.beacon_off = True
-            S.reload = True
-            return
+    # Elected leader — the COMMIT WINDOW. For a few seconds after promoting, listen
+    # for a near-simultaneous twin and step down if it has a LOWER MAC (resolves a
+    # boot-time double-promotion). Once the window elapses, COMMIT: stop scanning and
+    # stay leader — a late rival (e.g. a healed split-brain) will NOT usurp a running
+    # group. Fixed leaders never scan / never elect, so they never step down.
+    if S.leader_electing:
+        if time.ticks_diff(time.ticks_ms(), S.leader_commit_at) >= 3000:
+            S.leader_electing = False
+            try:
+                S.ble.gap_scan(None)   # committed: stop listening, free the radio
+            except Exception:
+                pass
+            S.scan_started = False
+            print("election: committed as leader (stopped listening)")
+        elif S.beacon_rx is not None:
+            rival = S.rival_mac
+            S.beacon_rx = None
+            if rival and S.my_mac and rival < S.my_mac:
+                print("election: lower-MAC twin in commit window -> STEP DOWN")
+                S.role = "follower"
+                S.beacon_off = True
+                S.reload = True
+                S.leader_electing = False
+                return
     now = time.ticks_ms()
     if S.tearing_down and time.ticks_diff(now, S.teardown_at) >= 2000:
         # Teardown window elapsed: followers have seen the flag — silence the
@@ -1543,9 +1558,11 @@ def _rx_beacon(adv, rssi, addr):
                 b = struct.unpack("<BIIBBBB", bytes(v[5:18]))
                 mac = bytes(addr)
                 if b[0] == S.group and mac != S.my_mac:
+                    if S.leader_mac and mac != S.leader_mac:
+                        return   # bound to a leader: ignore any other same-group leader
                     S.beacon_rx = b
                     S.rssi = rssi
-                    S.rival_mac = mac   # advertiser address, for lowest-MAC-wins
+                    S.rival_mac = mac   # advertiser address, for binding + lowest-MAC-wins
             return
         i += 1 + ln
 
@@ -1608,7 +1625,9 @@ def _elect():
         time.sleep_ms(20)
     S.role = "leader"
     S.role_locked = True
-    print("election -> LEADER (silence)")
+    S.leader_electing = True          # open the commit window (catch a simultaneous twin)
+    S.leader_commit_at = time.ticks_ms()
+    print("election -> LEADER (silence); commit window open")
 
 
 def _follower_loop(f, nf, fps, fb):
@@ -1648,6 +1667,12 @@ def _follower_loop(f, nf, fps, fb):
         if b is not None:
             S.beacon_rx = None
             grp, bframe, bts, bprog, bbr, bfl, bseq = b
+            if not S.leader_mac:
+                # Sticky-bind to this leader; the IRQ then ignores other same-group
+                # leaders until this one goes silent (see the "lost" un-bind below).
+                S.leader_mac = S.rival_mac
+                if _FOL_DEBUG:
+                    print("follower bound to leader", S.rival_mac)
             if bfl & 0x02:               # teardown: stop, go dark, await operator
                 S.mode = "off"
                 _mark_state()
@@ -1718,6 +1743,8 @@ def _follower_loop(f, nf, fps, fb):
         if _FOL_DEBUG and lost != last_lost:
             last_lost = lost
             print("fol", "LOST -> policy %d" % S.loss_policy if lost else "RE-ACQUIRED")
+        if lost and S.leader_mac:
+            S.leader_mac = b""   # bound leader has gone silent: un-bind + re-acquire any leader
         S.fol_locked = (not lost) and abs(drift) <= LOCK_TOL
         if lost and S.loss_policy == 2:
             # blackout policy: go dark until the leader returns (the PLL keeps
