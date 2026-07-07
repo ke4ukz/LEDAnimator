@@ -35,10 +35,10 @@ followed by the pixel data.
 | 6 | 2 | **numLeds** | `uint16` — LEDs per frame |
 | 8 | 4 | **numFrames** | `uint32` — frames in the loop |
 | 12 | 2 | **fps** | `uint16` — frames per second |
-| 14 | 1 | **role** | `0` standalone · `1` leader · `2` leader-only · `3` follower |
+| 14 | 1 | **role** | `0` standalone · `1` leader · `2` leader-only · `3` follower · `4` auto (first-boot election) |
 | 15 | 1 | **group id** | `uint8` — sync group / installation (leaders broadcast it; followers filter on it) |
 | 16 | 1 | **device id** | `uint8` — render-slice id (which device's slice this file is) |
-| 17 | 1 | **sync flags** | bits 0–1 = follower on-sync-loss: `0` indicate · `1` silent · `2` blackout |
+| 17 | 1 | **sync flags** | bits 0–1 = on-sync-loss (`0` indicate · `1` silent · `2` blackout); bit 2 = startup (`0` wait-for-sync · `1` start-and-go) |
 | 18 | 2 | **reserved** | `0` |
 
 The **sync fields (role / group / device)** make the file its own role config:

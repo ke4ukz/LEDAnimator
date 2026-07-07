@@ -380,6 +380,21 @@ name; pin 0; brightness 100%.
   loses its leader does one of `indicate` (amber LED 0), `silent` (free-run, no
   indicator), or `blackout` (dark until the leader returns). Set per-installation
   in the export UI.
+- **DONE** — **follower startup policy** (byte 17, bit 2): `wait-for-sync` (hold dark
+  until the first beacon — clean for a display) vs `start-and-go` (free-run its own
+  animation immediately and snap into sync when a beacon arrives — a lamp that works
+  alone but syncs with company). Validated on hardware.
+- **DONE (needs 2-Pico validation of the tiebreaker)** — **auto-elect role** (role 4):
+  at boot a device listens for its group's beacon for a randomized backoff (600–2647
+  ms, MAC-seeded); heard → follower, silence → promote to leader. `role_locked` keeps
+  the decision across reloads (re-elects only on reboot — matches "returning leader
+  defers to an existing one"). No re-election among running followers. An elected
+  leader keeps scanning and **steps down** if it hears a rival leader on its group
+  with a **lower BLE MAC** (lowest-MAC-wins; the advertiser MAC is free in the scan
+  result — no beacon change). Fixed leaders never scan, so never step down. Chosen in
+  the export UI (Leader: *Fixed device* vs *Auto — first to boot*). Validated: auto→
+  follower with a leader present, auto→leader on silence; the MAC step-down + the
+  simultaneous-boot backoff need 2+ Picos to exercise.
 - **DONE** — **role/group/loss export UI**: the Export dialog's *Multi-device sync*
   section (shown when >1 device is in the export) sets the Group ID, picks the
   **Leader** (one of the devices → leader+controller; the rest follow), and the
