@@ -254,6 +254,51 @@ much smaller/robust firmware and cheaper BOM. One shared core, a feature spectru
 
 ---
 
+## 4. White-label / OEM branding
+
+For others building a product on this firmware + app. **Nearer-term-buildable than the
+rest of this doc** — it rides the existing control protocol + export pipeline rather
+than needing a rewrite.
+
+### Brand logo in the device list (the near-term piece)
+
+Let a designer embed a **logo** that the app shows in place of the light-bulb icon, so
+their product looks like *theirs*.
+
+- **Mechanism:** a small per-installation logo file lives on the device and is served
+  over the control protocol; the app fetches it once, caches it, and shows it instead
+  of the bulb (bulb = fallback when there's none).
+- **Editor / export:** a per-*project* brand logo image (one brand per installation,
+  like the group id), written into every device's bundle on export.
+- **Firmware:** store `logo.png`; a `LOGO` command streams it over **TCP** — framed
+  like `UPLOAD` reversed (`LOGO <len>` then `<len>` raw bytes). `MOREINFO` gains a flag
+  that a logo exists (and optionally a short **brand id / hash**).
+- **App:** on discovery, if a logo exists and isn't cached, fetch once over TCP, cache
+  **by brand id** (one download per brand → the list renders instantly from cache),
+  render instead of the bulb.
+- **Format / size:** PNG (iOS/macOS decode natively). Keep it **small** — the Pico W
+  filesystem is ~800 KB, so a 32 KB logo is ~5%; **aim for ~16 KB**, cap dimensions +
+  bytes.
+- **List vs. grid sizing:** a list-row icon is small (~40–80 px); a grid tile wants
+  ~256 px+. Rather than ask for multiple sizes, **composite a designer's small mark
+  into a supplied larger frame** (e.g. their logo inside a light-bulb) so one ~16 KB
+  asset serves both. (Details for later — including the actual app row/tile sizes and
+  the grid/list toggle.)
+- **Transport:** Wi-Fi/TCP is the bulk channel; a BLE-only device shows the bulb until
+  it's on Wi-Fi (chunk over BLE later if wanted).
+- **Trust:** cosmetic — a device could advertise any logo; it's just an icon, not worth
+  authenticating for this domain.
+
+### Down-the-line branding
+
+- **Brand / product name** — distinct from the per-device name; a small add once the
+  logo path exists.
+- **App accent color / theme** — let a brand tint the app to their color.
+- Possible later: a bundled set of frame templates for the composite, brand-set default
+  patterns, etc.
+
+---
+
 ## Related
 
 - **[`multi-device-sync.md`](multi-device-sync.md)** — the current sync design (the
