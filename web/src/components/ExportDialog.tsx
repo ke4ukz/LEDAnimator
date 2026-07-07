@@ -3,7 +3,7 @@ import { useStore } from '../store'
 import { InfoDot } from './InfoDot'
 import { partitionByDevice } from '../bake'
 import { DEVICES, checkLimits } from '../export/devices'
-import { encodeRaster, estimateBytes, ROLE, LOSS, type LedaMeta } from '../export/format'
+import { encodeRaster, estimateBytes, ROLE, LOSS, STARTUP, type LedaMeta } from '../export/format'
 import { rp2040MainPy, rp2040Readme, rp2040SettingsFiles } from '../export/rp2040'
 import { serializeProjectFile } from '../export/projectFile'
 import { downloadBytes, zipProject } from '../export/download'
@@ -64,15 +64,14 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
   const effectiveLeader = multi ? (deviceIds.includes(multiDevice.leader) ? multiDevice.leader : deviceIds[0]) : -1
   // Sync metadata stamped into each device's .leda header. Single-device → a plain
   // standalone; multi → the leader is leader+controller, everyone else a follower.
-  const metaFor = (device: number): LedaMeta =>
-    !multi
-      ? { role: ROLE.standalone, device }
-      : {
-          role: device === effectiveLeader ? ROLE.leader : ROLE.follower,
-          group: multiDevice.group,
-          device,
-          lossPolicy: multiDevice.lossPolicy,
-        }
+  const metaFor = (device: number): LedaMeta => {
+    if (!multi) return { role: ROLE.standalone, device }
+    const common = { group: multiDevice.group, device, lossPolicy: multiDevice.lossPolicy, startup: multiDevice.startup }
+    // Auto-elect: every device is role=auto (first to boot leads). Fixed: the
+    // chosen device is leader+controller, the rest are followers.
+    if (multiDevice.autoElect) return { role: ROLE.auto, ...common }
+    return { role: device === effectiveLeader ? ROLE.leader : ROLE.follower, ...common }
+  }
   const base = sanitizeName(projectName)
   const progNum = String(program).padStart(2, '0')
   const progBase = `${progPrefix(program)}${base}` // e.g. 07-aurora
@@ -279,11 +278,26 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
                   />
                 </label>
                 <label className="field-row">
-                  <span title="Which device runs the master clock and broadcasts the sync beacon. It still drives its own strip (leader + controller); every other device becomes a follower.">Leader</span>
-                  <select value={effectiveLeader} onChange={(e) => setMultiDevice({ leader: Number(e.target.value) })}>
+                  <span title="Which device runs the master clock + beacon. Fixed: you pick it (it still drives its own strip); the rest follow. Auto: the first device to power on elects itself leader — flexible when physical position doesn't dictate who must lead.">Leader</span>
+                  <select
+                    value={multiDevice.autoElect ? -1 : effectiveLeader}
+                    onChange={(e) => {
+                      const v = Number(e.target.value)
+                      if (v === -1) setMultiDevice({ autoElect: true })
+                      else setMultiDevice({ autoElect: false, leader: v })
+                    }}
+                  >
                     {devices.map(({ device }) => (
-                      <option key={device} value={device}>Device {device} — {settingsFor(device).name}</option>
+                      <option key={device} value={device}>Fixed · Device {device} — {settingsFor(device).name}</option>
                     ))}
+                    <option value={-1}>Auto · first to boot</option>
+                  </select>
+                </label>
+                <label className="field-row">
+                  <span title="How a follower behaves before its first sync. Wait-for-sync holds dark until it hears the leader (clean for a display). Start-and-go plays its own animation right away and snaps into sync when a leader appears (a lamp that works alone but syncs with company).">Follower startup</span>
+                  <select value={multiDevice.startup} onChange={(e) => setMultiDevice({ startup: Number(e.target.value) })}>
+                    <option value={STARTUP.wait}>Wait for sync</option>
+                    <option value={STARTUP.go}>Start-and-go</option>
                   </select>
                 </label>
                 <label className="field-row">

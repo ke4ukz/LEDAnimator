@@ -33,11 +33,13 @@ const initialDeviceDefaults = (d?: DeviceDefaults): DeviceDefaultsState => ({
 /** Installation-level sync settings for multi-device export (see MultiDevice).
  *  `leader` is a device id; if it isn't among the exported devices the dialog
  *  falls back to the lowest present one. */
-type MultiDeviceState = { group: number; leader: number; lossPolicy: number }
+type MultiDeviceState = { group: number; leader: number; autoElect: boolean; lossPolicy: number; startup: number }
 const initialMultiDevice = (m?: MultiDevice): MultiDeviceState => ({
   group: m?.group ?? 0,
   leader: m?.leader ?? 0,
+  autoElect: m?.autoElect ?? false,
   lossPolicy: m?.lossPolicy ?? 0,
+  startup: m?.startup ?? 0,
 })
 import { loadSavedProjectFile, loadSavedDirty, loadSavedName, saveProjectFile, clearSavedProject, enforceStorageVersion } from './persistence'
 import { saveProjectToLibrary, listLibrary } from './export/library'

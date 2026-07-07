@@ -27,10 +27,14 @@ export interface DeviceDefaults {
 export interface MultiDevice {
   /** Sync group / installation id (0-255); followers filter on it. */
   group?: number
-  /** The device id designated leader (leader + controller). */
+  /** The device id designated leader (leader + controller), when not auto-electing. */
   leader?: number
+  /** First-boot election instead of a fixed leader: every device is role=auto. */
+  autoElect?: boolean
   /** Follower behavior on sync loss: 0 indicate, 1 silent, 2 blackout (see LOSS). */
   lossPolicy?: number
+  /** Follower boot: 0 wait-for-sync, 1 start-and-go (see STARTUP). */
+  startup?: number
 }
 
 export interface ProjectFile {
