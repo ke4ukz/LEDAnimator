@@ -388,13 +388,21 @@ name; pin 0; brightness 100%.
   at boot a device listens for its group's beacon for a randomized backoff (600–2647
   ms, MAC-seeded); heard → follower, silence → promote to leader. `role_locked` keeps
   the decision across reloads (re-elects only on reboot — matches "returning leader
-  defers to an existing one"). No re-election among running followers. An elected
-  leader keeps scanning and **steps down** if it hears a rival leader on its group
-  with a **lower BLE MAC** (lowest-MAC-wins; the advertiser MAC is free in the scan
-  result — no beacon change). Fixed leaders never scan, so never step down. Chosen in
-  the export UI (Leader: *Fixed device* vs *Auto — first to boot*). Validated: auto→
-  follower with a leader present, auto→leader on silence; the MAC step-down + the
-  simultaneous-boot backoff need 2+ Picos to exercise.
+  defers to an existing one"). No re-election among running followers. Chosen in the
+  export UI (Leader: *Fixed device* vs *Auto — first to boot*).
+  - **Commit window (stability):** a promoted leader listens for the lower-MAC
+    step-down for only **~3 s** after promoting (catches a near-simultaneous twin —
+    the advertiser MAC is free in the scan result, no beacon change), then **commits**:
+    stops scanning and stays leader. A late rival / healed split-brain does **not**
+    usurp a running group. Fixed leaders never scan, so they never step down.
+  - **Sticky follower binding (its complement):** a follower binds to its leader's MAC
+    on lock, and thereafter **ignores any other same-group leader**, so two leaders
+    can't yank it between their phases. On a real loss (bound leader silent > 2.5 s)
+    it un-binds and re-acquires any leader (keeps auto-leader-change). Together these
+    give stable islands that don't disruptively merge.
+  - Validated: auto→follower with a leader present, auto→leader on silence, follower
+    binds to the real leader MAC, leader commits after 3 s. **Needs 2+ Picos:** the
+    lower-MAC step-down firing, two-leaders-ignored, and the simultaneous-boot backoff.
 - **DONE** — **role/group/loss export UI**: the Export dialog's *Multi-device sync*
   section (shown when >1 device is in the export) sets the Group ID, picks the
   **Leader** (one of the devices → leader+controller; the rest follow), and the
