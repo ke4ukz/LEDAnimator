@@ -156,6 +156,8 @@ class S:
     loss_policy = 0          # follower on-sync-loss: 0 indicate / 1 silent / 2 blackout (header byte 17)
     startup_go = 0           # follower boot: 0 wait-for-sync (dark) / 1 start-and-go (play then snap)
     my_mac = b""             # our BLE MAC, for the auto-election lowest-MAC tiebreaker
+    rival_mac = b""          # MAC of the last group beacon heard (advertiser address)
+    role_locked = False      # once auto-election resolves the role, keep it across reloads
     program = 0              # program number carried in the sync beacon (0-255)
     frame = 0                # running frame index, for the leader beacon
     beacon_seq = 0           # beacon sequence, increments each advert
@@ -445,8 +447,11 @@ def _load_state():
 
 
 def _apply_role_header(h):
-    # Set role / group id / device-slice id from a LEDA header's sync bytes.
-    S.role = _ROLE_NAMES[h[14]] if h[14] < len(_ROLE_NAMES) else "standalone"
+    # Set role / group id / device-slice id from a LEDA header's sync bytes. Once
+    # an auto device has ELECTED a role, keep it across reloads (program switches)
+    # rather than re-reading "auto" and re-electing.
+    if not S.role_locked:
+        S.role = _ROLE_NAMES[h[14]] if h[14] < len(_ROLE_NAMES) else "standalone"
     S.group = h[15]
     S.device = h[16]
     S.loss_policy = h[17] & 0x03          # sync flags: on-sync-loss behavior
@@ -1490,6 +1495,18 @@ def _beacon_step():
     # to validate on hardware; guarded so any failure is harmless.
     if S.role not in ("leader", "leader-only") or S.ble is None or S.beacon_off:
         return
+    # Elected leaders keep scanning: if a rival leader with a LOWER MAC is beaconing
+    # our group, step down to follower (lowest MAC wins — resolves double-promotion /
+    # split-brain). Fixed leaders never start a scan, so they never see a rival.
+    if S.beacon_rx is not None:
+        rival = S.rival_mac
+        S.beacon_rx = None
+        if rival and S.my_mac and rival < S.my_mac:
+            print("election: rival leader has lower MAC -> STEP DOWN to follower")
+            S.role = "follower"
+            S.beacon_off = True
+            S.reload = True
+            return
     now = time.ticks_ms()
     if S.tearing_down and time.ticks_diff(now, S.teardown_at) >= 2000:
         # Teardown window elapsed: followers have seen the flag — silence the
@@ -1509,10 +1526,10 @@ def _beacon_step():
 # the bench PLL this ports). A follower scans for its group's beacon and locks a
 # free-running frame counter to it, displaying frames from its OWN slice. -------
 
-def _rx_beacon(adv, rssi):
-    # Parse a sync-beacon advert; if it's for OUR group, stash it for the follower
-    # loop (which runs the PLL). Runs in the BLE scan IRQ, so keep it light (no
-    # imports/allocation churn here — struct is imported at module load).
+def _rx_beacon(adv, rssi, addr):
+    # Parse a sync-beacon advert; if it's for OUR group (and not our OWN advert),
+    # stash it + the advertiser MAC for the follower PLL and the leader tiebreaker.
+    # Runs in the BLE scan IRQ, so keep it light (struct is imported at module load).
     i = 0
     n = len(adv)
     while i + 1 < n:
@@ -1524,9 +1541,11 @@ def _rx_beacon(adv, rssi):
             if (len(v) >= 18 and v[0] == 0xFF and v[1] == 0xFF and v[2] == 0x4C
                     and v[3] == 0x44 and v[4] == 0x02):   # 0xFFFF + "LD" + type 0x02
                 b = struct.unpack("<BIIBBBB", bytes(v[5:18]))
-                if b[0] == S.group:
+                mac = bytes(addr)
+                if b[0] == S.group and mac != S.my_mac:
                     S.beacon_rx = b
                     S.rssi = rssi
+                    S.rival_mac = mac   # advertiser address, for lowest-MAC-wins
             return
         i += 1 + ln
 
@@ -1552,6 +1571,44 @@ def _follower_start_scan():
         print("follower scan started (wifi", S.wifi_state, ")")
     except Exception as e:
         print("scan unavailable:", e)
+
+
+def _elect():
+    # Auto role: at boot, listen for a group beacon for a randomized window; if one
+    # is heard, become a follower; on silence, promote to leader. The random backoff
+    # keeps simultaneously-booted auto devices from all promoting (first to speak
+    # wins; the rest hear it and follow); a residual tie / split-brain is resolved by
+    # the leader-listen lowest-MAC step-down in _beacon_step. Resolves S.role in place
+    # (returns early, to be retried next loop, until Wi-Fi has settled + the scan is up).
+    if S.wifi_configured and S.wifi_state not in ("connected", "failed"):
+        _tick()
+        time.sleep_ms(50)
+        return   # don't scan during CYW43 station bring-up
+    _follower_start_scan()
+    if not S.scan_started:
+        _tick()
+        time.sleep_ms(50)
+        return
+    import random
+    try:
+        random.seed(int.from_bytes(S.my_mac[-3:], "big") if S.my_mac else time.ticks_us())
+    except Exception:
+        pass
+    window = 600 + random.getrandbits(11)   # 600-2647 ms randomized backoff
+    S.beacon_rx = None
+    start = time.ticks_ms()
+    print("election: listening", window, "ms")
+    while time.ticks_diff(time.ticks_ms(), start) < window:
+        if S.beacon_rx is not None:
+            S.role = "follower"
+            S.role_locked = True
+            print("election -> FOLLOWER (heard a leader)")
+            return
+        _tick()
+        time.sleep_ms(20)
+    S.role = "leader"
+    S.role_locked = True
+    print("election -> LEADER (silence)")
 
 
 def _follower_loop(f, nf, fps, fb):
@@ -1705,6 +1762,11 @@ def _start_ble():
         ble.config(gap_name=S.name)
     except Exception:
         pass
+    try:
+        _, _mac = ble.config("mac")   # our BLE address, for the auto-election tiebreaker
+        S.my_mac = bytes(_mac)
+    except Exception:
+        pass
     S.ble = ble
     ((tx, rx),) = ble.gatts_register_services(((_SVC, (_TX, _RX)),))
     ble.gatts_set_buffer(rx, 200)   # room for longer commands (SELECT <name>)
@@ -1746,7 +1808,7 @@ def _start_ble():
             # A follower scans for its group's beacon; advertise + scan coexist on
             # the CYW43 (validated), so it stays app-discoverable while syncing.
             _addr_type, _addr, _adv_type, rssi, adv = data
-            _rx_beacon(adv, rssi)
+            _rx_beacon(adv, rssi, _addr)
 
     ble.irq(irq)
     advertise()
@@ -1828,6 +1890,11 @@ def main():
             S.reload = False
             print("playing", S.file, "leds", S.n, "frames", frames, "fps", fps,
                   "role", S.role, "grp", S.group, "dev", S.device)
+        if S.role == "auto":
+            # First-boot election: resolve to leader or follower (retried until
+            # Wi-Fi settles + the scan is up), then re-enter with the resolved role.
+            _elect()
+            continue
         if S.role == "leader-only":
             # Dedicated leader (header-only file): run the master clock + beacon,
             # drive no strip. Advance the frame at the authored rate so followers
