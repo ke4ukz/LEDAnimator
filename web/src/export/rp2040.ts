@@ -62,7 +62,7 @@ def _load_pin():
 DATA_PIN = _load_pin()
 PATTERN_EXT = ".leda"
 HEADER_SIZE = 20               # LEDA header bytes (see docs/file-format.md)
-_ROLE_NAMES = ("standalone", "leader", "leader-only", "follower")  # header role byte -> name
+_ROLE_NAMES = ("standalone", "leader", "leader-only", "follower", "auto")  # header role byte -> name
 # The boot-clear and every status/flash state write this many LEDs regardless of
 # the real strip length — clearing power-on garbage AND any previous longer
 # pattern's tail (no need to track the last length). Overshooting a shorter strip
@@ -154,6 +154,8 @@ class S:
     group = 0                # sync group id 0-255 (leaders broadcast it; followers filter on it)
     device = 0               # render-slice id 0-255 (which device's slice this file is)
     loss_policy = 0          # follower on-sync-loss: 0 indicate / 1 silent / 2 blackout (header byte 17)
+    startup_go = 0           # follower boot: 0 wait-for-sync (dark) / 1 start-and-go (play then snap)
+    my_mac = b""             # our BLE MAC, for the auto-election lowest-MAC tiebreaker
     program = 0              # program number carried in the sync beacon (0-255)
     frame = 0                # running frame index, for the leader beacon
     beacon_seq = 0           # beacon sequence, increments each advert
@@ -447,7 +449,8 @@ def _apply_role_header(h):
     S.role = _ROLE_NAMES[h[14]] if h[14] < len(_ROLE_NAMES) else "standalone"
     S.group = h[15]
     S.device = h[16]
-    S.loss_policy = h[17] & 0x03   # sync flags: on-sync-loss behavior
+    S.loss_policy = h[17] & 0x03          # sync flags: on-sync-loss behavior
+    S.startup_go = (h[17] >> 2) & 1       # boot: start-and-go vs wait-for-sync
 
 
 def _program_from_name(name):
@@ -1630,10 +1633,24 @@ def _follower_loop(f, nf, fps, fb):
                 S.fol_seen, S.fol_phase, drift, S.fol_R, S.fol_off, S.fol_locked))
 
         if not S.fol_seen:
-            # Acquiring: never play out of sync — hold dark, LED0 blue pulse.
-            _show_status("acquiring")
-            _tick()
-            time.sleep_ms(20)
+            if S.startup_go:
+                # Start-and-go: free-run our own animation from a local clock until
+                # the first beacon, then snap into sync (the lamp-that-works-alone
+                # case). fol_R was seeded to the file's fps at loop entry.
+                S.fol_phase = (S.fol_phase + dt * S.fol_R) % nf
+                frame = int(S.fol_phase) % nf
+                S.frame = frame
+                f.seek(HEADER_SIZE + frame * fb)
+                _show_grb(f.read(fb), S.n)
+                _tick()
+                slack = period_us - time.ticks_diff(time.ticks_us(), t0)
+                if slack > 0:
+                    time.sleep_us(slack)
+            else:
+                # Wait-for-sync: hold dark (LED0 blue pulse) until the first beacon.
+                _show_status("acquiring")
+                _tick()
+                time.sleep_ms(20)
             continue
 
         # Followers are built to free-run through beacon gaps SILENTLY — only flag

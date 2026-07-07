@@ -13,7 +13,8 @@ import type { Raster } from '../types'
 //   14  1    role      (0 standalone, 1 leader, 2 leader-only, 3 follower)
 //   15  1    group id  (0-255 sync group / installation)
 //   16  1    device id (0-255 render-slice: which device this file is for)
-//   17  1    sync flags (bits 0-1 = follower on-sync-loss: 0 indicate, 1 silent, 2 blackout)
+//   17  1    sync flags: bits 0-1 = on-sync-loss (0 indicate,1 silent,2 blackout);
+//            bit 2 = startup (0 wait-for-sync, 1 start-and-go)
 //   18  2    reserved
 //   20  ...  for each frame: numLeds × (R,G,B)
 //
@@ -28,6 +29,7 @@ export const ROLE = {
   leader: 1, // leader + controller: runs the clock/beacon AND drives its strip
   leaderOnly: 2, // dedicated leader: runs the clock/beacon, drives no strip (header-only file)
   follower: 3,
+  auto: 4, // first-boot election: at boot, become leader if no beacon is heard, else follower
 } as const
 
 /** A follower's behavior when it loses its leader (header byte 17, bits 0-1). */
@@ -37,6 +39,12 @@ export const LOSS = {
   blackout: 2, // go dark until the leader returns
 } as const
 
+/** A follower's boot behavior before its first sync (header byte 17, bit 2). */
+export const STARTUP = {
+  wait: 0, // hold dark ("acquiring") until the first beacon, then come up in sync
+  go: 1, // free-run its own animation immediately; snap into sync when a beacon arrives
+} as const
+
 /** Per-file sync metadata stamped into the header (all default to a plain
  *  standalone device). */
 export interface LedaMeta {
@@ -44,6 +52,7 @@ export interface LedaMeta {
   group?: number
   device?: number
   lossPolicy?: number
+  startup?: number
 }
 
 /** Bytes a raster will occupy as a LEDA file (no allocation). */
@@ -71,7 +80,8 @@ function writeHeader(
   dv.setUint8(14, (meta.role ?? ROLE.standalone) & 0xff)
   dv.setUint8(15, (meta.group ?? 0) & 0xff)
   dv.setUint8(16, (meta.device ?? 0) & 0xff)
-  dv.setUint8(17, (meta.lossPolicy ?? LOSS.indicate) & 0x03) // sync flags
+  // sync flags: bits 0-1 = on-loss policy, bit 2 = start-and-go (else wait-for-sync)
+  dv.setUint8(17, ((meta.lossPolicy ?? LOSS.indicate) & 0x03) | (((meta.startup ?? STARTUP.wait) & 1) << 2))
   // 18-19 reserved (0)
 }
 
