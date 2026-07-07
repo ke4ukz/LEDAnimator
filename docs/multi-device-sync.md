@@ -422,6 +422,10 @@ name; pin 0; brightness 100%.
 
 ## To validate on hardware
 
+**The full checklist lives in [`hardware-test-plan.md`](hardware-test-plan.md)** (what
+still needs 2+ Pico W, and how to run each). Highlights below.
+
+
 - ~~BLE scan + advertise + GATT + DMA-player coexistence on one Pico W.~~
   **DONE (2026-07-06)** — all coexist at 30 fps; beacons received while playing.
 - **Follower integrated run** — the outstanding one: retest after the scan-after-

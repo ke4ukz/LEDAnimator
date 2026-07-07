@@ -36,10 +36,13 @@ A snapshot of what works today and what's next. Updated July 2026.
 ## Next / not yet built
 
 - **Multi-device synchronized playback** — split one animation across several
-  Pico W devices, synced as a group. Design is written and decisions are locked:
-  see [`multi-device-sync.md`](multi-device-sync.md). **First step:** the
-  transport-agnostic web foundation — per-LED `device` id, per-device export, and
-  a program number per pattern.
+  Pico W devices, synced as a group. **Mostly built + single-device-validated**
+  (2026-07: DMA player, header roles, follower PLL, on-loss/startup policies,
+  auto-election with commit window + sticky binding, multi-device export UI). See
+  [`multi-device-sync.md`](multi-device-sync.md). **What's left is real
+  multi-device validation** (2+ Pico W) — checklist in
+  [`hardware-test-plan.md`](hardware-test-plan.md) — plus dedicated-leader export,
+  the recovery ritual, and the iOS/macOS app catch-up.
 - **Color data format** — indexed color (per-program perceptual palette +
   dithering) and/or RGB565/444 to shrink exports; frame-rate as the cheapest
   lever. Splitting across devices divides file size by device count. (Discussion
