@@ -22,19 +22,14 @@ generates patterns, baked into `.leda` files. The firmware stays a dumb raster
 player — no on-device VM, no new runtime failure modes, and it ports cleanly to a
 compiled binary later.
 
-**Language: JavaScript.** Native, JIT-fast, zero runtime to ship, best tooling,
-WebGL/WebGPU available if wanted. The *only* reason to embed **Lua in the browser**
-(via Fengari or wasm-Lua) is if you want the **same script to run on-device too** —
-because you'd never run JS on an RP2040, so the shared language would be Lua. But
-browser-bake and on-device-react are different jobs, so best-tool-per-job says JS in
-the browser. Only reach for Lua-in-browser for the narrow "portable generator" case.
+The **language, authoring surface, and debugging** landed on **Lua + a block editor**
+after weighing JS — see "Language, authoring & debugging" below. Whatever the surface,
+the script runs **sandboxed** (a Web Worker and/or the wasm Lua VM you host, exposing
+only a safe API), so a bad or runaway script can't wedge the editor — it's isolated and
+killable, whether it returns a texture or a whole raster.
 
-**Sandbox: a Web Worker.** Isolated from the DOM, and you can time it out and kill it
-if a user script hangs. This is what makes handing control to a user-supplied script
-safe — and it's identical whether the script returns a texture or a whole raster.
-
-Two integration points, at different levels of the existing pipeline. Both fit as new
-**source** types on tracks.
+There are two integration points, at different levels of the existing pipeline. Both
+fit as new **source** types on tracks.
 
 ### 1a. Texture mode (build this first)
 
@@ -94,20 +89,72 @@ reaction-diffusion sim across 3-D space it could never *compute* live.
 **API shape:** per-frame callback is the primitive (a "whole timeline" call is just
 the engine looping over it → progress/cancel for free). Feed it rich context —
 especially **each LED's 3-D position**. Handle state with a one-time `setup()` that
-returns the per-frame closure, so evolving sims keep frame-to-frame memory:
+returns the per-frame closure, so evolving sims keep frame-to-frame memory (Lua
+closures work the same as JS's):
 
-```js
-export function setup({ leds, frames, fps, positions }) {
-  const heat = new Float32Array(leds)          // persists across frames
-  return function render(pixels, { frame, t }) {
-    // evolve `heat`, then write pixels (Uint8 RGB triples), using positions[i]
-  }
-}
+```lua
+function setup(ctx)                 -- ctx = { leds, frames, fps, positions }
+  local heat = {}                   -- persists across frames (closure upvalue)
+  return function(pixels, frame, t)
+    -- evolve `heat`, then write each pixel, using ctx.positions[i]
+  end
+end
 ```
 
-The per-pixel "shader" mental model is available *inside* `render` (just loop the
-pixels using their positions) — and since it's **offline in the browser**, the
+The per-pixel "shader" mental model is available *inside* the render function (just
+loop the pixels using their positions) — and since it's **offline in the browser**, the
 per-pixel cost that hurts on-device is irrelevant here.
+
+### Language, authoring & debugging
+
+**Language: Lua** (this evolved from an initial JavaScript leaning). Deciding factors:
+- **Portability** — the *same* script runs in the browser (preview/bake) **and
+  on-device** in the compiled firmware (native Lua), since you'd never run JS on an
+  RP2040. Write a "fire" generator once; preview it; ship it live.
+- **Audience** — veteran JS devs aren't the target; makers / artists / educators are,
+  and Lua's accessibility floor is proven (middle-schoolers ship Roblox games in it).
+- **Debugging** (below) is *dramatically* easier in Lua.
+
+**Runtime:** **wasmoon** (real Lua 5.4 in wasm) in the browser, native Lua on-device.
+Both run sandboxed, exposing only a safe API (`set_pixel`, `positions`, `frame`,
+`time`, `led_count`) — a script physically can't touch BLE/Wi-Fi/flash, and a line /
+instruction hook can kill a runaway loop.
+
+**Authoring: blocks first, text for power.** The primary surface is a **Blockly block
+editor** — snap-together imperative code, the same model as **MakeCode** (which does
+exactly this with kids and micro:bit LEDs). A **node / data-flow editor** (Blender-shader
+style) was considered and **set aside**: bigger build, weaker at state/logic, and it
+needs a shader-graph-literate maintainer; blocks map onto plain imperative code that's
+easier to design, support, and debug.
+- **Blockly generates Lua natively**, so blocks are just a friendly front-end emitting
+  the same Lua the text tier and the device run — one language, one runtime, two ways in.
+- **A small domain palette:** structure (`setup`, `for each LED`, `every frame`),
+  inputs (`LED position x/y/z`, `frame #`, `time`, `index`, `count`), output (`set this
+  LED to …`, `set whole strip …`), color/math (`HSV`, `gradient`, `noise`, arithmetic,
+  `if` / `repeat`, variables). *"For each LED → set color from its Z and the time"* is a
+  working pattern with no syntax.
+- **Growth ramp:** a **"Show Lua"** button lowers blocks into editable text, so a user
+  graduates from blocks to Lua (one-way generate is easy; round-trip isn't needed).
+- **Text tier:** Monaco or CodeMirror 6 for the Lua source — highlighting is trivial;
+  autocomplete is a convenience, not a requirement (full IDE-grade completion needs a
+  Lua language server in-browser — a later nicety).
+
+**Debugging flips in Lua's favor** — the weak spot for JS. You can't drive the browser's
+native debugger from page code, so JS would mean *building* one (AST instrumentation or
+a JS-in-JS interpreter). With Lua you **own the VM** *and* Lua ships a **debug library**:
+`debug.sethook(fn, "l")` fires per line, and `debug.getlocal` / `getupvalue` / `getinfo`
+read the scope. So a real step-debugger (run the script in a coroutine, `yield` at
+breakpoints, inspect locals) is *natural*, not bolted on — exactly how **mobdebug /
+ZeroBrane Studio** work. Bonuses:
+- **Visual self-debugging** — a block editor can **highlight the running block** (Scratch
+  does this); paired with the line hook you watch execution live and barely need a
+  classic debugger.
+- **On-device debugging** — native Lua has the same debug library, so the *same* approach
+  debugs a script **running live on the Pico over the wire** (mobdebug is a remote Lua
+  debugger). JS-on-device can't offer that — there's no JS there.
+- **Domain-specific inspection** — patterns are deterministic, so "click an LED at a
+  frame → see its inputs (position, frame, t) and computed color" stays the fastest way
+  to answer "why is this pixel wrong," on top of any step-debugger.
 
 ### Complementary to tracks, not a replacement
 
