@@ -1567,10 +1567,11 @@ def _follower_loop(f, nf, fps, fb):
     if nf <= 0:
         nf = 1
     if _FOL_DEBUG:
-        print("FOLLOWER LOOP nf", nf, "fps", fps, "group", S.group)
+        print("FOLLOWER LOOP nf", nf, "fps", fps, "group", S.group, "loss", S.loss_policy)
     period_us = int(1000000 / fps) if fps else 33333
     prev_us = time.ticks_us()
     last_dbg = time.ticks_ms()
+    last_lost = False
     drift = 0.0
     while True:
         if S.reload or S.mode != "play" or S.uploading:
@@ -1640,6 +1641,9 @@ def _follower_loop(f, nf, fps, fb):
         # advert or two. 2.5s is ~25 missed 10Hz beacons: essentially never a
         # false positive, still prompt on an actual loss.
         lost = time.ticks_diff(time.ticks_ms(), S.fol_last_ms) > 2500
+        if _FOL_DEBUG and lost != last_lost:
+            last_lost = lost
+            print("fol", "LOST -> policy %d" % S.loss_policy if lost else "RE-ACQUIRED")
         S.fol_locked = (not lost) and abs(drift) <= LOCK_TOL
         if lost and S.loss_policy == 2:
             # blackout policy: go dark until the leader returns (the PLL keeps
