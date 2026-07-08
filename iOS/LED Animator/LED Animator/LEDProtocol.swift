@@ -38,6 +38,9 @@ enum LEDCommand {
     case free
     case power                 // live power status (USB present + VSYS mV)
     case setPin(Int)           // re-point the strip's data GP pin (0–29)
+    // Multi-device sync
+    case program(Int)          // group jukebox: play program n (a leader switches the whole group)
+    case teardown              // leader-only: gracefully end the group
     // Wi-Fi provisioning (Pico W)
     case wifiScan              // stream nearby SSIDs
     case wifiSSID(String)      // stash the network name for the next connect
@@ -64,6 +67,8 @@ enum LEDCommand {
         case .free: return "FREE"
         case .power: return "POWER"
         case .setPin(let n): return "PIN \(n)"
+        case .program(let n): return "PROGRAM \(n)"
+        case .teardown: return "TEARDOWN"
         case .wifiScan: return "WIFISCAN"
         case .wifiSSID(let ssid): return "WIFISSID \(ssid)"
         case .wifiPass(let pass): return "WIFIPASS \(pass)"

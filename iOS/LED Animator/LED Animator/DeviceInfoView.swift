@@ -89,6 +89,21 @@ struct DeviceInfoView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
+            // Only shown for devices that are part of a sync group — a plain
+            // standalone device has nothing multi-device to report.
+            if let role = session.role, role != "standalone" {
+                Section("Sync") {
+                    LabeledContent("Role", value: role.capitalized)
+                    LabeledContent("Group", value: display(session.syncGroup.map(String.init)))
+                    LabeledContent("Device", value: display(session.deviceSlice.map(String.init)))
+                    LabeledContent("Program", value: display(session.program.map(String.init)))
+                    if role == "follower" || role == "auto" {
+                        LabeledContent("Startup", value: display(session.startupPolicy?.capitalized))
+                        LabeledContent("On sync loss", value: display(session.lossPolicy?.capitalized))
+                    }
+                }
+            }
+
             Section("Power") {
                 HStack(spacing: 12) {
                     Image(systemName: powerIcon.name)

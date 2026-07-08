@@ -51,6 +51,13 @@ final class DeviceSession {
     var powerSource: String?     // "usb", "batt", or "unknown" (nil until first POWER)
     var vsysMillivolts: Int?     // VSYS in mV; nil when the board can't measure it
     var dataPin: Int?            // GP pin the strip data line is on (from MOREINFO / PIN)
+    // Multi-device sync state (from MOREINFO; nil until that batch streams in).
+    var role: String?            // standalone / leader / leader-only / follower / auto
+    var syncGroup: Int?          // installation / sync group id
+    var deviceSlice: Int?        // render-slice id (which device's slice this is)
+    var program: Int?            // current program number (the group's jukebox selection)
+    var startupPolicy: String?   // follower boot: "wait" / "go"
+    var lossPolicy: String?      // follower on sync loss: "indicate" / "silent" / "blackout"
     var moreInfoLoaded = false   // true once the MOREINFO batch (ENDINFO) has arrived
     /// Last "ERR…" reply, surfaced for debugging/UI feedback.
     var lastError: String?
@@ -323,6 +330,18 @@ final class DeviceSession {
             hostname = String(reply.dropFirst("HOSTNAME ".count))
         } else if reply.hasPrefix("PIN ") {
             dataPin = Int(reply.dropFirst("PIN ".count))
+        } else if reply.hasPrefix("ROLE ") {
+            role = String(reply.dropFirst("ROLE ".count))
+        } else if reply.hasPrefix("GROUP ") {
+            syncGroup = Int(reply.dropFirst("GROUP ".count))
+        } else if reply.hasPrefix("DEVICE ") {
+            deviceSlice = Int(reply.dropFirst("DEVICE ".count))
+        } else if reply.hasPrefix("PROGRAM ") {
+            program = Int(reply.dropFirst("PROGRAM ".count))
+        } else if reply.hasPrefix("STARTUP ") {
+            startupPolicy = String(reply.dropFirst("STARTUP ".count))
+        } else if reply.hasPrefix("LOSS ") {
+            lossPolicy = String(reply.dropFirst("LOSS ".count))
         } else if reply.hasPrefix("POWER ") {
             // "POWER <usb|batt|unknown> <mv>" (mv 0 = voltage unavailable).
             let parts = reply.split(separator: " ")
@@ -360,6 +379,11 @@ final class DeviceSession {
             patterns.removeAll { $0 == name }
         } else if reply.hasPrefix("OK PIN ") {
             if let n = Int(reply.dropFirst("OK PIN ".count)) { dataPin = n }
+        } else if reply.hasPrefix("OK PROGRAM ") {
+            // "OK PROGRAM <n> [file]" — the first token after is the program number.
+            let rest = reply.dropFirst("OK PROGRAM ".count)
+            if let n = Int(rest.prefix(while: { $0 != " " })) { program = n }
+            mode = "play"
         } else if reply.hasPrefix("WIFISCANLEN ") {
             incomingNetworks = []
             armWifiScanTimeout()
