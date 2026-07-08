@@ -26,6 +26,7 @@ Implemented in [`web/src/export/rp2040.ts`](../web/src/export/rp2040.ts)
 | `acquiring` | blue | pulse | strip dark, LED 0 only | A follower has booted and is holding for its **first** beacon (never plays out of sync). Clears on lock. |
 | `searching` | amber | blink | overlay on the animation | A running follower **lost** its leader and is free-running. The show keeps playing; LED 0 blinks amber until the leader returns. |
 | `nofile` | red | pulse | strip dark, LED 0 only | Nothing is selected or the selection is gone. The device reads as alive-but-empty instead of dead. |
+| `noprogram` | red | blink | strip dark, LED 0 only | A **follower** was told (via the beacon) a program number it has **no `NN-` slice** for. Rather than silently play its stale slice, it goes dark + red-blinks and keeps watching beacons — recovering the moment the group switches to a program it has, or the missing slice is uploaded. (Red like `nofile`, but *blink* vs *pulse*, since both are "can't play right now.") |
 
 `OFF` (operator blanked the strip) is **fully dark** — deliberately distinct from
 `nofile`.

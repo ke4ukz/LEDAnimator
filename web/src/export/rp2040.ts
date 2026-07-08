@@ -55,6 +55,16 @@ import rp2
 # crawls without ever stalling the LED loop.
 AUTH_RETRY_MS = 5000
 
+# Power-cycle recovery ritual (docs/config-and-auth-plan.md §3). We count consecutive
+# SHORT boots — boots reset (power / RUN-pin) before running past the commit window.
+# Because the counter is bumped only once boot reaches main(), resets that arrive
+# faster than a boot (switch bounce, rapid taps) coalesce into one count — no debounce
+# needed. Fire a recovery action at each threshold; the physical ritual means a
+# forgotten PIN is never a permanent lockout.
+COMMIT_MS = 5000          # run this long uninterrupted -> "committed", counter resets to 0
+RECOVERY_UNLOCK = 5       # 5 short boots -> clear the PIN only (keep group + Wi-Fi)
+RECOVERY_FULL = 10        # 10 -> full reset: de-group + clear Wi-Fi + clear PIN
+
 
 def _load_pin():
     try:
@@ -159,6 +169,10 @@ class S:
     sess_auth = None         # {ref: True} authenticated connections (ref = ble conn / tcp sock)
     sess_nonce = None        # {ref: nonce_hex} the last challenge issued to that connection
     auth_fail_at = 0         # time.ticks_ms() of the last failed LOGIN (global rate-limit)
+    # Power-cycle recovery ritual (bootcount.txt in flash; see the constants above).
+    boot_at = 0              # time.ticks_ms() at boot, for the commit-window reset
+    boot_committed = False   # True once we've run past COMMIT_MS -> counter reset
+    force_standalone = False # standalone.txt recovery override: ignore the header role, be standalone
     udp_sock = None          # UDP discovery socket (replies to LEDADISCOVER probes)
     # Multi-device sync (see docs/sync-beacon.md). role/group/device come from the
     # active pattern's LEDA header — the file a device plays IS its role config.
@@ -178,6 +192,7 @@ class S:
     leader_electing = False  # elected leader still in its post-promotion commit window
     leader_commit_at = 0     # time.ticks_ms() at promotion (commit-window start)
     program = 0              # program number carried in the sync beacon (0-255)
+    program_missing = False  # follower: told a program we have no NN- slice for (show red)
     frame = 0                # running frame index, for the leader beacon
     beacon_seq = 0           # beacon sequence, increments each advert
     beacon_at = 0            # time.ticks_ms() of the last beacon advert
@@ -305,12 +320,13 @@ _STATUS = {
     "acquiring":    ((0,   40,  255), "pulse"),   # follower up, awaiting first beacon (strip dark)
     "searching":    ((255, 90,  0),   "blink"),   # follower free-running, leader lost (overlay)
     "nofile":       ((255, 0,   0),   "pulse"),   # nothing selected/playable (strip dark)
+    "noprogram":    ((255, 0,   0),   "blink"),   # follower lacks a slice for the group's program
 }
 # Whole-strip recovery flashes — shown briefly at boot when the power-cycle
 # ritual fires. Distinct colors so 5-cycle vs 10-cycle is obvious without counting.
 _RECOVERY = {
-    "standalone":   (120, 120, 120),   # 5th interrupted boot: device un-grouped
-    "wifi-cleared": (200, 0,   200),   # 10th interrupted boot: Wi-Fi config also cleared
+    "pin-cleared":   (0,   180, 180),   # 5th short boot: PIN cleared (cyan)
+    "factory-reset": (200, 0,   200),   # 10th short boot: de-group + Wi-Fi + PIN cleared (magenta)
 }
 _status_overlay = None   # (r,g,b,mode) painted on LED 0 over a playing animation, or None
 
@@ -535,6 +551,81 @@ def _save_auth():
             pass
 
 
+def _rm(name):
+    try:
+        os.remove(name)
+    except OSError:
+        pass
+
+
+def _file_exists(name):
+    try:
+        os.stat(name)
+        return True
+    except OSError:
+        return False
+
+
+def _write_bootcount(n):
+    try:
+        with open("bootcount.txt", "w") as fh:
+            fh.write(str(n))
+    except Exception:
+        pass
+
+
+def _bump_bootcount():
+    # Read+increment the consecutive-short-boot counter. Called as the very first
+    # thing in main() (before any init that can hang), so it sticks; zeroed by the
+    # commit-window check once the device has run long enough (see _tick).
+    n = 0
+    try:
+        with open("bootcount.txt") as fh:
+            n = int(fh.read().strip())
+    except (OSError, ValueError):
+        n = 0
+    n += 1
+    _write_bootcount(n)
+    return n
+
+
+def _force_standalone():
+    # De-group override: a standalone.txt makes _apply_role_header ignore the file's
+    # header role and be standalone (no sync), until the next upload clears it. Used
+    # by the full-reset recovery, since role lives in the header not a config file.
+    S.force_standalone = True
+    try:
+        with open("standalone.txt", "w") as fh:
+            fh.write("1")
+    except Exception:
+        pass
+
+
+def _clear_standalone():
+    # Rejoin: drop the de-group override so the played file's header role applies
+    # again. Called when a fresh pattern is uploaded (a deliberate re-deployment).
+    if S.force_standalone or _file_exists("standalone.txt"):
+        S.force_standalone = False
+        _rm("standalone.txt")
+
+
+def _recovery_check(n):
+    # Fire the power-cycle recovery action at a threshold boot. Physical + early, so
+    # a forgotten PIN is never a permanent lockout. Flashes the whole strip (cyan at
+    # 5, magenta at 10) for "keep cycling until it flashes" feedback.
+    if n == RECOVERY_UNLOCK:
+        _rm("auth.txt")                 # clear the PIN only (keep group + Wi-Fi)
+        print("recovery: PIN cleared (%dx)" % n)
+        _flash_strip("pin-cleared", 1500)
+    elif n >= RECOVERY_FULL:
+        _rm("auth.txt")                 # full reset: PIN + Wi-Fi + de-group
+        _rm("networks.txt")
+        _force_standalone()
+        _write_bootcount(0)             # terminal action — don't keep escalating
+        print("recovery: full reset (%dx)" % n)
+        _flash_strip("factory-reset", 1500)
+
+
 def _valid_pin(s):
     # 4-8 digits. A casual deterrent, not real security (physical reset defeats it),
     # so a short PIN is fine; the variable length adds a little ambiguity for a guesser.
@@ -593,7 +684,9 @@ def _apply_role_header(h):
     # Set role / group id / device-slice id from a LEDA header's sync bytes. Once
     # an auto device has ELECTED a role, keep it across reloads (program switches)
     # rather than re-reading "auto" and re-electing.
-    if not S.role_locked:
+    if S.force_standalone:
+        S.role = "standalone"   # recovery de-group override wins over the header role
+    elif not S.role_locked:
         S.role = _ROLE_NAMES[h[14]] if h[14] < len(_ROLE_NAMES) else "standalone"
     S.group = h[15]
     S.device = h[16]
@@ -628,6 +721,7 @@ def _select_program(n):
             S.file = name
             S.mode = "play"
             S.reload = True
+            S.program_missing = False
             _mark_state()
             try:
                 with open("selected.txt", "w") as fh:
@@ -635,8 +729,10 @@ def _select_program(n):
             except Exception:
                 pass
             return "OK PROGRAM %d %s" % (S.program, name)
-    # No local slice for this program (e.g. a leader-only device): still carry the
-    # new program # in the beacon so followers switch; nothing to play here.
+    # No local slice for this program. Normal for a leader-only device (no strip);
+    # for a FOLLOWER it's an error (told a program it lacks) -> the follower branch
+    # shows the "noprogram" red status instead of silently playing its stale slice.
+    S.program_missing = True
     return "OK PROGRAM %d" % S.program
 
 
@@ -1113,7 +1209,8 @@ def _valid_pattern_name(name):
         return None
     if keep in ("main.py", "datapin.txt", "bright.txt", "devicename.txt",
                 "selected.txt", "state.txt", "networks.txt", "upload.tmp",
-                "syncflags.txt", "auth.txt", "project.json"):
+                "syncflags.txt", "auth.txt", "bootcount.txt", "standalone.txt",
+                "project.json"):
         return None
     return keep
 
@@ -1173,6 +1270,7 @@ def _upload_finish(cl, fh, name):
         except OSError:
             pass
         os.rename("upload.tmp", name)
+        _clear_standalone()   # a fresh deployment re-establishes identity from headers
         _tcp_send_one(cl, "OK UPLOADED " + name + "\\n")
         _broadcast_list()   # tell every client about the new pattern
     except Exception:
@@ -1326,6 +1424,11 @@ def _udp_step():
 
 def _tick():
     # Per-loop housekeeping shared by every branch of the player loop.
+    if not S.boot_committed and time.ticks_diff(time.ticks_ms(), S.boot_at) > COMMIT_MS:
+        # Ran past the commit window -> this was NOT a short boot; reset the
+        # power-cycle recovery counter so a normal run never accumulates toward it.
+        S.boot_committed = True
+        _write_bootcount(0)
     _persist_bright()
     _echo_speed()
     _persist_state()
@@ -1867,6 +1970,29 @@ def _elect():
     print("election -> LEADER (silence); commit window open")
 
 
+def _noprogram_loop():
+    # The group is on a program this follower has no slice for. Show the "noprogram"
+    # red status (rather than silently playing a stale slice) and keep watching
+    # beacons: retry loading on each one, so we recover the moment the group switches
+    # to a program we have OR the missing slice is uploaded. Teardown still stops us.
+    while True:
+        if S.reload or S.mode != "play" or S.uploading:
+            return
+        b = S.beacon_rx
+        if b is not None:
+            S.beacon_rx = None
+            if b[5] & 0x02:              # teardown flag -> stop, await operator
+                S.mode = "off"
+                _mark_state()
+                return
+            _select_program(b[3])        # b[3] = program #; clears program_missing if found
+            if not S.program_missing:
+                return                   # found a slice -> main loop reloads + plays
+        _show_status("noprogram")
+        _tick()
+        time.sleep_ms(30)
+
+
 def _follower_loop(f, nf, fps, fb):
     # Phase-lock this follower to its group's leader and display frames from its
     # own slice. Holds dark (LED0 acquiring) until the first beacon; free-runs +
@@ -2085,10 +2211,14 @@ def _start_ble():
 
 
 def main():
+    _bootn = _bump_bootcount()   # FIRST — count this boot before any init that could hang
     _show_solid((0, 0, 0), STATUS_BLANK_LEDS)   # clear power-on garbage before init draws anything
+    S.boot_at = time.ticks_ms()
+    S.force_standalone = _file_exists("standalone.txt")   # persisted de-group from a prior full reset
+    _recovery_check(_bootn)   # 5th boot clears the PIN; 10th full-resets (may set force_standalone)
     S.sess_auth = {}       # per-connection auth state (empty = nobody authed yet)
     S.sess_nonce = {}      # per-connection login challenge
-    _load_auth()           # a set PIN locks the device until a connection LOGINs
+    _load_auth()           # a set PIN locks the device until a connection LOGINs (recovery may have cleared it)
     S.name = _load_name()
     S.file = _load_current()
     S.bright = _load_bright()
@@ -2181,9 +2311,14 @@ def main():
                     time.sleep_us(slack)
             continue
         if S.role == "follower":
-            # Phase-lock to the group leader and play our own slice (runs until a
-            # reload / mode change / program switch / teardown).
-            _follower_loop(f, frames, fps, S.n * 3)
+            if S.program_missing:
+                # Told a program we have no slice for: show red + watch for recovery
+                # (a switch to a program we have, or the slice being uploaded).
+                _noprogram_loop()
+            else:
+                # Phase-lock to the group leader and play our own slice (runs until a
+                # reload / mode change / program switch / teardown).
+                _follower_loop(f, frames, fps, S.n * 3)
             continue
         fb = S.n * 3
         f.seek(HEADER_SIZE)

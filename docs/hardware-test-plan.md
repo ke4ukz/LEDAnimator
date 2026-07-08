@@ -63,10 +63,14 @@ leader commit + stop-listening after the window.
   (power off a 2nd Pico W).
 - [ ] **Start-and-go convergence** — several lamps boot alone (start-and-go), then
   visibly sync up when they hear each other (the "impressive to watch" scenario).
-- [ ] **Power-cycle recovery ritual** (once built) — 5 interrupted boots → clear PIN
-  (cyan flash, keeps group + Wi-Fi), 10 → full reset: de-group + clear Wi-Fi + PIN
-  (magenta flash). Verify the ~5 s commit resets the counter and a set PIN is
-  clearable this way (forgotten-PIN escape hatch).
+- [x] **Power-cycle recovery ritual** — ✅ 2026-07-08: 5 quick resets cleared a stale PIN
+  (`auth.txt` removed); commit reset zeroes the counter after a ~5 s uninterrupted run; a
+  set PIN is clearable this way (forgotten-PIN escape hatch). Tip: wire a button from `RUN`
+  (pin 30) to GND for the taps. Still to try with a real button: the 10× full reset firing
+  (de-group + Wi-Fi + PIN) — not driven on the bench to avoid wiping it.
+- [x] **Missing-program status** — ✅ 2026-07-08: leader on a program the follower lacks →
+  follower reports that program #, keeps its old file, shows red `noprogram` (blink) on LED 0;
+  recovers automatically when the leader returns to a program it has.
 
 ### D. Export end-to-end
 - [ ] **Multi-device export → deploy** — export a real multi-device project (group /

@@ -84,7 +84,14 @@ physical access (reset/USB dump wins — RP2350 secure boot is the real lock, se
   escape hatch is the power-cycle ritual (§3), not a longer secret. Full link encryption (BLE
   bonding / TLS) is the real fix and is overkill here.
 
-## 3. Forgotten-PIN recovery — the power-cycle ritual (planned, ⏳ UNBUILT)
+## 3. Forgotten-PIN recovery — the power-cycle ritual — ✅ **BUILT + HW-validated (2026-07-08)**
+
+Built and validated on a Pico W: a device locked with a stale PIN was cleared by **5 quick
+resets** (`auth.txt` removed, cyan flash), the counter **commit-resets to 0** after a ~5 s
+uninterrupted run, and a normal single boot never accumulates. The 10× full reset
+(de-group + Wi-Fi + PIN, magenta) shares the same path and is unit-tested (20/20) but wasn't
+driven to 10 on the bench (would wipe it). Implementation notes below match what shipped.
+
 
 A set PIN can be forgotten, and since a locked device gates *everything* but
 `PING`/`INFO`/`LOGIN` (even Wi-Fi provisioning), a lockout would otherwise be permanent.
