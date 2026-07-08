@@ -119,6 +119,32 @@ animation until cleared with `… default`. Overrides live in `syncflags.txt` (o
 pinned fields are stored) and `MOREINFO` reports an `OVERRIDES` line so a controller
 can warn that a device isn't following its animation.
 
+### Auth (optional PIN lock)
+
+A **casual deterrent** (keep a neighbor from poking your lights) — *not* protection
+against physical access, which can reset the device (RP2350 secure boot is the real
+lock). A PIN is stored on the device in `auth.txt`; no file ⇒ **open**.
+
+| Command | Meaning |
+|---|---|
+| `LOGIN <hash>` | Authenticate this connection. `<hash>` = lowercase hex `sha256(pin + nonce)`, where `nonce` came from the `NEEDPIN` challenge. → `OK LOGIN` / `ERR auth` (wrong) / `ERR auth-wait` (rate-limited). |
+| `SETPASS <pin>` | Set/change the PIN (4–32 printable ASCII, no spaces). Authed-only. → `OK SETPASS`. |
+| `CLEARPASS` | Remove the PIN (unlock). Authed-only. → `OK CLEARPASS`. |
+
+**When a PIN is set, the device is locked:** every command is refused with `ERR auth`
+**except** `PING`, `LOGIN`, and `INFO` — and a locked+unauthenticated `INFO` returns a
+challenge instead of the state line:
+
+```
+NEEDPIN <nonce_hex>       # fresh per connection; hash the PIN against it and LOGIN
+```
+
+The PIN never travels in the clear (challenge-response). Auth is **per connection**
+and forgotten on disconnect. A wrong `LOGIN` starts a ~5 s window in which further
+attempts return `ERR auth-wait` (non-blocking rate limit). While locked, unsolicited
+state broadcasts are withheld from unauthenticated clients. `MOREINFO` reports `AUTH
+set|none`. First-ever provisioning still works because a fresh device is open.
+
 ### Wi‑Fi provisioning (Pico W)
 
 | Command | Meaning |
@@ -175,7 +201,8 @@ app ignores keys it doesn't recognize): `VERSION`, `LEDS`, `FREE`, `WIFIMAC`,
 `BTMAC`, `HOSTNAME`, `PLATFORM`, `PIN`, and the sync state `ROLE`, `GROUP`,
 `DEVICE`, `PROGRAM`, `STARTUP` (`wait`/`go`), `LOSS` (`indicate`/`silent`/
 `blackout`), `OVERRIDES` (`none` | a comma list of the pinned policy fields, e.g.
-`loss` / `loss,startup`), then `POWER`, closed by `ENDINFO`.
+`loss` / `loss,startup`), `AUTH` (`set` | `none` — is a PIN configured), then
+`POWER`, closed by `ENDINFO`.
 
 ## Uploading a pattern (Wi‑Fi)
 

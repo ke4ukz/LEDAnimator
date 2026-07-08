@@ -39,11 +39,19 @@ device override (if set)  >  animation header default  >  firmware default
 *(Fancy version, still YAGNI: per-**program** overrides on one device — a keyed map instead of a
 single override. Noted, not built.)*
 
-## 2. Auth PIN — challenge-response
+## 2. Auth PIN — challenge-response — ✅ **BUILT (2026-07-07)**, firmware HW-validated / app written
+
+Firmware + app done; firmware validated end-to-end on a live Pico W over TCP (SETPASS →
+locked → INFO returns `NEEDPIN <nonce>` → wrong `LOGIN` = `ERR auth` → immediate retry =
+`ERR auth-wait` → after cooldown correct `LOGIN` = `OK LOGIN` → state flows → `CLEARPASS` →
+open again; socket-keyed session dicts confirmed working on-device). App: DeviceSession does
+the CryptoKit `sha256(pin+nonce)` + parses `NEEDPIN`/`AUTH set|none`; ControlView shows an
+Unlock prompt on `needsLogin`; DeviceInfoView has a **Security** section (set/change/remove
+PIN). App unbuilt in Xcode as of writing.
 
 Casual/hobby-grade deterrent (stop a neighbor poking your lights); **not** protection against
 physical access (reset/USB dump wins — RP2350 secure boot is the real lock, see
-[`future-directions.md`](future-directions.md)). Design agreed:
+[`future-directions.md`](future-directions.md)). Design as built:
 
 - **Storage:** `auth.txt` (a device config file), set/cleared when authenticated.
 - **Challenge-response, so the PIN never travels in the clear:**

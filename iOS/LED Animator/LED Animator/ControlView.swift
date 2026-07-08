@@ -37,6 +37,7 @@ struct ControlView: View {
     #endif
     @State private var showImporter = false      // macOS pattern upload
     @State private var showTeardownConfirm = false   // confirm group teardown
+    @State private var pinEntry = ""             // scratch for the unlock prompt
     @State private var dropTargeted = false      // Finder drag-and-drop highlight
     #if os(macOS)
     @State private var inspectorPanel: InspectorPanel?   // open Info/Wi-Fi panel (nil = none)
@@ -287,6 +288,20 @@ struct ControlView: View {
         }
         .onChange(of: session.mode) { _, m in playback = mapMode(m) }
         .onChange(of: session.solid) { _, s in solidColor = color(from: s) }
+        // A locked device answers our connect INFO with a challenge; prompt for the
+        // PIN. On a wrong PIN the session re-arms `needsLogin` (with `authError`),
+        // so the alert re-presents until the user unlocks or cancels.
+        .alert("Unlock Device", isPresented: Binding(
+            get: { session.needsLogin },
+            set: { if !$0 { session.needsLogin = false } }
+        )) {
+            SecureField("PIN", text: $pinEntry)
+                .textContentType(.password)
+            Button("Unlock") { session.login(pin: pinEntry); pinEntry = "" }
+            Button("Cancel", role: .cancel) { pinEntry = ""; session.needsLogin = false }
+        } message: {
+            Text(session.authError ?? "This device is locked. Enter its PIN to control it.")
+        }
         #if os(macOS)
         .fileImporter(isPresented: $showImporter, allowedContentTypes: [ledaType]) { result in
             if case .success(let url) = result {

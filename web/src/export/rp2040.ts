@@ -46,9 +46,14 @@ export function rp2040MainPy(build = 'dev'): string {
 #   WIFIPASS <password>, WIFICONNECT (joins + saves to networks.txt, auto-joins
 #   on boot), WIFISTATUS, WIFIFORGET. Status arrives async as "WIFI <state> <ip>".
 
-import array, time, os, struct
+import array, time, os, struct, hashlib, binascii
 from machine import Pin, ADC
 import rp2
+
+# Auth (casual deterrent; see docs/config-and-auth-plan.md). After a failed LOGIN,
+# ignore further attempts for this long — a non-blocking rate limit so brute force
+# crawls without ever stalling the LED loop.
+AUTH_RETRY_MS = 5000
 
 
 def _load_pin():
@@ -147,6 +152,13 @@ class S:
     out_at = 0               # time.ticks_ms() of the last streamed out_queue line
     tcp_srv = None           # listening socket (once Wi-Fi is up); None = no server
     tcp_clients = []         # list of [sock, buf] - one per connected TCP client
+    # Auth: a PIN in auth.txt LOCKS the device — a connection must LOGIN (challenge-
+    # response) before any command but PING/INFO/LOGIN. No file -> open (needed for
+    # first-ever provisioning). Physical access defeats it (see the plan doc).
+    auth_pin = None          # the set PIN/passphrase (str), or None = open (unlocked)
+    sess_auth = None         # {ref: True} authenticated connections (ref = ble conn / tcp sock)
+    sess_nonce = None        # {ref: nonce_hex} the last challenge issued to that connection
+    auth_fail_at = 0         # time.ticks_ms() of the last failed LOGIN (global rate-limit)
     udp_sock = None          # UDP discovery socket (replies to LEDADISCOVER probes)
     # Multi-device sync (see docs/sync-beacon.md). role/group/device come from the
     # active pattern's LEDA header — the file a device plays IS its role config.
@@ -499,6 +511,84 @@ def _loss_name(v):
     return "silent" if v == 1 else "blackout" if v == 2 else "indicate"
 
 
+def _load_auth():
+    # A PIN in auth.txt locks the device; no file (or empty) = open.
+    try:
+        with open("auth.txt") as fh:
+            v = fh.read().strip()
+        S.auth_pin = v if v else None
+    except OSError:
+        S.auth_pin = None
+
+
+def _save_auth():
+    if S.auth_pin:
+        try:
+            with open("auth.txt", "w") as fh:
+                fh.write(S.auth_pin)
+        except Exception:
+            pass
+    else:
+        try:
+            os.remove("auth.txt")
+        except OSError:
+            pass
+
+
+def _valid_pin(s):
+    # 4-32 printable ASCII, no spaces (space is the arg separator). A short numeric
+    # PIN is fine for the casual threat model; a longer passphrase is allowed.
+    if len(s) < 4 or len(s) > 32:
+        return False
+    for ch in s:
+        if ord(ch) < 33 or ord(ch) >= 127:
+            return False
+    return True
+
+
+def _is_authed(origin):
+    # Open device -> everyone; internal (origin None) -> trusted; else per-connection.
+    if S.auth_pin is None or origin is None:
+        return True
+    return bool(S.sess_auth.get(origin[1]))
+
+
+def _new_nonce(ref):
+    # A fresh per-connection challenge, so a captured LOGIN can't be replayed.
+    n = binascii.hexlify(os.urandom(8)).decode()
+    S.sess_nonce[ref] = n
+    return n
+
+
+def _expected_login(nonce):
+    # The device and client agree on sha256(pin + nonce_hex), so the PIN never
+    # travels in the clear. Compared as lowercase hex.
+    return binascii.hexlify(hashlib.sha256((S.auth_pin + nonce).encode()).digest()).decode()
+
+
+def _do_login(p, origin):
+    ref = origin[1]
+    now = time.ticks_ms()
+    if time.ticks_diff(now, S.auth_fail_at) < AUTH_RETRY_MS:
+        return "ERR auth-wait"          # rate-limited after a recent failure
+    nonce = S.sess_nonce.get(ref)
+    if not nonce or len(p) < 2:
+        return "ERR auth"               # must fetch a challenge (INFO) first
+    if p[1].lower() == _expected_login(nonce):
+        S.sess_auth[ref] = True
+        return "OK LOGIN"
+    S.auth_fail_at = now
+    return "ERR auth"
+
+
+def _forget_session(ref):
+    # Drop a connection's auth + challenge when it disconnects.
+    if S.sess_auth is not None:
+        S.sess_auth.pop(ref, None)
+    if S.sess_nonce is not None:
+        S.sess_nonce.pop(ref, None)
+
+
 def _apply_role_header(h):
     # Set role / group id / device-slice id from a LEDA header's sync bytes. Once
     # an auto device has ELECTED a role, keep it across reloads (program switches)
@@ -596,10 +686,13 @@ def _notify(msg):
     # notifies (message-framed, no newline) and every TCP client (newline-added).
     # For genuine shared-state changes (BRIGHT / SPEED echoes, WIFI status) that
     # every client should see. Called from the player loop (not the IRQ).
+    locked = S.auth_pin is not None
     if S.ble and S.conns:
         try:
             data = msg.encode()
             for c in tuple(S.conns):
+                if locked and not (S.sess_auth and S.sess_auth.get(c)):
+                    continue   # don't leak state to a connected-but-unauthed client
                 try:
                     S.ble.gatts_notify(c, S.tx, data)
                 except Exception:
@@ -609,6 +702,8 @@ def _notify(msg):
     if S.tcp_clients:
         line = msg + "\\n"
         for entry in list(S.tcp_clients):
+            if locked and not (S.sess_auth and S.sess_auth.get(entry[0])):
+                continue
             _tcp_send_one(entry[0], line)
 
 
@@ -964,6 +1059,7 @@ def _tcp_drop(cl):
         cl.close()
     except Exception:
         pass
+    _forget_session(cl)   # drop this connection's auth + challenge
     S.tcp_clients = [e for e in S.tcp_clients if e[0] is not cl]
 
 
@@ -1017,7 +1113,7 @@ def _valid_pattern_name(name):
         return None
     if keep in ("main.py", "datapin.txt", "bright.txt", "devicename.txt",
                 "selected.txt", "state.txt", "networks.txt", "upload.tmp",
-                "syncflags.txt", "project.json"):
+                "syncflags.txt", "auth.txt", "project.json"):
         return None
     return keep
 
@@ -1288,9 +1384,42 @@ def dispatch(line, origin=None):
         return None
     p = line.split()
     c = p[0].upper()
+    # Auth gate: a LOCKED device answers only PING (liveness), INFO (hands back a
+    # login challenge) and LOGIN until this connection authenticates; every other
+    # command is refused with ERR auth. Internal calls (origin None) are trusted.
+    if origin is not None and S.auth_pin is not None and not _is_authed(origin):
+        if c == "LOGIN":
+            return _do_login(p, origin)
+        if c == "PING":
+            return "OK"
+        if c == "INFO":
+            return "NEEDPIN " + _new_nonce(origin[1])
+        return "ERR auth"
     try:
         if c == "PING":
             return "OK"
+        if c == "LOGIN":
+            # Past the gate (already authed, or the device is open) -> idempotent OK.
+            if origin is not None:
+                S.sess_auth[origin[1]] = True
+            return "OK LOGIN"
+        if c == "SETPASS":
+            # Set/change the PIN. Reachable only when authed or open (the gate
+            # blocks it otherwise), so knowing the current PIN is required to change it.
+            if len(p) < 2:
+                return "ERR args"
+            if not _valid_pin(p[1]):
+                return "ERR args"
+            S.auth_pin = p[1]
+            _save_auth()
+            if origin is not None:
+                S.sess_auth[origin[1]] = True   # keep the setter logged in
+            return "OK SETPASS"
+        if c == "CLEARPASS":
+            # Remove the PIN (unlock). Also gated, so only an authed client can.
+            S.auth_pin = None
+            _save_auth()
+            return "OK CLEARPASS"
         if c == "INFO":
             # Lean, control-only (fetched on every connect). Same line the device
             # broadcasts on state change (see _state_line / _persist_state).
@@ -1333,6 +1462,7 @@ def dispatch(line, origin=None):
             if S.startup_override:
                 _ov.append("startup")
             fields.append("OVERRIDES " + (",".join(_ov) if _ov else "none"))
+            fields.append("AUTH " + ("set" if S.auth_pin else "none"))
             fields.append(_power_status())   # "POWER usb|batt|unknown <mv>"
             # A field with no hardware is OMITTED (not sent as a placeholder); the
             # app shows N/A for anything still missing once ENDINFO arrives.
@@ -1922,6 +2052,7 @@ def _start_ble():
         elif event == _IRQ_DISCONNECT:
             conn, _, _ = data
             conns.discard(conn)
+            _forget_session(conn)   # drop this connection's auth + challenge
             advertise()
         elif event == _IRQ_WRITE:
             conn, handle = data
@@ -1952,6 +2083,9 @@ def _start_ble():
 
 def main():
     _show_solid((0, 0, 0), STATUS_BLANK_LEDS)   # clear power-on garbage before init draws anything
+    S.sess_auth = {}       # per-connection auth state (empty = nobody authed yet)
+    S.sess_nonce = {}      # per-connection login challenge
+    _load_auth()           # a set PIN locks the device until a connection LOGINs
     S.name = _load_name()
     S.file = _load_current()
     S.bright = _load_bright()

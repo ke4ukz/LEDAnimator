@@ -43,6 +43,10 @@ enum LEDCommand {
     case teardown              // leader-only: gracefully end the group
     case setLoss(String)       // follower on-sync-loss policy: indicate / silent / blackout
     case setStartup(String)    // follower boot behavior: wait / go
+    // Auth (see docs/config-and-auth-plan.md)
+    case login(String)         // LOGIN <sha256(pin+nonce) hex> — answer the NEEDPIN challenge
+    case setPass(String)       // SETPASS <pin> — set/change the device PIN (authed only)
+    case clearPass             // CLEARPASS — remove the PIN / unlock (authed only)
     // Wi-Fi provisioning (Pico W)
     case wifiScan              // stream nearby SSIDs
     case wifiSSID(String)      // stash the network name for the next connect
@@ -73,6 +77,9 @@ enum LEDCommand {
         case .teardown: return "TEARDOWN"
         case .setLoss(let s): return "LOSS \(s)"
         case .setStartup(let s): return "STARTUP \(s)"
+        case .login(let h): return "LOGIN \(h)"
+        case .setPass(let pin): return "SETPASS \(pin)"
+        case .clearPass: return "CLEARPASS"
         case .wifiScan: return "WIFISCAN"
         case .wifiSSID(let ssid): return "WIFISSID \(ssid)"
         case .wifiPass(let pass): return "WIFIPASS \(pass)"

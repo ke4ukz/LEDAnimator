@@ -20,6 +20,12 @@ struct DeviceInfoView: View {
     @State private var showRename = false
     /// Scratch text for the rename alert's field.
     @State private var editingName = ""
+    /// Drives the set/change-PIN alert.
+    @State private var showPinEditor = false
+    /// Scratch text for the new PIN.
+    @State private var newPin = ""
+    /// Confirms removing the PIN.
+    @State private var showRemovePin = false
 
     /// Bare list on macOS (inspector); wrapped in a NavigationStack with a Done
     /// button on iOS (sheet).
@@ -86,6 +92,22 @@ struct DeviceInfoView: View {
                 Text("Output")
             } footer: {
                 Text("The GP pin your LED strip's data line is wired to. Changing it takes effect immediately and is saved on the device.")
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Section {
+                if session.pinIsSet {
+                    LabeledContent("PIN protection", value: "On")
+                    Button("Change PIN") { newPin = ""; showPinEditor = true }
+                    Button("Remove PIN", role: .destructive) { showRemovePin = true }
+                } else {
+                    LabeledContent("PIN protection", value: "Off")
+                    Button("Set a PIN") { newPin = ""; showPinEditor = true }
+                }
+            } header: {
+                Text("Security")
+            } footer: {
+                Text("A PIN asks anyone connecting to enter it before they can control this device. It's a casual deterrent — someone with physical access can reset it.")
                     .fixedSize(horizontal: false, vertical: true)
             }
 
@@ -163,6 +185,20 @@ struct DeviceInfoView: View {
             Button("OK", action: commitRename)
         } message: {
             Text("Up to 26 characters. Saved on the device and used as its Bluetooth name.")
+        }
+        .alert(session.pinIsSet ? "Change PIN" : "Set PIN", isPresented: $showPinEditor) {
+            SecureField("PIN", text: $newPin)
+                .textContentType(.newPassword)
+            Button("Cancel", role: .cancel) { newPin = "" }
+            Button("Save", action: commitPin)
+        } message: {
+            Text("4–32 characters, no spaces. Saved on the device.")
+        }
+        .alert("Remove PIN?", isPresented: $showRemovePin) {
+            Button("Remove", role: .destructive) { session.clearPin() }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("The device will no longer ask for a PIN before letting anyone control it.")
         }
         .onAppear { session.requestMoreInfo() }
         .task {
@@ -247,6 +283,15 @@ struct DeviceInfoView: View {
         let trimmed = editingName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, trimmed != session.connectedName else { return }
         session.rename(trimmed)
+    }
+
+    /// Apply a new PIN, ignoring anything shorter than 4 chars (the firmware also
+    /// validates 4–32 printable, no spaces, and returns ERR args otherwise).
+    private func commitPin() {
+        let pin = newPin.trimmingCharacters(in: .whitespacesAndNewlines)
+        newPin = ""
+        guard pin.count >= 4 else { return }
+        session.setPin(pin)
     }
 
     /// Human-readable free space (e.g. "1.2 MB") for the raw byte count.

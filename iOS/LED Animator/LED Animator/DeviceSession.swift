@@ -9,6 +9,7 @@
 //
 
 import Foundation
+import CryptoKit
 import Observation
 
 /// The transport-agnostic control session for one connected device.
@@ -63,6 +64,13 @@ final class DeviceSession {
     var lossOverridden = false
     var startupOverridden = false
     var moreInfoLoaded = false   // true once the MOREINFO batch (ENDINFO) has arrived
+    // Auth (see docs/config-and-auth-plan.md). A locked device answers our connect
+    // INFO with a NEEDPIN challenge; we prompt, hash the PIN with the nonce, LOGIN.
+    var needsLogin = false       // device is locked and this connection isn't authed yet
+    var authenticated = false    // this connection has logged in
+    var pinIsSet = false         // a PIN is set on the device (from MOREINFO AUTH)
+    var authError: String?       // "Incorrect PIN" / "Too many attempts…" for the prompt
+    @ObservationIgnored private var loginNonce: String?   // the challenge to hash against
     /// Last "ERR…" reply, surfaced for debugging/UI feedback.
     var lastError: String?
     // Wi-Fi provisioning
@@ -137,6 +145,29 @@ final class DeviceSession {
     func setStartup(_ name: String) { startupPolicy = name; startupOverridden = true; send(.setStartup(name)) }
     /// Drop the startup override so the animation's header takes back over.
     func revertStartup() { startupOverridden = false; send(.setStartup("default")) }
+
+    // MARK: Auth
+
+    /// Answer the NEEDPIN challenge: hash the entered PIN with the device's nonce
+    /// (so the PIN never travels in the clear) and LOGIN. No-op without a nonce —
+    /// `requestChallenge()` fetches one first.
+    func login(pin: String) {
+        guard let nonce = loginNonce else { requestChallenge(); return }
+        authError = nil
+        send(.login(Self.sha256Hex(pin + nonce)))
+    }
+    /// Set or change the device PIN (only works while authed or open).
+    func setPin(_ pin: String) { send(.setPass(pin)) }
+    /// Remove the PIN / unlock the device (only works while authed).
+    func clearPin() { send(.clearPass) }
+    /// Ask the device for a fresh login challenge (it replies NEEDPIN <nonce>).
+    func requestChallenge() { send(.info) }
+
+    /// Lowercase hex SHA-256 of a string's UTF-8 bytes — matches the firmware's
+    /// `sha256(pin + nonce)` (see rp2040.ts `_expected_login`).
+    private static func sha256Hex(_ s: String) -> String {
+        SHA256.hash(data: Data(s.utf8)).map { String(format: "%02x", $0) }.joined()
+    }
 
     /// Delete a pattern file. The device refuses to delete the active one
     /// ("ERR in-use"); the app hides that option, but the guard is defense in depth.
@@ -317,7 +348,17 @@ final class DeviceSession {
             patterns = incomingPatterns.sorted { $0.localizedStandardCompare($1) == .orderedAscending }
             isLoadingPatterns = false
             listTimeoutWork?.cancel()
+        } else if reply.hasPrefix("NEEDPIN ") {
+            // The device is locked: it answered INFO with a fresh login challenge.
+            // Stash the nonce and let the UI prompt for the PIN.
+            loginNonce = String(reply.dropFirst("NEEDPIN ".count))
+            needsLogin = true
+            authenticated = false
+            pinIsSet = true
         } else if reply.hasPrefix("INFO ") {
+            // A real state line means we're through the gate (open or authed).
+            needsLogin = false
+            authenticated = true
             // Lean control state: INFO <mode> <bright%> <speed%> <r> <g> <b> <file...>
             // The filename is last and may contain spaces, so cap the split at 7
             // and treat the 8th piece as the whole (possibly spaced) name.
@@ -366,6 +407,9 @@ final class DeviceSession {
             let fields = list == "none" ? [] : list.split(separator: ",").map { String($0) }
             lossOverridden = fields.contains("loss")
             startupOverridden = fields.contains("startup")
+        } else if reply.hasPrefix("AUTH ") {
+            // MOREINFO status: "AUTH set" (a PIN is set) / "AUTH none" (open).
+            pinIsSet = reply.dropFirst("AUTH ".count) == "set"
         } else if reply.hasPrefix("POWER ") {
             // "POWER <usb|batt|unknown> <mv>" (mv 0 = voltage unavailable).
             let parts = reply.split(separator: " ")
@@ -442,6 +486,32 @@ final class DeviceSession {
         } else if reply == "OK WIFIFORGET" {
             wifiState = "off"
             wifiDetail = ""
+        } else if reply == "OK LOGIN" {
+            // Authenticated: clear the prompt and reload the state the gate hid.
+            authenticated = true
+            needsLogin = false
+            authError = nil
+            loginNonce = nil
+            start()
+        } else if reply == "OK SETPASS" {
+            // We just set/changed the PIN — this connection stays authed.
+            pinIsSet = true
+            authenticated = true
+            needsLogin = false
+        } else if reply == "OK CLEARPASS" {
+            pinIsSet = false
+        } else if reply == "ERR auth-wait" {
+            // Rate-limited after a wrong PIN; get a fresh challenge for the retry.
+            authError = "Too many attempts — wait a few seconds."
+            requestChallenge()
+        } else if reply == "ERR auth" {
+            if needsLogin {
+                // A wrong PIN (or a stale challenge): re-prompt with a fresh nonce.
+                authError = "Incorrect PIN."
+                requestChallenge()
+            } else {
+                lastError = reply
+            }
         } else if reply.hasPrefix("ERR") {
             lastError = reply
         }
