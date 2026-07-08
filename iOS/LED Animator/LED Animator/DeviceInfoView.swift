@@ -98,28 +98,39 @@ struct DeviceInfoView: View {
                     LabeledContent("Device", value: display(session.deviceSlice.map(String.init)))
                     LabeledContent("Program", value: display(session.program.map(String.init)))
                     if role == "follower" || role == "auto" {
+                        // "Automatic" == follow the animation's header (no device
+                        // override, i.e. delete the config entry). A concrete value
+                        // pins it as an override that wins over every animation.
                         Picker("Startup", selection: Binding(
-                            get: { session.startupPolicy ?? "wait" },
-                            set: { session.setStartup($0) }
+                            get: { session.startupOverridden ? (session.startupPolicy ?? "wait") : "auto" },
+                            set: { newVal in
+                                if newVal == "auto" { session.revertStartup() }
+                                else { session.setStartup(newVal) }
+                            }
                         )) {
+                            Text("Automatic (use animation)").tag("auto")
                             Text("Wait for sync").tag("wait")
                             Text("Start and go").tag("go")
                         }
                         .pickerStyle(.menu)
-                        if session.startupOverridden {
-                            overrideNote { session.revertStartup() }
+                        if !session.startupOverridden, let v = session.startupPolicy {
+                            followingNote(startupLabel(v))
                         }
                         Picker("On sync loss", selection: Binding(
-                            get: { session.lossPolicy ?? "indicate" },
-                            set: { session.setLossPolicy($0) }
+                            get: { session.lossOverridden ? (session.lossPolicy ?? "indicate") : "auto" },
+                            set: { newVal in
+                                if newVal == "auto" { session.revertLoss() }
+                                else { session.setLossPolicy(newVal) }
+                            }
                         )) {
+                            Text("Automatic (use animation)").tag("auto")
                             Text("Keep playing · indicate").tag("indicate")
                             Text("Keep playing · silent").tag("silent")
                             Text("Blackout").tag("blackout")
                         }
                         .pickerStyle(.menu)
-                        if session.lossOverridden {
-                            overrideNote { session.revertLoss() }
+                        if !session.lossOverridden, let v = session.lossPolicy {
+                            followingNote(lossLabel(v))
                         }
                     }
                 }
@@ -165,20 +176,28 @@ struct DeviceInfoView: View {
         }
     }
 
-    /// The caption + revert control shown under a policy picker whose value is
-    /// pinned as a device override — so the user sees this device is ignoring what
-    /// its animation asks for, and can hand control back to the animation.
+    /// Caption under a policy picker set to Automatic, echoing what the current
+    /// animation actually asks for (the effective value the device reports) — so
+    /// "Automatic" isn't opaque about the behavior in effect right now.
     @ViewBuilder
-    private func overrideNote(revert: @escaping () -> Void) -> some View {
-        HStack {
-            Label("Overriding the animation", systemImage: "pin.fill")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Spacer()
-            Button("Use animation's setting", action: revert)
-                .font(.caption)
-                .buttonStyle(.borderless)
+    private func followingNote(_ value: String) -> some View {
+        Text("Following the animation · \(value)")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+    }
+
+    /// Menu-matching label for a loss policy value ("indicate"/"silent"/"blackout").
+    private func lossLabel(_ v: String) -> String {
+        switch v {
+        case "silent": return "Keep playing · silent"
+        case "blackout": return "Blackout"
+        default: return "Keep playing · indicate"
         }
+    }
+
+    /// Menu-matching label for a startup policy value ("wait"/"go").
+    private func startupLabel(_ v: String) -> String {
+        v == "go" ? "Start and go" : "Wait for sync"
     }
 
     /// Plug icon when on USB; a battery whose fill approximates the 1S LiPo

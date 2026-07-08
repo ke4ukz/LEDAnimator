@@ -28,9 +28,10 @@ device override (if set)  >  animation header default  >  firmware default
   header. `syncflags.txt` stores only the pinned fields as tokens (`L<0-2>` / `S<0-1>`), and is
   removed when nothing is pinned. (Replaced the old single `syncflags_set` int file.)
 - ✅ **Clear / revert** — `LOSS default` / `STARTUP default` drop that field's override and
-  recompute the effective value from the current header (no reload). App shows a caption
-  **"Overriding the animation"** + a **"Use animation's setting"** button under any pinned
-  picker (cleaner than a 4th picker option — the picker keeps showing the effective value).
+  recompute the effective value from the current header (no reload). App surfaces this as the
+  first picker option **"Automatic (use animation)"**: selecting it sends `… default` (deletes
+  the config entry); a concrete value pins the override. When set to Automatic the picker shows
+  a **"Following the animation · <value>"** caption so the effective behavior stays visible.
 - ✅ **Override warning** — `MOREINFO` emits `OVERRIDES <none | loss | startup | loss,startup>`;
   the app parses it into `lossOverridden` / `startupOverridden` and gates the caption/revert on
   it. (Device-row list badge still optional — not built; Info-view caption covers the warning.)
