@@ -155,6 +155,7 @@ class S:
     device = 0               # render-slice id 0-255 (which device's slice this file is)
     loss_policy = 0          # follower on-sync-loss: 0 indicate / 1 silent / 2 blackout (header byte 17)
     startup_go = 0           # follower boot: 0 wait-for-sync (dark) / 1 start-and-go (play then snap)
+    syncflags_set = False    # a runtime LOSS/STARTUP override (syncflags.txt) is in effect
     my_mac = b""             # our BLE MAC, for the auto-election lowest-MAC tiebreaker
     rival_mac = b""          # MAC of the last group beacon heard (advertiser address)
     role_locked = False      # once auto-election resolves the role, keep it across reloads
@@ -449,6 +450,33 @@ def _load_state():
         pass
 
 
+def _load_syncflags():
+    # Runtime override for the follower on-loss + startup policies — settable live
+    # (like the data pin). If syncflags.txt exists it WINS over the .leda header, so
+    # a change made from the app sticks across reboots and program switches.
+    try:
+        with open("syncflags.txt") as fh:
+            v = int(fh.read().strip())
+        S.loss_policy = v & 0x03
+        S.startup_go = (v >> 2) & 1
+        S.syncflags_set = True
+    except (OSError, ValueError):
+        pass
+
+
+def _save_syncflags():
+    S.syncflags_set = True
+    try:
+        with open("syncflags.txt", "w") as fh:
+            fh.write(str((S.loss_policy & 0x03) | ((S.startup_go & 1) << 2)))
+    except Exception:
+        pass
+
+
+def _loss_name(v):
+    return "silent" if v == 1 else "blackout" if v == 2 else "indicate"
+
+
 def _apply_role_header(h):
     # Set role / group id / device-slice id from a LEDA header's sync bytes. Once
     # an auto device has ELECTED a role, keep it across reloads (program switches)
@@ -457,8 +485,9 @@ def _apply_role_header(h):
         S.role = _ROLE_NAMES[h[14]] if h[14] < len(_ROLE_NAMES) else "standalone"
     S.group = h[15]
     S.device = h[16]
-    S.loss_policy = h[17] & 0x03          # sync flags: on-sync-loss behavior
-    S.startup_go = (h[17] >> 2) & 1       # boot: start-and-go vs wait-for-sync
+    if not S.syncflags_set:               # a runtime override (syncflags.txt) wins over the header
+        S.loss_policy = h[17] & 0x03      # sync flags: on-sync-loss behavior
+        S.startup_go = (h[17] >> 2) & 1   # boot: start-and-go vs wait-for-sync
 
 
 def _program_from_name(name):
@@ -960,7 +989,7 @@ def _valid_pattern_name(name):
         return None
     if keep in ("main.py", "datapin.txt", "bright.txt", "devicename.txt",
                 "selected.txt", "state.txt", "networks.txt", "upload.tmp",
-                "project.json"):
+                "syncflags.txt", "project.json"):
         return None
     return keep
 
@@ -1324,6 +1353,30 @@ def dispatch(line, origin=None):
         if c == "DEVICE":
             # Read-only: render-slice id, from the header.
             return "DEVICE %d" % S.device
+        if c == "LOSS":
+            # No arg reports; "LOSS <indicate|silent|blackout>" sets the follower's
+            # on-sync-loss policy live + persists it (overrides the header).
+            if len(p) < 2:
+                return "LOSS " + _loss_name(S.loss_policy)
+            v = {"indicate": 0, "silent": 1, "blackout": 2, "0": 0, "1": 1, "2": 2}.get(p[1].lower())
+            if v is None:
+                return "ERR args"
+            S.loss_policy = v
+            _save_syncflags()
+            return "OK LOSS " + _loss_name(v)
+        if c == "STARTUP":
+            # No arg reports; "STARTUP <wait|go>" sets the follower's boot behavior.
+            if len(p) < 2:
+                return "STARTUP " + ("go" if S.startup_go else "wait")
+            a = p[1].lower()
+            if a in ("go", "1"):
+                S.startup_go = 1
+            elif a in ("wait", "0"):
+                S.startup_go = 0
+            else:
+                return "ERR args"
+            _save_syncflags()
+            return "OK STARTUP " + ("go" if S.startup_go else "wait")
         if c == "PROGRAM":
             # The group jukebox verb: "PROGRAM <n>" plays program n (loads this
             # device's own NN slice + sets the beacon #); no arg reports it.
@@ -1855,6 +1908,7 @@ def main():
     S.bright = _load_bright()
     _load_state()          # restore play/solid/off + the solid color
     _prime_header()        # LED count + role/group/device from the selected file's header
+    _load_syncflags()      # runtime override of the on-loss/startup policy, if set
     _load_networks()       # queue a Wi-Fi auto-connect if provisioned
     try:
         _start_ble()

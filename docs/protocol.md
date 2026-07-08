@@ -105,12 +105,16 @@ argument usually *queries* the value.
 | `ROLE` | **Read-only.** Reports `standalone` / `leader` / `leader-only` / `follower` / `auto` (`auto` resolves to leader or follower at boot by election). Role lives in the played file's [header](file-format.md) — change it by loading a different file, not with a command. |
 | `GROUP` | **Read-only.** Reports the sync group id (also from the header). |
 | `DEVICE` | **Read-only.** Reports the render-slice id (also from the header). |
+| `LOSS [indicate\|silent\|blackout]` | Follower on-sync-loss policy. No arg reports it; with an arg, sets it **live and persists** it (an override that wins over the file header). |
+| `STARTUP [wait\|go]` | Follower boot behavior — wait-for-sync vs start-and-go. No arg reports; with an arg, sets + persists. |
 | `TEARDOWN` | Leader-only. Gracefully ends the group: broadcasts the teardown flag for ~2 s so followers stop, then silences the beacon until reboot. `ERR not-leader` otherwise. |
 
-Role / group / device-id are **not** set by command — they come from the `.leda`
-header, so the file a device plays *is* its sync config (see
-[`multi-device-sync.md`](multi-device-sync.md)). Program # is the file's `NN-`
-name prefix.
+**Identity** (`ROLE`/`GROUP`/`DEVICE`) is read-only — it comes from the `.leda` header,
+so the file a device plays *is* its identity (see
+[`multi-device-sync.md`](multi-device-sync.md)); program # is the file's `NN-` name
+prefix. **Behavior policies** (`LOSS`/`STARTUP`) default from the header but are
+live-settable — a change is saved in `syncflags.txt` and overrides the header
+thereafter (the same pattern as `PIN`/`datapin.txt`).
 
 ### Wi‑Fi provisioning (Pico W)
 
