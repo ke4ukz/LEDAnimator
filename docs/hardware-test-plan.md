@@ -63,8 +63,10 @@ leader commit + stop-listening after the window.
   (power off a 2nd Pico W).
 - [ ] **Start-and-go convergence** — several lamps boot alone (start-and-go), then
   visibly sync up when they hear each other (the "impressive to watch" scenario).
-- [ ] **Power-cycle recovery ritual** (once built) — 5 interrupted boots → standalone
-  (strip flash), 10 → also clear Wi-Fi.
+- [ ] **Power-cycle recovery ritual** (once built) — 5 interrupted boots → clear PIN
+  (cyan flash, keeps group + Wi-Fi), 10 → full reset: de-group + clear Wi-Fi + PIN
+  (magenta flash). Verify the ~5 s commit resets the counter and a set PIN is
+  clearable this way (forgotten-PIN escape hatch).
 
 ### D. Export end-to-end
 - [ ] **Multi-device export → deploy** — export a real multi-device project (group /

@@ -74,7 +74,52 @@ physical access (reset/USB dump wins — RP2350 secure boot is the real lock, se
   allow a longer passphrase if that matters. Full link encryption (BLE bonding / TLS) is the
   real fix and is overkill here.
 
-## 3. Still open (decide separately) — identity in the header vs config files
+## 3. Forgotten-PIN recovery — the power-cycle ritual (planned, ⏳ UNBUILT)
+
+A set PIN can be forgotten, and since a locked device gates *everything* but
+`PING`/`INFO`/`LOGIN` (even Wi-Fi provisioning), a lockout would otherwise be permanent.
+The escape hatch is the existing **power-cycle recovery ritual** — deliberately re-folded
+in to also clear the PIN. It's a *physical* act, so it works regardless of auth: **a PIN is
+never a permanent lockout.**
+
+**Mechanism (unchanged from the original design, see
+[`multi-device-sync.md`](multi-device-sync.md)):** a tiny counter file is bumped **very early
+in boot** (before BLE/Wi-Fi init, so it sticks even if init hangs); the pattern still plays
+instantly every boot; once the device has run past a **~5 s commit window** the counter resets
+to 0. The criterion is simply *"did you let it run past the commit window before pulling
+power."* The action fires **at the threshold boot itself** and flashes the whole strip so you
+get "keep cycling until it flashes" feedback. A 5-minimum guards against accidental
+double-boots.
+
+**Thresholds (decision 2026-07-07 — "unlock first, full reset later"):**
+
+| Count | Action | Keeps | Strip flash |
+|---|---|---|---|
+| **5th** short boot | **Clear the PIN only** (remove `auth.txt`) | group + Wi-Fi | cyan (`pin-cleared`) |
+| **10th** short boot | **Full reset:** de-group **and** clear Wi-Fi (`networks.txt`) **and** clear the PIN | nothing | magenta (`factory-reset`) |
+
+Rationale: the gentlest, most-reached ritual targets exactly the forgotten-PIN lockout and
+preserves everything else; the old "5 = de-group but keep Wi-Fi" step folds into the 10 full
+reset (with Wi-Fi up you can already re-provision from the app, so the physical de-group only
+matters when you're heading to a full wipe anyway).
+
+**Build TODO:**
+- **Counter:** bump `bootcount.txt` at the very top of `main()` (before the strip clear / BLE);
+  reset it to 0 in the player loop once `time.ticks_ms()` since boot passes the commit window.
+- **Threshold actions:** at 5 → `_save_auth()` with `auth_pin=None`; at 10 → also remove
+  `networks.txt` + trigger the de-group override (below). Fire `_flash_strip` with the color.
+- **De-group at boot** needs a mechanism because role/group live in the **header**, not a file
+  (see §4). Simplest: a `standalone.txt` recovery-override that `_apply_role_header` respects
+  (forces `role="standalone"`, ignores the header's role/group) until the next upload/SELECT
+  clears it — the same override shape as `syncflags.txt`. (Ties into the §4 identity decision:
+  if identity moves to files, de-group is just deleting those files instead.)
+- **Flash colors:** add `pin-cleared` (cyan) to the `_RECOVERY` table; keep `factory-reset`
+  (magenta) for the 10th. (The old white `standalone`/magenta `wifi-cleared` entries collapse
+  into these two.)
+- **Recovery-UF2** remains the ultimate backstop (a one-drag firmware that forces standalone +
+  open).
+
+## 4. Still open (decide separately) — identity in the header vs config files
 
 The override model settles **behavior** (loss/startup). It does **not** settle **identity**
 (role / group / device-id). The open question: should an uploaded animation be able to change

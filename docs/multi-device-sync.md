@@ -37,16 +37,22 @@ authoring and controlling the whole thing as one.
   This keeps a **no-reboot recovery path** for a leader whose Wi-Fi went bad
   (connect over BLE, fix Wi-Fi) without the power-cycle ritual. Purely app-side —
   the firmware already supports BLE control + resume-on-disconnect.
-- **Recovery is a power-cycle ritual (no boot delay).** To rescue a device whose
-  AP vanished (WiFi points at a ghost, BT is busy syncing): **5 interrupted
-  power-cycles → standalone** (un-group, keep WiFi); **10 → also clear WiFi
-  config**. Mechanism: bump a flash counter **very early in boot** (before BLE, so
+- **Recovery is a power-cycle ritual (no boot delay).** To rescue a device that's
+  locked out (forgotten PIN) or whose AP vanished (WiFi points at a ghost, BT is
+  busy syncing): **5 interrupted power-cycles → clear the PIN only** (keep group +
+  WiFi — the forgotten-PIN escape hatch); **10 → full reset** (de-group + clear WiFi
+  + clear PIN). *(Updated 2026-07-07 to fold in PIN-clear; the old "5 = de-group,
+  keep WiFi" step folds into the 10 full reset. Full build plan +
+  flash colors in [`config-and-auth-plan.md`](config-and-auth-plan.md) §3.)* The
+  ritual is physical, so a PIN is **never a permanent lockout**. Mechanism: bump a
+  flash counter **very early in boot** (before BLE, so
   it sticks even if init hangs); the pattern plays **instantly** every boot; once
   the device has run ~5 s ("commit") the counter resets to 0 — so a normal single
   glitch never counts. The criterion is simply *"did you let it run past the
   commit window before pulling power."* The action fires **at the threshold boot
-  itself**: the 5th short boot comes up standalone and **flashes the strip**; a
-  10th also clears WiFi; only the ~5 s commit resets the counter, so 5 vs 10 stay
+  itself**: the 5th short boot **clears the PIN** and flashes the strip (cyan); the
+  10th **full-resets** (de-group + clear WiFi + PIN) and flashes magenta; only the
+  ~5 s commit resets the counter, so 5 vs 10 stay
   distinguishable and you get immediate "keep cycling until it flashes" feedback.
   File ops are trivial (~tens of ms); 5-minimum guards against accidental
   double-boots. A one-drag "recovery UF2" (forces standalone) is the ultimate
@@ -411,7 +417,7 @@ name; pin 0; brightness 100%.
   the remaining one as plain **standalone**.
 - **TODO** — **dedicated leader-only** export option (a coordinator Pico with no
   strip = a header-only file across all formats incl. a header-only UF2); the
-  power-cycle recovery ritual (5→standalone, 10→clear Wi-Fi) + recovery flashes.
+  power-cycle recovery ritual (5→clear PIN, 10→full reset) + recovery flashes.
 
 ## Explicitly out of scope
 
@@ -445,5 +451,5 @@ still needs 2+ Pico W, and how to run each). Highlights below.
 4. ~~Web: role/group/on-loss export UI (leader picker + group id, stamped into
    headers).~~ **DONE (2026-07-06)** — except the *dedicated leader-only* option.
 5. Web: dedicated leader-only export (header-only coordinator file, all formats).
-6. Firmware: power-cycle recovery ritual (5→standalone, 10→clear Wi-Fi) + flashes.
+6. Firmware: power-cycle recovery ritual (5→clear PIN, 10→full reset) + flashes.
 7. iOS/macOS: group view, batch upload, consistency check, provisioning-only BLE.

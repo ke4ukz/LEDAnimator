@@ -39,8 +39,12 @@ different colors so you never have to count cycles:
 
 | Event | Color | Meaning |
 |---|---|---|
-| `standalone` | white | The 5th interrupted boot **un-grouped** the device (kept Wi-Fi). |
-| `wifi-cleared` | magenta | The 10th interrupted boot **also cleared** the Wi-Fi config. |
+| `pin-cleared` | cyan | The 5th interrupted boot **cleared the PIN** (kept group + Wi-Fi) — the forgotten-PIN escape hatch. |
+| `factory-reset` | magenta | The 10th interrupted boot **full-reset**: de-grouped + cleared Wi-Fi + cleared the PIN. |
+
+*(Threshold model updated 2026-07-07 — "unlock at 5, full reset at 10." Build plan
+in [`config-and-auth-plan.md`](config-and-auth-plan.md) §3. The old white
+`standalone` / magenta `wifi-cleared` pair collapses into these two.)*
 
 ## Strip length is never tracked for status
 
