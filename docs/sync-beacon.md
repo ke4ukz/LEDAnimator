@@ -53,15 +53,22 @@ correlate this device across BLE and Wi-Fi. (Replaces today's bare `0xFFFF`+id a
 <ts_ms:    u32>   leader clock (ms) at broadcast, for phase-lock
 <program:  u8>    program number the group is playing
 <bright:   u8>    0–255
-<flags:    u8>    bit0 = playing, bit1 = teardown, bit2 = pairing (rest reserved)
+<flags:    u8>    bit0 = playing, bit1 = teardown (rest reserved; pairing dropped for auto-discovery)
 <seq:      u8>    increments every advert; detect stale/duplicate
 ```
 13-byte payload. Full advert ≈ 27/31 bytes, so there's still headroom.
 
-- The leader broadcasts this continuously (a few Hz), **including while phone-connected**
-  (validate advertise-while-connected on the CYW43 — the rig is for this).
+- The leader broadcasts this continuously (a few Hz). **Caveat (measured on the CYW43):**
+  advertising *stops* while a BLE central is connected, so leader **control is over Wi-Fi** —
+  intentionally BLE-connecting to a leader pauses its beacon for the connection's duration
+  (its followers free-run through the gap). Worth re-confirming; it may be an artifact.
 - Followers **scan** for adverts matching the filter + magic + type `0x02` + their bound
-  `group`, and phase-lock a free-running frame counter to `frame`/`ts_ms`.
+  `group`, and phase-lock a free-running frame counter to `frame`/`ts_ms`. A follower
+  **binds to the first leader's BLE address** and ignores other same-group leaders until
+  that leader goes silent (> ~2.5 s).
+- **Auto-election** (a device with role `auto` promotes to leader on boot silence) resolves a
+  double-promotion by **lowest BLE MAC wins** — using the **advertiser address** from the
+  scan result, so no beacon-payload field is needed.
 - Because the beacon carries program/bright/flags, changing them on the leader propagates
   group-wide with no upload ("jukebox").
 
@@ -69,5 +76,5 @@ correlate this device across BLE and Wi-Fi. (Replaces today's bare `0xFFFF`+id a
 
 - `0x1EDA` reads like "LEDA" and is not a standard GATT service; the magic guard makes any
   collision harmless, so no SIG assignment is needed.
-- The Pi rig's earlier draft used a 4-byte `"LEDA"` group + 4-byte frame; it will be
-  updated to this format so Pi ↔ Pico interop is byte-exact.
+- The Pi rig (`PiSyncTest/beacon.py`) now emits this exact format — Pi ↔ Pico interop is
+  byte-exact and validated on hardware.

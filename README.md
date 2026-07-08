@@ -85,8 +85,8 @@ iPhone/iPad or Mac. See [`iOS/README.md`](iOS/README.md).
 The two contracts everything depends on — full specs in
 [`docs/file-format.md`](docs/file-format.md) and [`docs/protocol.md`](docs/protocol.md).
 
-**Pattern file (`.leda`, "LEDA v1"):** a 16-byte header + frame-major RGB888
-pixels. All integers little-endian.
+**Pattern file (`.leda`):** a 20-byte header + frame-major RGB888 pixels. All
+integers little-endian.
 
 | Offset | Size | Field |
 |---:|---:|---|
@@ -96,8 +96,15 @@ pixels. All integers little-endian.
 | 6 | 2 | numLeds (uint16) |
 | 8 | 4 | numFrames (uint32) |
 | 12 | 2 | fps (uint16) |
-| 14 | 2 | reserved |
-| 16 | … | `numFrames × numLeds × (R,G,B)` |
+| 14 | 1 | sync role (`0` standalone … `4` auto-elect) |
+| 15 | 1 | group id (uint8) |
+| 16 | 1 | device / render-slice id (uint8) |
+| 17 | 1 | sync flags (on-loss policy + startup) |
+| 18 | 2 | reserved |
+| 20 | … | `numFrames × numLeds × (R,G,B)` |
+
+The sync role/group/device/flags carry the multi-device configuration — a plain
+single-device pattern is all-zero there. See [`file-format.md`](docs/file-format.md).
 
 **Control protocol:** one-line text commands (e.g. `INFO`, `SELECT <name>`,
 `BRIGHT 50`), identical over two transports:

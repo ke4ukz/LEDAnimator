@@ -102,7 +102,7 @@ argument usually *queries* the value.
 | Command | Meaning |
 |---|---|
 | `PROGRAM [n]` | The group **jukebox** verb. `PROGRAM <n>` plays program *n*: loads this device's own `NN-*.leda` slice and sets the beacon program #; on a leader this switches the whole group. No arg reports the current program #. |
-| `ROLE` | **Read-only.** Reports `standalone` / `leader` / `leader-only` / `follower`. Role lives in the played file's [header](file-format.md) — change it by loading a different file, not with a command. |
+| `ROLE` | **Read-only.** Reports `standalone` / `leader` / `leader-only` / `follower` / `auto` (`auto` resolves to leader or follower at boot by election). Role lives in the played file's [header](file-format.md) — change it by loading a different file, not with a command. |
 | `GROUP` | **Read-only.** Reports the sync group id (also from the header). |
 | `DEVICE` | **Read-only.** Reports the render-slice id (also from the header). |
 | `TEARDOWN` | Leader-only. Gracefully ends the group: broadcasts the teardown flag for ~2 s so followers stop, then silences the beacon until reboot. `ERR not-leader` otherwise. |
