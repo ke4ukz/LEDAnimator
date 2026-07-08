@@ -103,12 +103,19 @@ struct MacRootView: View {
         .toolbar {
             ToolbarItem {
                 Button {
+                    // Drop the current connection first, so reconnecting re-pulls
+                    // fresh device info (INFO/MOREINFO) rather than showing state
+                    // another app may have changed underneath us. Clearing the
+                    // selection also disconnects via onChange; do it explicitly too.
+                    ble.disconnect()
+                    wifi.disconnect()
+                    selection = nil
                     ble.startScan()
                     discovery.scan()
                 } label: {
                     Image(systemName: "arrow.clockwise")
                 }
-                .help("Rescan for devices")
+                .help("Rescan for devices (disconnects the current device)")
             }
         }
     }
