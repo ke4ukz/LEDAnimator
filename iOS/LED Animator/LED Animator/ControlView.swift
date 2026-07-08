@@ -296,7 +296,9 @@ struct ControlView: View {
             set: { if !$0 { session.needsLogin = false } }
         )) {
             SecureField("PIN", text: $pinEntry)
-                .textContentType(.password)
+                #if os(iOS)
+                .keyboardType(.numberPad)
+                #endif
             Button("Unlock") { session.login(pin: pinEntry); pinEntry = "" }
             Button("Cancel", role: .cancel) { pinEntry = ""; session.needsLogin = false }
         } message: {

@@ -128,7 +128,7 @@ lock). A PIN is stored on the device in `auth.txt`; no file ⇒ **open**.
 | Command | Meaning |
 |---|---|
 | `LOGIN <hash>` | Authenticate this connection. `<hash>` = lowercase hex `sha256(pin + nonce)`, where `nonce` came from the `NEEDPIN` challenge. → `OK LOGIN` / `ERR auth` (wrong) / `ERR auth-wait` (rate-limited). |
-| `SETPASS <pin>` | Set/change the PIN (4–32 printable ASCII, no spaces). Authed-only. → `OK SETPASS`. |
+| `SETPASS <pin>` | Set/change the PIN (**4–8 digits**). Authed-only. → `OK SETPASS` / `ERR args`. |
 | `CLEARPASS` | Remove the PIN (unlock). Authed-only. → `OK CLEARPASS`. |
 
 **When a PIN is set, the device is locked:** every command is refused with `ERR auth`

@@ -155,7 +155,7 @@ class S:
     # Auth: a PIN in auth.txt LOCKS the device — a connection must LOGIN (challenge-
     # response) before any command but PING/INFO/LOGIN. No file -> open (needed for
     # first-ever provisioning). Physical access defeats it (see the plan doc).
-    auth_pin = None          # the set PIN/passphrase (str), or None = open (unlocked)
+    auth_pin = None          # the set PIN (4-8 digit str), or None = open (unlocked)
     sess_auth = None         # {ref: True} authenticated connections (ref = ble conn / tcp sock)
     sess_nonce = None        # {ref: nonce_hex} the last challenge issued to that connection
     auth_fail_at = 0         # time.ticks_ms() of the last failed LOGIN (global rate-limit)
@@ -536,12 +536,12 @@ def _save_auth():
 
 
 def _valid_pin(s):
-    # 4-32 printable ASCII, no spaces (space is the arg separator). A short numeric
-    # PIN is fine for the casual threat model; a longer passphrase is allowed.
-    if len(s) < 4 or len(s) > 32:
+    # 4-8 digits. A casual deterrent, not real security (physical reset defeats it),
+    # so a short PIN is fine; the variable length adds a little ambiguity for a guesser.
+    if len(s) < 4 or len(s) > 8:
         return False
     for ch in s:
-        if ord(ch) < 33 or ord(ch) >= 127:
+        if ch < "0" or ch > "9":
             return False
     return True
 

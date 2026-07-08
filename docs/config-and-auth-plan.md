@@ -66,13 +66,18 @@ physical access (reset/USB dump wins — RP2350 secure boot is the real lock, se
   then provision.)
 - **Open until set:** no `auth.txt` → open (needed for first-ever BLE provisioning). Setting a
   PIN locks it; clearing it re-opens.
+- **PIN format:** **4–8 digits** (variable length adds a little guess-space ambiguity). The
+  app shows a number pad; the firmware `_valid_pin` enforces digits-only 4–8. Numeric so it's
+  quick to enter on a phone — this is a casual deterrent, not real security.
 - **Manage (authenticated only):** `SETPASS <pin>` set/change, `CLEARPASS` remove — both
-  settable from the app. *(Avoid the name `PIN`; it's already the GPIO-pin command.)*
-- **Rate-limit:** a ~5 s delay after each failed `LOGIN` (serial, so naturally one-at-a-time;
-  4-digit × 5 s ≈ 14 h). Linear is plenty — physical reset is the real bypass.
-- **Caveat:** a short PIN is still offline-brute-forceable from one captured nonce+hash, so
-  allow a longer passphrase if that matters. Full link encryption (BLE bonding / TLS) is the
-  real fix and is overkill here.
+  settable from the app. *(Command names avoid `PIN`, which is already the GPIO-pin command.)*
+- **Rate-limit:** a ~5 s window after each failed `LOGIN` (non-blocking: further attempts get
+  `ERR auth-wait`, the LED loop never stalls). At 5 s/try, even a 4-digit space ≈ 14 h online —
+  plenty, since physical reset is the real bypass.
+- **Caveat (accepted):** a short numeric PIN is offline-brute-forceable from one captured
+  nonce+hash — fine for the threat model (a neighbor poking your lights). The forgotten-PIN
+  escape hatch is the power-cycle ritual (§3), not a longer secret. Full link encryption (BLE
+  bonding / TLS) is the real fix and is overkill here.
 
 ## 3. Forgotten-PIN recovery — the power-cycle ritual (planned, ⏳ UNBUILT)
 

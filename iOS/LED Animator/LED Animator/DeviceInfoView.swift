@@ -188,11 +188,13 @@ struct DeviceInfoView: View {
         }
         .alert(session.pinIsSet ? "Change PIN" : "Set PIN", isPresented: $showPinEditor) {
             SecureField("PIN", text: $newPin)
-                .textContentType(.newPassword)
+                #if os(iOS)
+                .keyboardType(.numberPad)
+                #endif
             Button("Cancel", role: .cancel) { newPin = "" }
             Button("Save", action: commitPin)
         } message: {
-            Text("4–32 characters, no spaces. Saved on the device.")
+            Text("A 4–8 digit PIN. Saved on the device.")
         }
         .alert("Remove PIN?", isPresented: $showRemovePin) {
             Button("Remove", role: .destructive) { session.clearPin() }
@@ -285,13 +287,13 @@ struct DeviceInfoView: View {
         session.rename(trimmed)
     }
 
-    /// Apply a new PIN, ignoring anything shorter than 4 chars (the firmware also
-    /// validates 4–32 printable, no spaces, and returns ERR args otherwise).
+    /// Apply a new PIN: keep digits only and require 4–8 of them (the firmware
+    /// validates the same and returns ERR args otherwise).
     private func commitPin() {
-        let pin = newPin.trimmingCharacters(in: .whitespacesAndNewlines)
+        let digits = newPin.filter(\.isNumber)
         newPin = ""
-        guard pin.count >= 4 else { return }
-        session.setPin(pin)
+        guard (4...8).contains(digits.count) else { return }
+        session.setPin(digits)
     }
 
     /// Human-readable free space (e.g. "1.2 MB") for the raw byte count.
