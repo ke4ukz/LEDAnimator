@@ -164,8 +164,10 @@ WIFISCANEND
 ### `MOREINFO` — device details
 
 A set of discrete, self-describing `KEY <value>` lines (order-independent; the
-app ignores keys it doesn't recognize), e.g. `VERSION`, `LEDS`, `FREE`,
-`WIFIMAC`, `BTMAC`, `HOSTNAME`, `PLATFORM`, `PIN`, `POWER`.
+app ignores keys it doesn't recognize): `VERSION`, `LEDS`, `FREE`, `WIFIMAC`,
+`BTMAC`, `HOSTNAME`, `PLATFORM`, `PIN`, and the sync state `ROLE`, `GROUP`,
+`DEVICE`, `PROGRAM`, `STARTUP` (`wait`/`go`), `LOSS` (`indicate`/`silent`/
+`blackout`), then `POWER`, closed by `ENDINFO`.
 
 ## Uploading a pattern (Wi‑Fi)
 

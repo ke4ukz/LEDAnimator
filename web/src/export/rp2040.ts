@@ -1268,6 +1268,8 @@ def dispatch(line, origin=None):
             fields.append("GROUP %d" % S.group)
             fields.append("DEVICE %d" % S.device)
             fields.append("PROGRAM %d" % S.program)
+            fields.append("STARTUP " + ("go" if S.startup_go else "wait"))
+            fields.append("LOSS " + ("silent" if S.loss_policy == 1 else "blackout" if S.loss_policy == 2 else "indicate"))
             fields.append(_power_status())   # "POWER usb|batt|unknown <mv>"
             # A field with no hardware is OMITTED (not sent as a placeholder); the
             # app shows N/A for anything still missing once ENDINFO arrives.
