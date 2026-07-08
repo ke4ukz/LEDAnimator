@@ -119,6 +119,10 @@ final class DeviceSession {
 
     /// Switch the device to the named pattern (confirmed by OK SELECT).
     func select(_ name: String) { send(.select(name)) }
+    /// Group jukebox: play program n. On a leader this switches the whole group.
+    func selectProgram(_ n: Int) { send(.program(max(0, min(255, n)))) }
+    /// Leader-only: gracefully end the group (its followers stop).
+    func teardown() { send(.teardown) }
 
     /// Delete a pattern file. The device refuses to delete the active one
     /// ("ERR in-use"); the app hides that option, but the guard is defense in depth.

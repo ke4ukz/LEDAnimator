@@ -36,6 +36,7 @@ struct ControlView: View {
     @State private var showWifi = false
     #endif
     @State private var showImporter = false      // macOS pattern upload
+    @State private var showTeardownConfirm = false   // confirm group teardown
     @State private var dropTargeted = false      // Finder drag-and-drop highlight
     #if os(macOS)
     @State private var inspectorPanel: InspectorPanel?   // open Info/Wi-Fi panel (nil = none)
@@ -129,6 +130,32 @@ struct ControlView: View {
                 if session.speed != 100 {
                     Button("Reset to 100%") { session.setSpeed(100) }
                         .font(.caption)
+                }
+            }
+
+            // A leader drives the whole group's program and can end the group.
+            if let role = session.role, role == "leader" || role == "leader-only" {
+                Section {
+                    Stepper(value: Binding(
+                        get: { session.program ?? 0 },
+                        set: { session.selectProgram($0) }
+                    ), in: 0...255) {
+                        LabeledContent("Program", value: "\(session.program ?? 0)")
+                    }
+                    Button(role: .destructive) { showTeardownConfirm = true } label: {
+                        Label("End group", systemImage: "person.2.slash")
+                    }
+                    .alert("End the group?", isPresented: $showTeardownConfirm) {
+                        Button("End group", role: .destructive) { session.teardown() }
+                        Button("Cancel", role: .cancel) { }
+                    } message: {
+                        Text("The followers stop until they're started again.")
+                    }
+                } header: {
+                    Text("Group")
+                } footer: {
+                    Text("Program switches the whole group to that numbered pattern (each device plays its own slice).")
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
 
