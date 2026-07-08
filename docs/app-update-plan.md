@@ -9,7 +9,13 @@ below (see [`protocol.md`](protocol.md)); this is purely app-side.
 Ordered by value + risk. **Phase 1 is mechanical** (mirror existing patterns); Phase 2
 is new UI worth designing as you go.
 
-## Phase 1 — read, show, and send (low-risk, pattern-following)
+**Status (2026-07-07):** Phase 1 + the jukebox/teardown controls are **written** (commits
+`17c3290`, `12e33ac`) but **unverified — build in Xcode to confirm** (this box has no
+Xcode; cross-file SourceKit "cannot find type" warnings there are false positives). The
+device-list group view and warned-connect are still **TODO** — both need the discovery
+layer to parse the beacon advert first (below).
+
+## Phase 1 — read, show, and send (low-risk) — ✅ WRITTEN
 
 ### 1. `LEDProtocol.swift` — two new commands
 Add to `enum LEDCommand`:
@@ -52,27 +58,30 @@ Mirror the existing info rows. This is the "show it on the app" ask.
 
 ## Phase 2 — interactive (design as you build)
 
-### 4. Jukebox + teardown (`ControlView.swift`)
+### 4. Jukebox + teardown (`ControlView.swift`) — ✅ WRITTEN
 - A **Program** control (stepper/menu) that sends `.program(n)` — the group-wide
   pattern switch. Show it prominently for a leader/standalone; for a follower it's
   read-only (the leader drives it).
 - A **Teardown** action (destructive style, confirm first) — only for `role == leader`
   / `leader-only`; expect `ERR not-leader` otherwise.
 
-### 5. Group representation (`DeviceListView.swift`)
-Cluster followers under their leader by `syncGroup` — show the group as one unit with a
-sync-status line, rather than N separate rows. This is the biggest piece; a first cut
-can just **badge** each device with its role/group and sort grouped, before a full
-nested UI.
+### Prerequisite for 5 & 6 — parse the beacon advert in discovery (`BLEController.swift`)
+Both remaining items need the app to identify a **leader + its group before connecting**,
+which means parsing the **sync beacon advert** (manufacturer data `FFFF` + `"LD"` + type
+`0x02`, then `group` at the first payload byte — see [`sync-beacon.md`](sync-beacon.md))
+in the BLE scan callback, and carrying `isLeader` / `group` on `DiscoveredDevice` /
+`UnifiedDevice`. No firmware change needed (a leader already radiates type `0x02`).
 
-### 6. Warned BLE-connect to a leader
-When the user taps to connect **over BLE** to a device the app knows is a **group
-leader**, warn first: "This will pause the group for the duration of the connection."
-The app can tell a leader from the **advert type** during scanning — a leader radiates
-the **sync beacon** (manufacturer data type `0x02`, see [`sync-beacon.md`](sync-beacon.md)),
-vs a non-leader's device-info advert (type `0x01`). So detection is possible pre-connect
-without any new firmware. Wi-Fi connects need no warning. (Re-confirm the "beacon pauses
-while connected" premise with nRF first — it may be an artifact.)
+### 5. Group representation (`DeviceListView.swift`) — TODO
+Once discovery carries role/group: cluster followers under their leader by `group` — show
+the group as one unit with a sync-status line, rather than N separate rows. A first cut
+can just **badge** each row with role/group and sort grouped, before a full nested UI.
+
+### 6. Warned BLE-connect to a leader — TODO
+When the user taps to connect **over BLE** to a device discovery flagged as a **leader**,
+warn first: "This will pause the group for the duration of the connection." Wi-Fi connects
+need no warning. (Re-confirm the "beacon pauses while connected" premise with nRF first —
+it may be an artifact.)
 
 ## Notes
 - Everything Phase 1 needs is already in `MOREINFO`; no firmware change required.
