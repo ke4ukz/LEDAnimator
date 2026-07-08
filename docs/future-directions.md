@@ -190,6 +190,17 @@ protocol are locked — for performance, robustness, and IP protection.
   secure boot = actual lockdown.
 - **Sequencing:** MicroPython **now** (why we iterate this fast), compiled **Rust on
   RP2350 later** (hardening/productization). Don't rewrite mid-prototype.
+- **Board decision (2026-07-08): the Pico 2 W / RP2350 is the go-forward board** for the
+  networked tier — new units are Pico 2 W. The current MicroPython firmware is expected to be
+  **drop-in** (the RP2350 MicroPython build supports `rp2.DMA`, PIO/`asm_pio`,
+  `@micropython.viper`, `bluetooth`, and `network`/CYW43 — same wireless chip), so the switch is
+  *buy-one-and-flash* plus a **first-boot hardware checklist**: WS2812 timing still correct at
+  the 150 MHz sysclk (our PIO sets the SM frequency absolutely, so it should auto-adapt),
+  viper/DMA init cleanly, and BLE↔Wi-Fi coexistence behaves as it did on the RP2040 (same CYW43).
+  RP2350 upsides we inherit for free: a real hardware **TRNG** (better auth nonces than the
+  RP2040 had), **520 KB** SRAM, **4 MB** flash, a single-precision **FPU** (cheap float shaders —
+  see §3), and **secure boot** for the eventual compiled lockdown. Only cosmetic debt: the
+  `rp2040.ts` template name (code is generic).
 
 ---
 
@@ -298,6 +309,55 @@ their product looks like *theirs*.
   patterns, etc.
 
 ---
+
+## 5. HomeKit / Matter integration (feasibility researched 2026-07-08)
+
+The draw: **easier provisioning** (QR-code commissioning → on the network) plus basic control
+(on/off, brightness, solid color) surfaced in **Apple Home / Siri**. Full animation control
+stays in our own app — Matter's data model can't express our patterns anyway.
+
+**Can a Pico do it?** In principle yes — **Matter-over-Wi-Fi**. Matter needs Wi-Fi + BLE (BLE
+only for commissioning), which the Pico W / Pico 2 W both have. No 802.15.4 radio, so **Thread
+is out**, but Wi-Fi Matter is fully supported by Apple Home (a HomePod/Apple TV is the
+controller; **no Thread border router needed** for a Wi-Fi accessory). The plumbing exists too:
+lwIP (already used by the CYW43 driver), FreeRTOS (Pico SDK supports it), mbedTLS for crypto.
+
+**Why nobody's shipped it:**
+- **No vendor-maintained port.** Espressif and Nordic maintain official Matter SDKs (examples,
+  OTA, factory-cert partitions, hardware crypto). RP2040/RP2350 have none — you'd port the
+  `connectedhomeip` platform layer yourself. Community *interest* exists; no working solution.
+- **Memory + crypto.** Minimal-doable in the RP2040's 264 KB SRAM but zero headroom; no HW
+  crypto/TRNG on RP2040, so SPAKE2+/P-256 commissioning is slow (one-time). RP2350's 520 KB +
+  SHA/TRNG is far friendlier but still tight and still unported.
+- **The architectural killer for us:** Matter is a large **C++** stack with its own event
+  loop/RTOS that expects to *own* the device — you can't co-host it with MicroPython. Adopting
+  Matter means the **compiled-firmware rewrite** (§2), not a MicroPython add-on. So Matter is
+  **gated on the compiled/RP2350 path**, not a near-term feature.
+- **Industry tell:** commercial "RP2350 + Matter" boards bolt on an **ESP32-C6 co-processor**
+  for the radio/Matter stack — i.e. the ESP32 is the Matter workhorse; the RP2350 wasn't tried
+  and rejected, it's just unsupported.
+
+**Certification reality:** hobby/**test credentials** pair with Apple Home (with an
+"uncertified accessory" warning) — fine to prototype the UX. A *shipping* product needs CSA
+membership + a DAC certificate chain + a test harness = real money and effort.
+
+**Lighter alternatives:**
+- **HAP-direct (HomeKit without Matter)** — Apple's pre-Matter accessory protocol (mDNS + HTTP
+  + SRP pairing + Curve25519/ChaCha20). Lighter than Matter, ported to ESP32/ESP8266, Pico W
+  support limited/WIP. Same outcome (provision + on/off/brightness/color) with less weight — but
+  Apple-only and still a **C firmware**, not MicroPython.
+- **Bridge via a hub (cheapest, zero firmware change) — the recommended near-term experiment.**
+  A **Homebridge / Home Assistant plugin** that speaks our existing TCP control protocol
+  ([`protocol.md`](protocol.md) — port 4550: `SOLID` / `BRIGHT` / `OFF`) and exposes each device
+  to HomeKit as a light. Gets Siri + the Home app immediately; needs an always-on hub; **doesn't
+  help first-time provisioning** (the part most worth wanting).
+
+**Conclusion:** native HomeKit/Matter is an **RP2350 + compiled-firmware future** (rides §2), best
+de-risked by first prototyping with Matter test credentials. The **Homebridge/HA bridge** is a
+cheap, firmware-free experiment we could run anytime to get "works with Apple Home" today.
+Sources: [Matter on Pico — RPi forums](https://forums.raspberrypi.com/viewtopic.php?t=340189) ·
+[HomeKit lib for Pico W — RPi forums](https://forums.raspberrypi.com/viewtopic.php?t=343530) ·
+[RP2350 + ESP32-C6 Matter boards — heise](https://www.heise.de/en/news/Raspberry-Pi-RP2350-Pico-2-alternatives-with-wireless-more-flash-or-smaller-9829988.html).
 
 ## Related
 
