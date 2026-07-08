@@ -56,8 +56,12 @@ final class DeviceSession {
     var syncGroup: Int?          // installation / sync group id
     var deviceSlice: Int?        // render-slice id (which device's slice this is)
     var program: Int?            // current program number (the group's jukebox selection)
-    var startupPolicy: String?   // follower boot: "wait" / "go"
-    var lossPolicy: String?      // follower on sync loss: "indicate" / "silent" / "blackout"
+    var startupPolicy: String?   // follower boot: "wait" / "go" (EFFECTIVE value)
+    var lossPolicy: String?      // follower on sync loss: "indicate" / "silent" / "blackout" (EFFECTIVE)
+    // Which policy fields are pinned as device overrides (win over the animation's
+    // header). Parsed from MOREINFO's OVERRIDES line; used to warn/offer "revert".
+    var lossOverridden = false
+    var startupOverridden = false
     var moreInfoLoaded = false   // true once the MOREINFO batch (ENDINFO) has arrived
     /// Last "ERR…" reply, surfaced for debugging/UI feedback.
     var lastError: String?
@@ -123,10 +127,16 @@ final class DeviceSession {
     func selectProgram(_ n: Int) { send(.program(max(0, min(255, n)))) }
     /// Leader-only: gracefully end the group (its followers stop).
     func teardown() { send(.teardown) }
-    /// Set the follower on-sync-loss policy ("indicate"/"silent"/"blackout") — live + persisted.
-    func setLossPolicy(_ name: String) { lossPolicy = name; send(.setLoss(name)) }
-    /// Set the follower boot behavior ("wait"/"go") — live + persisted.
-    func setStartup(_ name: String) { startupPolicy = name; send(.setStartup(name)) }
+    /// Pin the follower on-sync-loss policy ("indicate"/"silent"/"blackout") as a
+    /// device override — live + persisted, wins over every animation's header.
+    func setLossPolicy(_ name: String) { lossPolicy = name; lossOverridden = true; send(.setLoss(name)) }
+    /// Drop the loss override so the animation's own header takes back over. The
+    /// resulting header value arrives in the OK LOSS ack.
+    func revertLoss() { lossOverridden = false; send(.setLoss("default")) }
+    /// Pin the follower boot behavior ("wait"/"go") as a device override.
+    func setStartup(_ name: String) { startupPolicy = name; startupOverridden = true; send(.setStartup(name)) }
+    /// Drop the startup override so the animation's header takes back over.
+    func revertStartup() { startupOverridden = false; send(.setStartup("default")) }
 
     /// Delete a pattern file. The device refuses to delete the active one
     /// ("ERR in-use"); the app hides that option, but the guard is defense in depth.
@@ -350,6 +360,12 @@ final class DeviceSession {
             startupPolicy = String(reply.dropFirst("STARTUP ".count))
         } else if reply.hasPrefix("LOSS ") {
             lossPolicy = String(reply.dropFirst("LOSS ".count))
+        } else if reply.hasPrefix("OVERRIDES ") {
+            // "OVERRIDES none" or a comma list of pinned policy fields (loss, startup).
+            let list = String(reply.dropFirst("OVERRIDES ".count))
+            let fields = list == "none" ? [] : list.split(separator: ",").map { String($0) }
+            lossOverridden = fields.contains("loss")
+            startupOverridden = fields.contains("startup")
         } else if reply.hasPrefix("POWER ") {
             // "POWER <usb|batt|unknown> <mv>" (mv 0 = voltage unavailable).
             let parts = reply.split(separator: " ")

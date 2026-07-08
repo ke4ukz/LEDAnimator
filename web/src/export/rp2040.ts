@@ -153,9 +153,12 @@ class S:
     role = "standalone"      # "standalone" | "leader" | "leader-only" | "follower"
     group = 0                # sync group id 0-255 (leaders broadcast it; followers filter on it)
     device = 0               # render-slice id 0-255 (which device's slice this file is)
-    loss_policy = 0          # follower on-sync-loss: 0 indicate / 1 silent / 2 blackout (header byte 17)
-    startup_go = 0           # follower boot: 0 wait-for-sync (dark) / 1 start-and-go (play then snap)
-    syncflags_set = False    # a runtime LOSS/STARTUP override (syncflags.txt) is in effect
+    loss_policy = 0          # follower on-sync-loss: 0 indicate / 1 silent / 2 blackout (EFFECTIVE value)
+    startup_go = 0           # follower boot: 0 wait-for-sync (dark) / 1 start-and-go (play then snap) (EFFECTIVE)
+    loss_header = 0          # the loss default the active file's header asks for (byte 17 bits 0-1)
+    startup_header = 0       # the startup default the active file's header asks for (byte 17 bit 2)
+    loss_override = False    # a device override (syncflags.txt) pins loss, ignoring the header
+    startup_override = False # a device override pins startup, ignoring the header
     my_mac = b""             # our BLE MAC, for the auto-election lowest-MAC tiebreaker
     rival_mac = b""          # MAC of the last group beacon heard (advertiser address)
     role_locked = False      # once auto-election resolves the role, keep it across reloads
@@ -451,24 +454,43 @@ def _load_state():
 
 
 def _load_syncflags():
-    # Runtime override for the follower on-loss + startup policies — settable live
-    # (like the data pin). If syncflags.txt exists it WINS over the .leda header, so
-    # a change made from the app sticks across reboots and program switches.
+    # Device overrides for the follower on-loss + startup policies — settable live
+    # (like the data pin). Each field can be pinned INDEPENDENTLY; a pinned field
+    # wins over the .leda header for every animation until cleared. syncflags.txt
+    # stores only the pinned fields as space-separated tokens ("L<0-2>" loss,
+    # "S<0-1>" startup); an absent token means that field follows the header.
     try:
         with open("syncflags.txt") as fh:
-            v = int(fh.read().strip())
-        S.loss_policy = v & 0x03
-        S.startup_go = (v >> 2) & 1
-        S.syncflags_set = True
-    except (OSError, ValueError):
-        pass
+            txt = fh.read().strip()
+    except OSError:
+        return
+    for tok in txt.split():
+        if len(tok) == 2 and tok[0] == "L" and tok[1] in "012":
+            S.loss_policy = int(tok[1])
+            S.loss_override = True
+        elif len(tok) == 2 and tok[0] == "S" and tok[1] in "01":
+            S.startup_go = int(tok[1])
+            S.startup_override = True
+    # (Unknown/legacy tokens are ignored, so a field just falls back to the header.)
 
 
 def _save_syncflags():
-    S.syncflags_set = True
+    # Persist only the pinned fields; if nothing is pinned, remove the file so the
+    # device is cleanly back to "follow the animation's header".
+    toks = []
+    if S.loss_override:
+        toks.append("L%d" % (S.loss_policy & 0x03))
+    if S.startup_override:
+        toks.append("S%d" % (S.startup_go & 1))
     try:
-        with open("syncflags.txt", "w") as fh:
-            fh.write(str((S.loss_policy & 0x03) | ((S.startup_go & 1) << 2)))
+        if toks:
+            with open("syncflags.txt", "w") as fh:
+                fh.write(" ".join(toks))
+        else:
+            try:
+                os.remove("syncflags.txt")
+            except OSError:
+                pass
     except Exception:
         pass
 
@@ -485,9 +507,15 @@ def _apply_role_header(h):
         S.role = _ROLE_NAMES[h[14]] if h[14] < len(_ROLE_NAMES) else "standalone"
     S.group = h[15]
     S.device = h[16]
-    if not S.syncflags_set:               # a runtime override (syncflags.txt) wins over the header
-        S.loss_policy = h[17] & 0x03      # sync flags: on-sync-loss behavior
-        S.startup_go = (h[17] >> 2) & 1   # boot: start-and-go vs wait-for-sync
+    # Remember what THIS file asks for, then apply it to any field the device
+    # hasn't pinned. A pinned field (device override) keeps its value across file
+    # switches; an unpinned field takes on the new animation's header on every load.
+    S.loss_header = h[17] & 0x03          # sync flags: on-sync-loss behavior
+    S.startup_header = (h[17] >> 2) & 1   # boot: start-and-go vs wait-for-sync
+    if not S.loss_override:
+        S.loss_policy = S.loss_header
+    if not S.startup_override:
+        S.startup_go = S.startup_header
 
 
 def _program_from_name(name):
@@ -1299,6 +1327,12 @@ def dispatch(line, origin=None):
             fields.append("PROGRAM %d" % S.program)
             fields.append("STARTUP " + ("go" if S.startup_go else "wait"))
             fields.append("LOSS " + ("silent" if S.loss_policy == 1 else "blackout" if S.loss_policy == 2 else "indicate"))
+            _ov = []
+            if S.loss_override:
+                _ov.append("loss")
+            if S.startup_override:
+                _ov.append("startup")
+            fields.append("OVERRIDES " + (",".join(_ov) if _ov else "none"))
             fields.append(_power_status())   # "POWER usb|batt|unknown <mv>"
             # A field with no hardware is OMITTED (not sent as a placeholder); the
             # app shows N/A for anything still missing once ENDINFO arrives.
@@ -1354,27 +1388,42 @@ def dispatch(line, origin=None):
             # Read-only: render-slice id, from the header.
             return "DEVICE %d" % S.device
         if c == "LOSS":
-            # No arg reports; "LOSS <indicate|silent|blackout>" sets the follower's
-            # on-sync-loss policy live + persists it (overrides the header).
+            # No arg reports; "LOSS <indicate|silent|blackout>" pins the follower's
+            # on-sync-loss policy (device override) + persists it. "LOSS default"
+            # clears the override so the animation's header takes back over.
             if len(p) < 2:
                 return "LOSS " + _loss_name(S.loss_policy)
-            v = {"indicate": 0, "silent": 1, "blackout": 2, "0": 0, "1": 1, "2": 2}.get(p[1].lower())
+            a = p[1].lower()
+            if a in ("default", "clear", "header"):
+                S.loss_override = False
+                S.loss_policy = S.loss_header
+                _save_syncflags()
+                return "OK LOSS " + _loss_name(S.loss_policy)
+            v = {"indicate": 0, "silent": 1, "blackout": 2, "0": 0, "1": 1, "2": 2}.get(a)
             if v is None:
                 return "ERR args"
             S.loss_policy = v
+            S.loss_override = True
             _save_syncflags()
             return "OK LOSS " + _loss_name(v)
         if c == "STARTUP":
-            # No arg reports; "STARTUP <wait|go>" sets the follower's boot behavior.
+            # No arg reports; "STARTUP <wait|go>" pins the follower's boot behavior
+            # (device override). "STARTUP default" clears it back to the header.
             if len(p) < 2:
                 return "STARTUP " + ("go" if S.startup_go else "wait")
             a = p[1].lower()
+            if a in ("default", "clear", "header"):
+                S.startup_override = False
+                S.startup_go = S.startup_header
+                _save_syncflags()
+                return "OK STARTUP " + ("go" if S.startup_go else "wait")
             if a in ("go", "1"):
                 S.startup_go = 1
             elif a in ("wait", "0"):
                 S.startup_go = 0
             else:
                 return "ERR args"
+            S.startup_override = True
             _save_syncflags()
             return "OK STARTUP " + ("go" if S.startup_go else "wait")
         if c == "PROGRAM":
@@ -1907,8 +1956,9 @@ def main():
     S.file = _load_current()
     S.bright = _load_bright()
     _load_state()          # restore play/solid/off + the solid color
+    _load_syncflags()      # device overrides for the on-loss/startup policy — load FIRST so
+                           # _prime_header's header-apply respects the pins (like the reload path)
     _prime_header()        # LED count + role/group/device from the selected file's header
-    _load_syncflags()      # runtime override of the on-loss/startup policy, if set
     _load_networks()       # queue a Wi-Fi auto-connect if provisioned
     try:
         _start_ble()

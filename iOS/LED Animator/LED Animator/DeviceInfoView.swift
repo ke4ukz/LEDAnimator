@@ -106,6 +106,9 @@ struct DeviceInfoView: View {
                             Text("Start and go").tag("go")
                         }
                         .pickerStyle(.menu)
+                        if session.startupOverridden {
+                            overrideNote { session.revertStartup() }
+                        }
                         Picker("On sync loss", selection: Binding(
                             get: { session.lossPolicy ?? "indicate" },
                             set: { session.setLossPolicy($0) }
@@ -115,6 +118,9 @@ struct DeviceInfoView: View {
                             Text("Blackout").tag("blackout")
                         }
                         .pickerStyle(.menu)
+                        if session.lossOverridden {
+                            overrideNote { session.revertLoss() }
+                        }
                     }
                 }
             }
@@ -156,6 +162,22 @@ struct DeviceInfoView: View {
                 if Task.isCancelled { break }
                 session.requestPower()
             }
+        }
+    }
+
+    /// The caption + revert control shown under a policy picker whose value is
+    /// pinned as a device override — so the user sees this device is ignoring what
+    /// its animation asks for, and can hand control back to the animation.
+    @ViewBuilder
+    private func overrideNote(revert: @escaping () -> Void) -> some View {
+        HStack {
+            Label("Overriding the animation", systemImage: "pin.fill")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Spacer()
+            Button("Use animation's setting", action: revert)
+                .font(.caption)
+                .buttonStyle(.borderless)
         }
     }
 

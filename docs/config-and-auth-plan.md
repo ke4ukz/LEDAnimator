@@ -20,38 +20,23 @@ device override (if set)  >  animation header default  >  firmware default
   the header for **all** animations until cleared. This is "pin this device, ignore what the
   animation wants." Applying to all is the point, not a bug.
 
-### Status
-- ✅ Header default, set-override + persist (`syncflags.txt`), and app pickers — **built +
-  hardware-validated** (firmware) / written (app).
-- ⏳ Two things remain (below).
+### Status — ✅ **BUILT (2026-07-07)**, firmware compiles / app written (needs Xcode build)
+- ✅ Header default (each `.leda` carries loss/startup; applied on every file load —
+  uploading/switching a pattern applies *that* pattern's behavior).
+- ✅ **Per-field override** — `S.loss_override` / `S.startup_override` (independent), header
+  values remembered in `S.loss_header` / `S.startup_header`; effective = override ? override :
+  header. `syncflags.txt` stores only the pinned fields as tokens (`L<0-2>` / `S<0-1>`), and is
+  removed when nothing is pinned. (Replaced the old single `syncflags_set` int file.)
+- ✅ **Clear / revert** — `LOSS default` / `STARTUP default` drop that field's override and
+  recompute the effective value from the current header (no reload). App shows a caption
+  **"Overriding the animation"** + a **"Use animation's setting"** button under any pinned
+  picker (cleaner than a 4th picker option — the picker keeps showing the effective value).
+- ✅ **Override warning** — `MOREINFO` emits `OVERRIDES <none | loss | startup | loss,startup>`;
+  the app parses it into `lossOverridden` / `startupOverridden` and gates the caption/revert on
+  it. (Device-row list badge still optional — not built; Info-view caption covers the warning.)
 
-### TODO a — per-field override (refine storage)
-Today a single `syncflags_set` flag pins **both** loss and startup together, so setting one
-from the app silently pins the other to its current value. Make them **independent**:
-- Replace `syncflags_set` with `S.loss_override` + `S.startup_override` (bools).
-- `syncflags.txt` stores only the overridden fields (e.g. tokens `L2` / `S1`; absence = not
-  overridden).
-- Keep the header values available (store `S.loss_header`/`S.startup_header` in
-  `_apply_role_header`) so the *effective* value = override ? override : header, and clearing
-  recomputes from the header with no reload.
-
-### TODO b — clear / revert
-A way to drop an override so the header takes back over (per field):
-- Firmware: `LOSS default` / `STARTUP default` → clear that field's override + rewrite
-  `syncflags.txt` + recompute the effective value from the current header.
-- App: the loss/startup pickers get a 4th option **"Use the animation's setting"** that sends
-  the clear.
-
-### TODO c — override warning (the thing you flagged)
-So a user knows a device isn't following its animation:
-- Firmware: `MOREINFO` reports which fields are pinned — an `OVERRIDES <none | loss | startup |
-  loss,startup>` line (cleanest to parse) alongside the existing `LOSS`/`STARTUP` values.
-- App: in the Info view, show a caption on a pinned picker ("Overriding the animation") and
-  offer the revert option; optionally a small **"overridden"** badge on the device row in the
-  list.
-
-*(Fancy version, almost certainly YAGNI: per-**program** overrides on one device — a keyed
-map instead of a single override. Note it, don't build it.)*
+*(Fancy version, still YAGNI: per-**program** overrides on one device — a keyed map instead of a
+single override. Noted, not built.)*
 
 ## 2. Auth PIN — challenge-response
 

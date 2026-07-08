@@ -105,16 +105,19 @@ argument usually *queries* the value.
 | `ROLE` | **Read-only.** Reports `standalone` / `leader` / `leader-only` / `follower` / `auto` (`auto` resolves to leader or follower at boot by election). Role lives in the played file's [header](file-format.md) — change it by loading a different file, not with a command. |
 | `GROUP` | **Read-only.** Reports the sync group id (also from the header). |
 | `DEVICE` | **Read-only.** Reports the render-slice id (also from the header). |
-| `LOSS [indicate\|silent\|blackout]` | Follower on-sync-loss policy. No arg reports it; with an arg, sets it **live and persists** it (an override that wins over the file header). |
-| `STARTUP [wait\|go]` | Follower boot behavior — wait-for-sync vs start-and-go. No arg reports; with an arg, sets + persists. |
+| `LOSS [indicate\|silent\|blackout\|default]` | Follower on-sync-loss policy. No arg reports it; a value **pins** it (device override, persisted, wins over the file header for every animation); `LOSS default` clears the override so the animation's header takes back over. |
+| `STARTUP [wait\|go\|default]` | Follower boot behavior — wait-for-sync vs start-and-go. No arg reports; a value pins it (device override, persisted); `STARTUP default` clears the override. |
 | `TEARDOWN` | Leader-only. Gracefully ends the group: broadcasts the teardown flag for ~2 s so followers stop, then silences the beacon until reboot. `ERR not-leader` otherwise. |
 
 **Identity** (`ROLE`/`GROUP`/`DEVICE`) is read-only — it comes from the `.leda` header,
 so the file a device plays *is* its identity (see
 [`multi-device-sync.md`](multi-device-sync.md)); program # is the file's `NN-` name
-prefix. **Behavior policies** (`LOSS`/`STARTUP`) default from the header but are
-live-settable — a change is saved in `syncflags.txt` and overrides the header
-thereafter (the same pattern as `PIN`/`datapin.txt`).
+prefix. **Behavior policies** (`LOSS`/`STARTUP`) default from each animation's header
+— so uploading/switching a pattern applies *that* pattern's behavior — but each can
+be **pinned independently** as a device override that wins over the header for every
+animation until cleared with `… default`. Overrides live in `syncflags.txt` (only the
+pinned fields are stored) and `MOREINFO` reports an `OVERRIDES` line so a controller
+can warn that a device isn't following its animation.
 
 ### Wi‑Fi provisioning (Pico W)
 
@@ -171,7 +174,8 @@ A set of discrete, self-describing `KEY <value>` lines (order-independent; the
 app ignores keys it doesn't recognize): `VERSION`, `LEDS`, `FREE`, `WIFIMAC`,
 `BTMAC`, `HOSTNAME`, `PLATFORM`, `PIN`, and the sync state `ROLE`, `GROUP`,
 `DEVICE`, `PROGRAM`, `STARTUP` (`wait`/`go`), `LOSS` (`indicate`/`silent`/
-`blackout`), then `POWER`, closed by `ENDINFO`.
+`blackout`), `OVERRIDES` (`none` | a comma list of the pinned policy fields, e.g.
+`loss` / `loss,startup`), then `POWER`, closed by `ENDINFO`.
 
 ## Uploading a pattern (Wi‑Fi)
 
