@@ -41,6 +41,8 @@ enum LEDCommand {
     // Multi-device sync
     case program(Int)          // group jukebox: play program n (a leader switches the whole group)
     case teardown              // leader-only: gracefully end the group
+    case setLoss(String)       // follower on-sync-loss policy: indicate / silent / blackout
+    case setStartup(String)    // follower boot behavior: wait / go
     // Wi-Fi provisioning (Pico W)
     case wifiScan              // stream nearby SSIDs
     case wifiSSID(String)      // stash the network name for the next connect
@@ -69,6 +71,8 @@ enum LEDCommand {
         case .setPin(let n): return "PIN \(n)"
         case .program(let n): return "PROGRAM \(n)"
         case .teardown: return "TEARDOWN"
+        case .setLoss(let s): return "LOSS \(s)"
+        case .setStartup(let s): return "STARTUP \(s)"
         case .wifiScan: return "WIFISCAN"
         case .wifiSSID(let ssid): return "WIFISSID \(ssid)"
         case .wifiPass(let pass): return "WIFIPASS \(pass)"

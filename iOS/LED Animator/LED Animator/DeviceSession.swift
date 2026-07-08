@@ -123,6 +123,10 @@ final class DeviceSession {
     func selectProgram(_ n: Int) { send(.program(max(0, min(255, n)))) }
     /// Leader-only: gracefully end the group (its followers stop).
     func teardown() { send(.teardown) }
+    /// Set the follower on-sync-loss policy ("indicate"/"silent"/"blackout") — live + persisted.
+    func setLossPolicy(_ name: String) { lossPolicy = name; send(.setLoss(name)) }
+    /// Set the follower boot behavior ("wait"/"go") — live + persisted.
+    func setStartup(_ name: String) { startupPolicy = name; send(.setStartup(name)) }
 
     /// Delete a pattern file. The device refuses to delete the active one
     /// ("ERR in-use"); the app hides that option, but the guard is defense in depth.
@@ -388,6 +392,10 @@ final class DeviceSession {
             let rest = reply.dropFirst("OK PROGRAM ".count)
             if let n = Int(rest.prefix(while: { $0 != " " })) { program = n }
             mode = "play"
+        } else if reply.hasPrefix("OK LOSS ") {
+            lossPolicy = String(reply.dropFirst("OK LOSS ".count))
+        } else if reply.hasPrefix("OK STARTUP ") {
+            startupPolicy = String(reply.dropFirst("OK STARTUP ".count))
         } else if reply.hasPrefix("WIFISCANLEN ") {
             incomingNetworks = []
             armWifiScanTimeout()

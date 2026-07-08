@@ -98,8 +98,23 @@ struct DeviceInfoView: View {
                     LabeledContent("Device", value: display(session.deviceSlice.map(String.init)))
                     LabeledContent("Program", value: display(session.program.map(String.init)))
                     if role == "follower" || role == "auto" {
-                        LabeledContent("Startup", value: display(session.startupPolicy?.capitalized))
-                        LabeledContent("On sync loss", value: display(session.lossPolicy?.capitalized))
+                        Picker("Startup", selection: Binding(
+                            get: { session.startupPolicy ?? "wait" },
+                            set: { session.setStartup($0) }
+                        )) {
+                            Text("Wait for sync").tag("wait")
+                            Text("Start and go").tag("go")
+                        }
+                        .pickerStyle(.menu)
+                        Picker("On sync loss", selection: Binding(
+                            get: { session.lossPolicy ?? "indicate" },
+                            set: { session.setLossPolicy($0) }
+                        )) {
+                            Text("Keep playing · indicate").tag("indicate")
+                            Text("Keep playing · silent").tag("silent")
+                            Text("Blackout").tag("blackout")
+                        }
+                        .pickerStyle(.menu)
                     }
                 }
             }
