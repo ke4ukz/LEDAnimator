@@ -71,6 +71,7 @@ final class DeviceSession {
     var pinIsSet = false         // a PIN is set on the device (from MOREINFO AUTH)
     var authError: String?       // "Incorrect PIN" / "Too many attempts…" for the prompt
     @ObservationIgnored private var loginNonce: String?   // the challenge to hash against
+    @ObservationIgnored private var loginAttempted = false   // a LOGIN is in flight (distinguishes wrong-PIN from just-locked)
     /// Last "ERR…" reply, surfaced for debugging/UI feedback.
     var lastError: String?
     // Wi-Fi provisioning
@@ -154,6 +155,7 @@ final class DeviceSession {
     func login(pin: String) {
         guard let nonce = loginNonce else { requestChallenge(); return }
         authError = nil
+        loginAttempted = true
         send(.login(Self.sha256Hex(pin + nonce)))
     }
     /// Set or change the device PIN (only works while authed or open).
@@ -162,6 +164,15 @@ final class DeviceSession {
     func clearPin() { send(.clearPass) }
     /// Ask the device for a fresh login challenge (it replies NEEDPIN <nonce>).
     func requestChallenge() { send(.info) }
+
+    /// Drop into the locked state (device requires auth, we're not authed) and get
+    /// a fresh challenge so the unlock screen can (re)try. Idempotent.
+    private func enterLocked() {
+        needsLogin = true
+        authenticated = false
+        pinIsSet = true
+        requestChallenge()
+    }
 
     /// Lowercase hex SHA-256 of a string's UTF-8 bytes — matches the firmware's
     /// `sha256(pin + nonce)` (see rp2040.ts `_expected_login`).
@@ -492,9 +503,10 @@ final class DeviceSession {
             needsLogin = false
             authError = nil
             loginNonce = nil
+            loginAttempted = false
             start()
         } else if reply == "OK SETPASS" {
-            // We just set/changed the PIN — this connection stays authed.
+            // We just set the PIN — this connection stays authed.
             pinIsSet = true
             authenticated = true
             needsLogin = false
@@ -503,15 +515,19 @@ final class DeviceSession {
         } else if reply == "ERR auth-wait" {
             // Rate-limited after a wrong PIN; get a fresh challenge for the retry.
             authError = "Too many attempts — wait a few seconds."
-            requestChallenge()
+            loginAttempted = false
+            enterLocked()
         } else if reply == "ERR auth" {
-            if needsLogin {
-                // A wrong PIN (or a stale challenge): re-prompt with a fresh nonce.
-                authError = "Incorrect PIN."
-                requestChallenge()
-            } else {
-                lastError = reply
-            }
+            // Locked and not authed: a wrong PIN, or a command refused because
+            // another controller just set a PIN. Either way, show the locked
+            // screen and fetch a fresh challenge so the user can (re)try.
+            if loginAttempted { authError = "Incorrect PIN." }
+            loginAttempted = false
+            enterLocked()
+        } else if reply == "ERR exists" {
+            // Tried to set a PIN when one is already set — remove it first.
+            pinIsSet = true
+            lastError = "A PIN is already set. Remove it before setting a new one."
         } else if reply.hasPrefix("ERR") {
             lastError = reply
         }

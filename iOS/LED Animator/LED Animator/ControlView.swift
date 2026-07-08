@@ -37,7 +37,6 @@ struct ControlView: View {
     #endif
     @State private var showImporter = false      // macOS pattern upload
     @State private var showTeardownConfirm = false   // confirm group teardown
-    @State private var pinEntry = ""             // scratch for the unlock prompt
     @State private var dropTargeted = false      // Finder drag-and-drop highlight
     #if os(macOS)
     @State private var inspectorPanel: InspectorPanel?   // open Info/Wi-Fi panel (nil = none)
@@ -59,7 +58,18 @@ struct ControlView: View {
     /// Brightness and Speed sections (bump buttons + slider), the Patterns
     /// section (loading/error/empty/rows, plus macOS reload+upload header), and a
     /// trailing error section. On macOS also the Finder drag-and-drop target.
+    @ViewBuilder
     private var patternList: some View {
+        // A locked device (PIN set, this connection not yet authed) shows only the
+        // unlock screen — there's nothing to control until it's unlocked.
+        if session.needsLogin {
+            LockedView(session: session)
+        } else {
+            unlockedList
+        }
+    }
+
+    private var unlockedList: some View {
         List {
             Section("Playback") {
                 // Custom bindings: the `set` closures (user interaction) send
@@ -254,23 +264,26 @@ struct ControlView: View {
         .navigationTitle(session.connectedName)
         .inlineNavTitle()
         .toolbar {
-            #if os(macOS)
-            ToolbarItem(placement: .primaryAction) {
-                Button { toggleInspector(.wifi) } label: { Image(systemName: "wifi") }
-                    .help("Wi-Fi settings")
+            // While locked, the only action is to unlock — hide Info/Wi-Fi.
+            if !session.needsLogin {
+                #if os(macOS)
+                ToolbarItem(placement: .primaryAction) {
+                    Button { toggleInspector(.wifi) } label: { Image(systemName: "wifi") }
+                        .help("Wi-Fi settings")
+                }
+                ToolbarItem(placement: .primaryAction) {
+                    Button { toggleInspector(.info) } label: { Image(systemName: "info.circle") }
+                        .help("Device info")
+                }
+                #else
+                ToolbarItem(placement: .primaryAction) {
+                    Button { showWifi = true } label: { Image(systemName: "wifi") }
+                }
+                ToolbarItem(placement: .primaryAction) {
+                    Button { showInfo = true } label: { Image(systemName: "info.circle") }
+                }
+                #endif
             }
-            ToolbarItem(placement: .primaryAction) {
-                Button { toggleInspector(.info) } label: { Image(systemName: "info.circle") }
-                    .help("Device info")
-            }
-            #else
-            ToolbarItem(placement: .primaryAction) {
-                Button { showWifi = true } label: { Image(systemName: "wifi") }
-            }
-            ToolbarItem(placement: .primaryAction) {
-                Button { showInfo = true } label: { Image(systemName: "info.circle") }
-            }
-            #endif
         }
         #if os(iOS)
         .sheet(isPresented: $showInfo) {
@@ -288,22 +301,6 @@ struct ControlView: View {
         }
         .onChange(of: session.mode) { _, m in playback = mapMode(m) }
         .onChange(of: session.solid) { _, s in solidColor = color(from: s) }
-        // A locked device answers our connect INFO with a challenge; prompt for the
-        // PIN. On a wrong PIN the session re-arms `needsLogin` (with `authError`),
-        // so the alert re-presents until the user unlocks or cancels.
-        .alert("Unlock Device", isPresented: Binding(
-            get: { session.needsLogin },
-            set: { if !$0 { session.needsLogin = false } }
-        )) {
-            SecureField("PIN", text: $pinEntry)
-                #if os(iOS)
-                .keyboardType(.numberPad)
-                #endif
-            Button("Unlock") { session.login(pin: pinEntry); pinEntry = "" }
-            Button("Cancel", role: .cancel) { pinEntry = ""; session.needsLogin = false }
-        } message: {
-            Text(session.authError ?? "This device is locked. Enter its PIN to control it.")
-        }
         #if os(macOS)
         .fileImporter(isPresented: $showImporter, allowedContentTypes: [ledaType]) { result in
             if case .success(let url) = result {
@@ -465,6 +462,57 @@ struct ControlView: View {
     /// Show "rainbow" rather than "rainbow.leda" in the list.
     private func displayName(_ file: String) -> String {
         file.hasSuffix(".leda") ? String(file.dropLast(5)) : file
+    }
+}
+
+/// Shown in place of the controls when the device is locked (a PIN is set and
+/// this connection hasn't authenticated). Persistent and self-retrying: a wrong
+/// PIN leaves this on screen with an error, and the device hands back a fresh
+/// challenge each time, so "Unlock" always works — no need to disconnect/reselect.
+private struct LockedView: View {
+    let session: DeviceSession
+    @State private var pin = ""
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        VStack(spacing: 16) {
+            Image(systemName: "lock.fill")
+                .font(.largeTitle)
+                .foregroundStyle(.secondary)
+            Text("Device is locked")
+                .font(.headline)
+            Text("Enter this device's PIN to control it.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+            SecureField("PIN", text: $pin)
+                #if os(iOS)
+                .keyboardType(.numberPad)
+                #endif
+                .textFieldStyle(.roundedBorder)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 200)
+                .focused($focused)
+                .onSubmit(submit)
+            Button("Unlock", action: submit)
+                .buttonStyle(.borderedProminent)
+                .disabled(pin.count < 4)
+            if let err = session.authError {
+                Text(err)
+                    .font(.callout)
+                    .foregroundStyle(.red)
+                    .multilineTextAlignment(.center)
+            }
+        }
+        .padding()
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .onAppear { focused = true }
+    }
+
+    private func submit() {
+        guard pin.count >= 4 else { return }
+        session.login(pin: pin)
+        pin = ""
     }
 }
 

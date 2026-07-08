@@ -98,7 +98,6 @@ struct DeviceInfoView: View {
             Section {
                 if session.pinIsSet {
                     LabeledContent("PIN protection", value: "On")
-                    Button("Change PIN") { newPin = ""; showPinEditor = true }
                     Button("Remove PIN", role: .destructive) { showRemovePin = true }
                 } else {
                     LabeledContent("PIN protection", value: "Off")
@@ -107,7 +106,7 @@ struct DeviceInfoView: View {
             } header: {
                 Text("Security")
             } footer: {
-                Text("A PIN asks anyone connecting to enter it before they can control this device. It's a casual deterrent — someone with physical access can reset it.")
+                Text("A PIN asks anyone connecting to enter it before they can control this device. To change it, remove it and set a new one. It's a casual deterrent — someone with physical access can reset it.")
                     .fixedSize(horizontal: false, vertical: true)
             }
 
@@ -186,7 +185,7 @@ struct DeviceInfoView: View {
         } message: {
             Text("Up to 26 characters. Saved on the device and used as its Bluetooth name.")
         }
-        .alert(session.pinIsSet ? "Change PIN" : "Set PIN", isPresented: $showPinEditor) {
+        .alert("Set PIN", isPresented: $showPinEditor) {
             SecureField("PIN", text: $newPin)
                 #if os(iOS)
                 .keyboardType(.numberPad)

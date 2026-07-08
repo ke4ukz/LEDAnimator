@@ -45,9 +45,11 @@ Firmware + app done; firmware validated end-to-end on a live Pico W over TCP (SE
 locked → INFO returns `NEEDPIN <nonce>` → wrong `LOGIN` = `ERR auth` → immediate retry =
 `ERR auth-wait` → after cooldown correct `LOGIN` = `OK LOGIN` → state flows → `CLEARPASS` →
 open again; socket-keyed session dicts confirmed working on-device). App: DeviceSession does
-the CryptoKit `sha256(pin+nonce)` + parses `NEEDPIN`/`AUTH set|none`; ControlView shows an
-Unlock prompt on `needsLogin`; DeviceInfoView has a **Security** section (set/change/remove
-PIN). App unbuilt in Xcode as of writing.
+the CryptoKit `sha256(pin+nonce)` + parses `NEEDPIN`/`AUTH set|none`; ControlView replaces the
+controls with a persistent, retryable **"Device is locked"** screen whenever `needsLogin`
+(entered on `NEEDPIN` *or* an unexpected `ERR auth`, so a mid-session lock-out drops you there
+too); DeviceInfoView has a **Security** section (set / remove PIN — no "change", you remove then
+set). App unbuilt in Xcode as of writing.
 
 Casual/hobby-grade deterrent (stop a neighbor poking your lights); **not** protection against
 physical access (reset/USB dump wins — RP2350 secure boot is the real lock, see
@@ -69,8 +71,11 @@ physical access (reset/USB dump wins — RP2350 secure boot is the real lock, se
 - **PIN format:** **4–8 digits** (variable length adds a little guess-space ambiguity). The
   app shows a number pad; the firmware `_valid_pin` enforces digits-only 4–8. Numeric so it's
   quick to enter on a phone — this is a casual deterrent, not real security.
-- **Manage (authenticated only):** `SETPASS <pin>` set/change, `CLEARPASS` remove — both
-  settable from the app. *(Command names avoid `PIN`, which is already the GPIO-pin command.)*
+- **Manage (authenticated only):** `SETPASS <pin>` set (**refused with `ERR exists` if one is
+  already set** — remove then set, no "change"; this kills the two-apps-set-twice last-writer-
+  wins race), `CLEARPASS` remove — both from the app. *(Command names avoid `PIN`, the GPIO-pin
+  command.)* Setting a PIN immediately locks out other already-connected controllers (their next
+  command → `ERR auth`), and the app drops them onto a retryable "Device is locked" screen.
 - **Rate-limit:** a ~5 s window after each failed `LOGIN` (non-blocking: further attempts get
   `ERR auth-wait`, the LED loop never stalls). At 5 s/try, even a 4-digit space ≈ 14 h online —
   plenty, since physical reset is the real bypass.

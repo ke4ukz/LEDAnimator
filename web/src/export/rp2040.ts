@@ -1404,10 +1404,13 @@ def dispatch(line, origin=None):
                 S.sess_auth[origin[1]] = True
             return "OK LOGIN"
         if c == "SETPASS":
-            # Set/change the PIN. Reachable only when authed or open (the gate
-            # blocks it otherwise), so knowing the current PIN is required to change it.
+            # Set the PIN. Refuse if one already EXISTS (no silent overwrite / last-
+            # writer-wins between two connected apps) — remove it first, then set a
+            # new one. Reachable only when authed or open (the gate blocks it otherwise).
             if len(p) < 2:
                 return "ERR args"
+            if S.auth_pin is not None:
+                return "ERR exists"    # CLEARPASS first, then SETPASS a new one
             if not _valid_pin(p[1]):
                 return "ERR args"
             S.auth_pin = p[1]
