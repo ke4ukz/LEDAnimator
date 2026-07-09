@@ -1,0 +1,32 @@
+[package]
+name = "led-animator-fw"
+version = "0.1.0"
+edition = "2021"
+resolver = "2"
+description = "LED Animator device firmware — Rust port of the MicroPython player (see ../web/src/export/rp2040.ts)"
+
+[dependencies]
+embassy-executor = { version = "0.7", features = ["arch-cortex-m", "executor-thread"] }
+embassy-rp = { version = "0.4", features = ["rp2040", "time-driver", "critical-section-impl"] }
+embassy-time = { version = "0.4" }
+embassy-sync = { version = "0.6" }
+embassy-futures = { version = "0.1" }
+
+cortex-m = { version = "0.7.7", features = ["inline-asm"] }
+cortex-m-rt = "0.7.5"
+panic-halt = "1"
+fixed = "1"
+static_cell = "2"
+# RP2040 is Cortex-M0+ (thumbv6m): no native atomic CAS. Emulate it via
+# critical-section so static_cell / embassy atomics compile.
+portable-atomic = { version = "1", features = ["critical-section"] }
+
+# Fast enough to hold framerate even in dev; embassy is unhappy at opt-level 0.
+[profile.dev]
+opt-level = "s"
+
+[profile.release]
+codegen-units = 1
+debug = 2
+lto = "fat"
+opt-level = "s"

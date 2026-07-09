@@ -1,0 +1,12 @@
+[build]
+target = "thumbv6m-none-eabi"
+
+[target.thumbv6m-none-eabi]
+# Load + run over USB while the Pico is in BOOTSEL:  picotool load -x -t elf <elf>
+# (elf2uf2-rs is also available to make a UF2.)  No probe on this bench, so no
+# `probe-rs run` / RTT — panic-halt + on-strip status is the debugging channel.
+rustflags = [
+  "-C", "link-arg=--nmagic",
+  "-C", "link-arg=-Tlink.x",
+  "-C", "link-arg=-Tlink-rp.x",
+]

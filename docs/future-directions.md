@@ -190,6 +190,14 @@ protocol are locked — for performance, robustness, and IP protection.
   secure boot = actual lockdown.
 - **Sequencing:** MicroPython **now** (why we iterate this fast), compiled **Rust on
   RP2350 later** (hardening/productization). Don't rewrite mid-prototype.
+- **Port STARTED 2026-07-09** as its own crate, [`firmware-rust/`](../firmware-rust/)
+  (see [`firmware-rust/docs/PORT.md`](../firmware-rust/docs/PORT.md)) — kept separate for
+  now, to merge in / replace the Python once it reaches parity. Done so far: the **player
+  core** (WS2812 PIO+DMA, LEDA parse + fixed-rate playback, brightness, LED-0 status) on
+  **embassy-rp**, compiling for thumbv6m and flashed + running on the bench. Remaining
+  (planned in PORT.md): flash/config (littlefs), then BLE / Wi-Fi / sync / auth / recovery
+  (the CYW43 networking via `cyw43` + `embassy-net` + `trouble` is the large, experimental
+  part).
 - **Board decision (2026-07-08): the Pico 2 W / RP2350 is the go-forward board** for the
   networked tier — new units are Pico 2 W. The current MicroPython firmware is expected to be
   **drop-in** (the RP2350 MicroPython build supports `rp2.DMA`, PIO/`asm_pio`,
