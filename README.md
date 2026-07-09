@@ -59,6 +59,8 @@ Project-wide files (this README, `LICENSE`, the GitHub Pages workflow in
   writes and the device plays (LEDA v1).
 - **[Control protocol](docs/protocol.md)** — the text command protocol the app
   and firmware speak over BLE and Wi‑Fi.
+- **[Building the firmware](docs/firmware-build.md)** — how the MicroPython player
+  is authored, tested on a bench Pico, and shipped (precompiled to `leda.mpy`).
 - **[Project status](docs/STATUS.md)** — what works today and what's next.
 - **[Multi-device sync plan](docs/multi-device-sync.md)** — design for splitting
   one animation across several synchronized Pico W devices.

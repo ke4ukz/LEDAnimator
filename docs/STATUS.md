@@ -19,6 +19,7 @@ A snapshot of what works today and what's next. Updated July 2026.
   v1.28) + a tiny loader `main.py`, so the board skips the ~3 s on-device compile
   every boot (measured 2.97 s → 1.22 s). Regenerate the blob with `npm run gen:mpy`
   after editing `rp2040.ts`; the build's `prebuild` hook fails on a stale blob.
+  Full process in [`firmware-build.md`](firmware-build.md).
 - Project save/load (JSON), local library (IndexedDB), crash recovery, and a
   storage-version gate that clears a stale session after breaking changes.
 
