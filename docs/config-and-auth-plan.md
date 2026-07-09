@@ -92,15 +92,21 @@ uninterrupted run, and a normal single boot never accumulates. The 10× full res
 (de-group + Wi-Fi + PIN, magenta) shares the same path and is unit-tested (20/20) but wasn't
 driven to 10 on the bench (would wipe it).
 
-**Timing/feedback tuning (2026-07-08, after a real RUN-pin test felt fiddly):** boot itself
-takes **~3 s** (compiling the ~92 KB `main.py`) to reach the counter, so a reset must be
-spaced >~3 s to count — that part is inherent (only a precompiled `.mpy` or a tiny early-boot
-loader would cut it; noted, not done). Two fixes made it usable: (a) the **commit window is
-12 s** (was 5 s) so you can't easily overshoot and reset the count; (b) each counted press
-from the 2nd on **lights that many pixels dim-white** (`_show_bootcount`) — immediate "it
-registered + you're at N" feedback, since otherwise there's nothing until the 5× cyan flash.
-`n == 1` stays silent (indistinguishable from a normal power-on). Wire a button from **`RUN`
-(pin 30) to GND**; no debounce needed (bounce/rapid taps coalesce into one count).
+**Timing/feedback tuning (2026-07-08, from real RUN-pin testing):**
+- **Boot latency** was ~3 s (compiling the ~92 KB `main.py`) to reach the counter, so presses
+  had to be spaced >~3 s. **Fixed by shipping the player precompiled (`leda.mpy`)** — boot is
+  now ~1.2 s (see [`firmware-build.md`](firmware-build.md)), so presses register fast.
+- **Feedback:** each counted press from the 2nd on **lights that many pixels dim-white**
+  (`_show_bootcount`) — immediate "it registered + you're at N", since there's otherwise
+  nothing until the 5× cyan flash. `n == 1` stays silent (looks like a normal power-on).
+- **Cyan is the ritual boundary (fixes cyan rituals summing to a magenta).** The 5× branch
+  resets the counter **after** the cyan flash, so **letting the cyan flash finish "completes"
+  the ritual** — a fresh 5 resets = cyan *again*, not magenta, with no wait. To **escalate to
+  the full reset**, keep cycling *through* the cyan flash (a reset before the flash's
+  post-write preserves the count, climbing to 10). The 12 s commit window still resets the
+  count for a normal (sub-threshold) boot.
+- Wire a button from **`RUN` (pin 30) to GND**; no debounce needed (bounce / rapid taps
+  coalesce into one count).
 
 
 A set PIN can be forgotten, and since a locked device gates *everything* but

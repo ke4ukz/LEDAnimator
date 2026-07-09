@@ -637,6 +637,11 @@ def _recovery_check(n):
         _rm("auth.txt")                 # clear the PIN only (keep group + Wi-Fi)
         print("recovery: PIN cleared (%dx)" % n)
         _flash_strip("pin-cleared", 1500)
+        # Reset the count AFTER the flash, so the cyan flash is the ritual boundary:
+        # let it finish -> this ritual is done (a fresh 5 resets = cyan AGAIN, not
+        # magenta). To escalate to the full reset instead, keep cycling DURING the
+        # flash (a reset before this line preserves the count, climbing toward 10).
+        _write_bootcount(0)
     elif n >= RECOVERY_FULL:
         _rm("auth.txt")                 # full reset: PIN + Wi-Fi + de-group
         _rm("networks.txt")
