@@ -99,17 +99,20 @@ driven to 10 on the bench (would wipe it).
 - **Feedback:** each counted press from the 2nd on **lights that many pixels dim-white**
   (`_show_bootcount`) — immediate "it registered + you're at N", since there's otherwise
   nothing until the 5× cyan flash. `n == 1` stays silent (looks like a normal power-on).
-- **Model: press N times = tier N; a short idle resets.** The commit window is **3 s** (was
-  12 s — far too long once boot dropped to <1 s): you press ~1 s apart reliably, so 3 s is a
-  comfortable press window yet a brief pause cleanly separates one ritual from the next with no
-  waiting. (An earlier "cyan flash is the boundary" attempt — reset the count *after* the cyan
-  flash — was reverted: with fast steady pressing you blow *through* the 1.5 s flash and the
-  count overshoots toward magenta. Idle-reset is simpler and doesn't fight the press rhythm.)
-- **So:** 5 presses → cyan (PIN cleared); **stop and pause ~3 s** → count resets, a fresh 5 =
-  cyan again. Keep going straight to **10 presses → magenta** (full reset). Two separate 5-press
-  rituals never sum to a magenta because the pause between them zeros the count.
+- **Model: interrupt the boot to climb; let it boot once to reset.** The count commits (resets
+  to 0) a short settle (~0.7 s) after the device **reaches its running loop** — i.e. the boot
+  *completed* instead of being interrupted by another reset. This replaced a wall-clock idle
+  timer (tried 12 s then 3 s): a timer is a hidden "just wait N seconds if you fumble", which is
+  bad UX, and the earlier "reset after the cyan flash" boundary let a steady ~1 s press rhythm
+  blow *through* the flash and overshoot toward magenta. Tying the reset to **boot completion**
+  makes it observable (you see the device come up / start playing = the window closed) and needs
+  no fixed wait.
+- **So:** press ~1 s apart to climb (each press interrupts before the boot finishes); **5 =
+  cyan** (PIN cleared), keep going straight to **10 = magenta** (full reset). Fumbled the count?
+  Just **let it boot once** (you'll see it start) and the count clears — then start over. Two
+  separate rituals never sum because letting it come up between them zeros the count.
 - Wire a button from **`RUN` (pin 30) to GND**; no debounce needed (bounce / rapid taps
-  coalesce into one count).
+  coalesce — they interrupt before the boot reaches the counter, so they're one count).
 
 
 A set PIN can be forgotten, and since a locked device gates *everything* but

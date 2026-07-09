@@ -61,12 +61,13 @@ AUTH_RETRY_MS = 5000
 # faster than a boot (switch bounce, rapid taps) coalesce into one count — no debounce
 # needed. Fire a recovery action at each threshold; the physical ritual means a
 # forgotten PIN is never a permanent lockout.
-COMMIT_MS = 3000          # idle this long -> "committed", counter resets to 0. Short on
-                          # purpose: the player ships precompiled (leda.mpy) so boot reaches the
-                          # counter in <1s and presses register in ~1s, so 3s is a comfortable
-                          # press window yet a brief pause cleanly separates one ritual from the
-                          # next (no waiting). Normal use runs far longer, so it always commits
-                          # between real boots. (Model: press N times = tier N; pause to reset.)
+COMMIT_MS = 700           # settle AFTER the device reaches its running loop (see main), then
+                          # "commit" — reset the counter. Tied to boot COMPLETING (observable:
+                          # it starts running), not a wall clock, so recovering a fumbled count
+                          # is just "let it boot once", never a fixed wait. A ritual press
+                          # resets the board before this, so presses keep accumulating; stop and
+                          # the count clears ~0.7s after it comes up. (Model: interrupt to climb,
+                          # let it boot to reset.)
 RECOVERY_UNLOCK = 5       # 5 short boots -> clear the PIN only (keep group + Wi-Fi)
 RECOVERY_FULL = 10        # 10 -> full reset: de-group + clear Wi-Fi + clear PIN
 
@@ -175,8 +176,8 @@ class S:
     sess_nonce = None        # {ref: nonce_hex} the last challenge issued to that connection
     auth_fail_at = 0         # time.ticks_ms() of the last failed LOGIN (global rate-limit)
     # Power-cycle recovery ritual (bootcount.txt in flash; see the constants above).
-    boot_at = 0              # time.ticks_ms() at boot, for the commit-window reset
-    boot_committed = False   # True once we've run past COMMIT_MS -> counter reset
+    boot_at = 0              # time.ticks_ms() when we reached the running loop (boot completed)
+    boot_committed = False   # True once we've run past the settle -> counter reset
     force_standalone = False # standalone.txt recovery override: ignore the header role, be standalone
     udp_sock = None          # UDP discovery socket (replies to LEDADISCOVER probes)
     # Multi-device sync (see docs/sync-beacon.md). role/group/device come from the
@@ -1455,8 +1456,9 @@ def _udp_step():
 def _tick():
     # Per-loop housekeeping shared by every branch of the player loop.
     if not S.boot_committed and time.ticks_diff(time.ticks_ms(), S.boot_at) > COMMIT_MS:
-        # Ran past the commit window -> this was NOT a short boot; reset the
-        # power-cycle recovery counter so a normal run never accumulates toward it.
+        # The device reached its running loop and settled -> this boot COMPLETED
+        # (wasn't interrupted by another reset), so the ritual is over: reset the
+        # power-cycle recovery counter. A normal run never accumulates toward it.
         S.boot_committed = True
         _write_bootcount(0)
     _persist_bright()
@@ -2243,7 +2245,6 @@ def _start_ble():
 def main():
     _bootn = _bump_bootcount()   # FIRST — count this boot before any init that could hang
     _show_solid((0, 0, 0), STATUS_BLANK_LEDS)   # clear power-on garbage before init draws anything
-    S.boot_at = time.ticks_ms()
     S.force_standalone = _file_exists("standalone.txt")   # persisted de-group from a prior full reset
     _recovery_check(_bootn)   # 5th boot clears the PIN; 10th full-resets (may set force_standalone)
     S.sess_auth = {}       # per-connection auth state (empty = nobody authed yet)
@@ -2266,6 +2267,12 @@ def main():
     f = None
     frames = 0
     base_delay = 0.03
+    # Mark when we REACH the running loop — boot finished (wasn't interrupted by
+    # another reset). The recovery counter commits (resets) a short settle after
+    # this, so the "window to add a press" closes when the device comes up: to
+    # reset a fumbled count you just let it boot once (you'll see it start), no
+    # fixed wait. Ritual presses interrupt before here, so they keep accumulating.
+    S.boot_at = time.ticks_ms()
     while True:
         if S.uploading:
             # A pattern file is streaming in over TCP: close our handle (it may be

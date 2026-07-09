@@ -41,8 +41,8 @@ different colors so you never have to count cycles:
 | Event | Color | Meaning |
 |---|---|---|
 | *progress* | dim white | Each counted reset from the **2nd** on lights that many pixels (1 pixel per count), so you get immediate "it registered / you're at N" feedback while cycling. `n == 1` stays silent (looks like a normal boot). |
-| `pin-cleared` | cyan | The 5th interrupted boot **cleared the PIN** (kept group + Wi-Fi) — the forgotten-PIN escape hatch. Stop here and pause ~3 s (the commit window) and the count resets, so a fresh 5 = cyan again. |
-| `factory-reset` | magenta | The 10th interrupted boot **full-reset**: de-grouped + cleared Wi-Fi + cleared the PIN. Reached by continuing straight from 5 to 10 (don't pause). |
+| `pin-cleared` | cyan | The 5th interrupted boot **cleared the PIN** (kept group + Wi-Fi) — the forgotten-PIN escape hatch. Fumbled? Just let it boot once (you'll see it come up) and the count clears, so a fresh 5 = cyan again. |
+| `factory-reset` | magenta | The 10th interrupted boot **full-reset**: de-grouped + cleared Wi-Fi + cleared the PIN. Reached by continuing straight from 5 to 10 (don't let it finish booting in between). |
 
 *(Threshold model updated 2026-07-07 — "unlock at 5, full reset at 10." Build plan
 in [`config-and-auth-plan.md`](config-and-auth-plan.md) §3. The old white
