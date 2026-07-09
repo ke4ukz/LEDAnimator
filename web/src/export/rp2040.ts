@@ -2370,19 +2370,35 @@ main()
 `
 }
 
+/**
+ * The player as an importable MODULE — the same source as `rp2040MainPy` but with
+ * the trailing top-level `main()` call removed, so it can be precompiled to
+ * `leda.mpy` and invoked by the loader below. Precompiling skips the ~3s on-device
+ * compile of the ~90KB source every boot (measured 2.97s → 1.22s on a Pico W).
+ */
+export function rp2040ModulePy(build = 'dev'): string {
+  return rp2040MainPy(build).replace(/\n+main\(\)\s*$/, '\n')
+}
+
+/** The tiny `main.py` that runs the precompiled `leda.mpy` module. */
+export const RP2040_LOADER_PY = 'import leda\nleda.main()\n'
+
 export function rp2040Readme(pin: number, patternFile: string): string {
   return `LED Animator - WS2812 LED strip controller
 
 A baked animation for a WS2812 / NeoPixel strip, exported from LED Animator.
 
 Target device:
-  Raspberry Pi Pico or Pico W running MicroPython. The strip data line goes to
+  Raspberry Pi Pico W running MicroPython v1.28 (the player is precompiled to
+  leda.mpy for this version + the RP2040/armv6m core). The strip data line goes to
   GP${pin} (change datapin.txt to use another pin); share GND and power the strip
   from 5V. On a Pico W you can also control it over Bluetooth/Wi-Fi from the
   LED Animator app.
 
 Files:
-  main.py         The player - runs on boot, drives the strip, handles control.
+  main.py         Tiny loader: imports and runs leda.mpy.
+  leda.mpy        The player, precompiled - runs on boot, drives the strip, handles
+                  control. Precompiled so the board skips the ~3s startup compile.
   ${patternFile}
                   Your baked animation.
   datapin.txt     GP pin the strip data line is wired to (GP${pin}).
@@ -2400,7 +2416,8 @@ Created on the device later (not in this download):
                   in plain text - anyone with access to the board can read it.
 
 To install (with Thonny or mpremote):
-  1. Flash MicroPython for RP2040 onto the Pico / Pico W.
+  1. Flash MicroPython v1.28 for the Pico W onto the board (leda.mpy is built for
+     it; a mismatched version won't import).
   2. Copy every file except project.json to the board.
   3. Reset - it plays the animation on a loop.
 `

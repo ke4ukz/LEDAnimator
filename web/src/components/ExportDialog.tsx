@@ -4,7 +4,8 @@ import { InfoDot } from './InfoDot'
 import { partitionByDevice } from '../bake'
 import { DEVICES, checkLimits } from '../export/devices'
 import { encodeRaster, estimateBytes, ROLE, LOSS, STARTUP, type LedaMeta } from '../export/format'
-import { rp2040MainPy, rp2040Readme, rp2040SettingsFiles } from '../export/rp2040'
+import { RP2040_LOADER_PY, rp2040Readme, rp2040SettingsFiles } from '../export/rp2040'
+import { firmwareMpyBytes } from '../export/firmwareMpy.generated'
 import { serializeProjectFile } from '../export/projectFile'
 import { downloadBytes, zipProject } from '../export/download'
 import { commit } from 'virtual:build-info'
@@ -156,7 +157,10 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
       const s = settingsFor(device)
       const pf = ledaName(device)
       const dir = multi ? `device-${device}/` : '' // one folder per board when split
-      files[`${dir}main.py`] = rp2040MainPy(FW_BUILD)
+      // Precompiled player + tiny loader (skips the on-device compile). The .mpy
+      // matches the bundled MicroPython (armv6m / v1.28); see firmwareMpy.generated.
+      files[`${dir}main.py`] = RP2040_LOADER_PY
+      files[`${dir}leda.mpy`] = firmwareMpyBytes()
       files[`${dir}${pf}`] = encodeRaster(raster, metaFor(device))
       for (const [n, v] of Object.entries(rp2040SettingsFiles(s.pin, Number(s.brightness.toFixed(2)), s.name, pf))) {
         files[`${dir}${n}`] = v

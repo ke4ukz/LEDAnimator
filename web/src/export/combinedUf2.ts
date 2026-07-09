@@ -1,7 +1,8 @@
 import firmwareUrl from '../assets/RPI_PICO_W-v1.28.0.uf2?url'
 import type { Raster } from '../types'
 import { encodeRaster, type LedaMeta } from './format'
-import { rp2040MainPy, rp2040SettingsFiles } from './rp2040'
+import { RP2040_LOADER_PY, rp2040SettingsFiles } from './rp2040'
+import { firmwareMpyBytes } from './firmwareMpy.generated'
 import { buildLittleFsImage } from './littlefs'
 import { assembleCombinedUf2 } from './uf2'
 
@@ -39,8 +40,13 @@ export async function buildRp2040CombinedUf2(
 ): Promise<Uint8Array> {
   const enc = new TextEncoder()
   const settings = rp2040SettingsFiles(pin, brightness, name ?? 'LED Animator', patternFile)
+  // Ship the precompiled player (leda.mpy) + a tiny loader main.py, not the raw
+  // source — the board skips the ~3s boot-time compile. The .mpy matches the
+  // bundled MicroPython (arch + version); `build` is baked into the blob at gen time.
+  void build
   const files = [
-    { name: 'main.py', data: enc.encode(rp2040MainPy(build)) },
+    { name: 'main.py', data: enc.encode(RP2040_LOADER_PY) },
+    { name: 'leda.mpy', data: firmwareMpyBytes() },
     { name: patternFile, data: encodeRaster(raster, meta) },
     ...Object.entries(settings).map(([n, v]) => ({ name: n, data: enc.encode(v) })),
   ]
