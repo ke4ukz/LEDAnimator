@@ -61,11 +61,12 @@ AUTH_RETRY_MS = 5000
 # faster than a boot (switch bounce, rapid taps) coalesce into one count — no debounce
 # needed. Fire a recovery action at each threshold; the physical ritual means a
 # forgotten PIN is never a permanent lockout.
-COMMIT_MS = 12000         # run this long uninterrupted -> "committed", counter resets to 0.
-                          # Generous on purpose: boot itself takes ~3s (compiling main.py) to
-                          # reach the counter, so a 5s window left only ~2s to re-press before
-                          # a reset "committed" and zeroed it. 12s gives a comfortable window;
-                          # normal use runs far longer, so it always commits between real boots.
+COMMIT_MS = 3000          # idle this long -> "committed", counter resets to 0. Short on
+                          # purpose: the player ships precompiled (leda.mpy) so boot reaches the
+                          # counter in <1s and presses register in ~1s, so 3s is a comfortable
+                          # press window yet a brief pause cleanly separates one ritual from the
+                          # next (no waiting). Normal use runs far longer, so it always commits
+                          # between real boots. (Model: press N times = tier N; pause to reset.)
 RECOVERY_UNLOCK = 5       # 5 short boots -> clear the PIN only (keep group + Wi-Fi)
 RECOVERY_FULL = 10        # 10 -> full reset: de-group + clear Wi-Fi + clear PIN
 
@@ -637,11 +638,9 @@ def _recovery_check(n):
         _rm("auth.txt")                 # clear the PIN only (keep group + Wi-Fi)
         print("recovery: PIN cleared (%dx)" % n)
         _flash_strip("pin-cleared", 1500)
-        # Reset the count AFTER the flash, so the cyan flash is the ritual boundary:
-        # let it finish -> this ritual is done (a fresh 5 resets = cyan AGAIN, not
-        # magenta). To escalate to the full reset instead, keep cycling DURING the
-        # flash (a reset before this line preserves the count, climbing toward 10).
-        _write_bootcount(0)
+        # NB: cyan does NOT reset the count here. Stopping at 5 (see cyan) then
+        # pausing lets the short commit window zero it, so a fresh 5 = cyan again;
+        # cycling straight on to 10 (through the cyan flash) reaches the full reset.
     elif n >= RECOVERY_FULL:
         _rm("auth.txt")                 # full reset: PIN + Wi-Fi + de-group
         _rm("networks.txt")

@@ -99,12 +99,15 @@ driven to 10 on the bench (would wipe it).
 - **Feedback:** each counted press from the 2nd on **lights that many pixels dim-white**
   (`_show_bootcount`) — immediate "it registered + you're at N", since there's otherwise
   nothing until the 5× cyan flash. `n == 1` stays silent (looks like a normal power-on).
-- **Cyan is the ritual boundary (fixes cyan rituals summing to a magenta).** The 5× branch
-  resets the counter **after** the cyan flash, so **letting the cyan flash finish "completes"
-  the ritual** — a fresh 5 resets = cyan *again*, not magenta, with no wait. To **escalate to
-  the full reset**, keep cycling *through* the cyan flash (a reset before the flash's
-  post-write preserves the count, climbing to 10). The 12 s commit window still resets the
-  count for a normal (sub-threshold) boot.
+- **Model: press N times = tier N; a short idle resets.** The commit window is **3 s** (was
+  12 s — far too long once boot dropped to <1 s): you press ~1 s apart reliably, so 3 s is a
+  comfortable press window yet a brief pause cleanly separates one ritual from the next with no
+  waiting. (An earlier "cyan flash is the boundary" attempt — reset the count *after* the cyan
+  flash — was reverted: with fast steady pressing you blow *through* the 1.5 s flash and the
+  count overshoots toward magenta. Idle-reset is simpler and doesn't fight the press rhythm.)
+- **So:** 5 presses → cyan (PIN cleared); **stop and pause ~3 s** → count resets, a fresh 5 =
+  cyan again. Keep going straight to **10 presses → magenta** (full reset). Two separate 5-press
+  rituals never sum to a magenta because the pause between them zeros the count.
 - Wire a button from **`RUN` (pin 30) to GND**; no debounce needed (bounce / rapid taps
   coalesce into one count).
 
