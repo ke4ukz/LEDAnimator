@@ -63,11 +63,12 @@ leader commit + stop-listening after the window.
   (power off a 2nd Pico W).
 - [ ] **Start-and-go convergence** — several lamps boot alone (start-and-go), then
   visibly sync up when they hear each other (the "impressive to watch" scenario).
-- [x] **Power-cycle recovery ritual** — ✅ 2026-07-08: 5 quick resets cleared a stale PIN
-  (`auth.txt` removed); commit reset zeroes the counter after a ~5 s uninterrupted run; a
-  set PIN is clearable this way (forgotten-PIN escape hatch). Tip: wire a button from `RUN`
-  (pin 30) to GND for the taps. Still to try with a real button: the 10× full reset firing
-  (de-group + Wi-Fi + PIN) — not driven on the bench to avoid wiping it.
+- [x] **Power-cycle recovery ritual** — ✅ 2026-07-08, fully validated with a real `RUN`-pin
+  button: **5× cyan** clears the PIN (`auth.txt`, keeps group + Wi-Fi); **10× magenta** does the
+  full reset (de-group + clear Wi-Fi + PIN — confirmed by the Pico dropping off Wi-Fi, needing
+  `networks.txt` re-sent). Count commits (resets) the instant the boot reaches the animation, so
+  the reliable rule is "let it come up, then press again." Wire a momentary button from `RUN`
+  (pin 30) to GND; no debounce needed.
 - [x] **Missing-program status** — ✅ 2026-07-08: leader on a program the follower lacks →
   follower reports that program #, keeps its old file, shows red `noprogram` (blink) on LED 0;
   recovers automatically when the leader returns to a program it has.
