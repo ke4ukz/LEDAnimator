@@ -100,13 +100,14 @@ driven to 10 on the bench (would wipe it).
   (`_show_bootcount`) — immediate "it registered + you're at N", since there's otherwise
   nothing until the 5× cyan flash. `n == 1` stays silent (looks like a normal power-on).
 - **Model: interrupt the boot to climb; let it boot once to reset.** The count commits (resets
-  to 0) a short settle (~0.7 s) after the device **reaches its running loop** — i.e. the boot
-  *completed* instead of being interrupted by another reset. This replaced a wall-clock idle
-  timer (tried 12 s then 3 s): a timer is a hidden "just wait N seconds if you fumble", which is
-  bad UX, and the earlier "reset after the cyan flash" boundary let a steady ~1 s press rhythm
-  blow *through* the flash and overshoot toward magenta. Tying the reset to **boot completion**
-  makes it observable (you see the device come up / start playing = the window closed) and needs
-  no fixed wait.
+  to 0) **the instant the device reaches its running loop** — i.e. the boot *completed* instead
+  of being interrupted by another reset. `COMMIT_MS = 0`: no settle, so there's no gap after it
+  comes up where a press still continues the count (a ~0.7 s settle let "5 presses → let it
+  start → 5 more" reach magenta). This replaced a wall-clock idle timer (tried 12 s then 3 s):
+  a timer is a hidden "just wait N seconds if you fumble", which is bad UX; and an earlier
+  "reset after the cyan flash" boundary let a steady ~1 s press rhythm blow *through* the flash
+  and overshoot. Tying the reset to **boot completion** makes it observable (you see it come up /
+  start playing = the window closed exactly then) with no fixed wait.
 - **So:** press ~1 s apart to climb (each press interrupts before the boot finishes); **5 =
   cyan** (PIN cleared), keep going straight to **10 = magenta** (full reset). Fumbled the count?
   Just **let it boot once** (you'll see it start) and the count clears — then start over. Two

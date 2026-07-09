@@ -61,13 +61,13 @@ AUTH_RETRY_MS = 5000
 # faster than a boot (switch bounce, rapid taps) coalesce into one count — no debounce
 # needed. Fire a recovery action at each threshold; the physical ritual means a
 # forgotten PIN is never a permanent lockout.
-COMMIT_MS = 700           # settle AFTER the device reaches its running loop (see main), then
-                          # "commit" — reset the counter. Tied to boot COMPLETING (observable:
-                          # it starts running), not a wall clock, so recovering a fumbled count
-                          # is just "let it boot once", never a fixed wait. A ritual press
-                          # resets the board before this, so presses keep accumulating; stop and
-                          # the count clears ~0.7s after it comes up. (Model: interrupt to climb,
-                          # let it boot to reset.)
+COMMIT_MS = 0             # commit (reset the counter) as soon as the device REACHES its running
+                          # loop — the boot COMPLETED instead of being interrupted by another
+                          # reset. Literally "if it gets to the animation, the window is over":
+                          # NO settle, so there's no gap after it comes up where a press still
+                          # continues the count (that gap let 5 presses + let-it-start + 5 more
+                          # reach magenta). Presses interrupt before the loop, so they climb;
+                          # let it come up even once and the count clears at that instant.
 RECOVERY_UNLOCK = 5       # 5 short boots -> clear the PIN only (keep group + Wi-Fi)
 RECOVERY_FULL = 10        # 10 -> full reset: de-group + clear Wi-Fi + clear PIN
 
