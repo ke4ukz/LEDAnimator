@@ -40,6 +40,7 @@ different colors so you never have to count cycles:
 
 | Event | Color | Meaning |
 |---|---|---|
+| *progress* | dim white | Each counted reset from the **2nd** on lights that many pixels (1 pixel per count), so you get immediate "it registered / you're at N" feedback while cycling. `n == 1` stays silent (looks like a normal boot). |
 | `pin-cleared` | cyan | The 5th interrupted boot **cleared the PIN** (kept group + Wi-Fi) — the forgotten-PIN escape hatch. |
 | `factory-reset` | magenta | The 10th interrupted boot **full-reset**: de-grouped + cleared Wi-Fi + cleared the PIN. |
 

@@ -61,7 +61,11 @@ AUTH_RETRY_MS = 5000
 # faster than a boot (switch bounce, rapid taps) coalesce into one count — no debounce
 # needed. Fire a recovery action at each threshold; the physical ritual means a
 # forgotten PIN is never a permanent lockout.
-COMMIT_MS = 5000          # run this long uninterrupted -> "committed", counter resets to 0
+COMMIT_MS = 12000         # run this long uninterrupted -> "committed", counter resets to 0.
+                          # Generous on purpose: boot itself takes ~3s (compiling main.py) to
+                          # reach the counter, so a 5s window left only ~2s to re-press before
+                          # a reset "committed" and zeroed it. 12s gives a comfortable window;
+                          # normal use runs far longer, so it always commits between real boots.
 RECOVERY_UNLOCK = 5       # 5 short boots -> clear the PIN only (keep group + Wi-Fi)
 RECOVERY_FULL = 10        # 10 -> full reset: de-group + clear Wi-Fi + clear PIN
 
@@ -389,6 +393,22 @@ def _flash_strip(kind, ms):
         time.sleep_ms(140)
 
 
+def _show_bootcount(n):
+    # Power-cycle-ritual progress: light the first n pixels dim white so each
+    # counted reset is visible and you can see how close you are to a threshold
+    # (5 = cyan, 10 = magenta). Left lit; the role display overwrites it once the
+    # player loop starts. Non-blocking, so it adds no boot latency.
+    global _back, _front
+    m = n if n < STATUS_BLANK_LEDS else STATUS_BLANK_LEDS
+    _ensure_bufs(STATUS_BLANK_LEDS)
+    _fill_word(_back, STATUS_BLANK_LEDS, 0)
+    w = (80 << 24) | (80 << 16) | (80 << 8)   # dim white GRB word
+    for i in range(m):
+        _back[i] = w
+    _dma_kick(_back, STATUS_BLANK_LEDS)
+    _back, _front = _front, _back
+
+
 def _set_pin(arg):
     # Re-point the WS2812 output at a new GP pin at runtime and persist it, so a
     # single prebuilt firmware works for any wiring (no per-device UF2 needed).
@@ -624,6 +644,12 @@ def _recovery_check(n):
         _write_bootcount(0)             # terminal action — don't keep escalating
         print("recovery: full reset (%dx)" % n)
         _flash_strip("factory-reset", 1500)
+    elif n >= 2:
+        # Below a threshold but clearly mid-ritual (2nd+ quick reset): show the
+        # running count as lit pixels so each press gives immediate feedback. A
+        # lone normal boot (n == 1) is indistinguishable from a real power-on, so
+        # it stays silent — only the 2nd quick reset starts the progress display.
+        _show_bootcount(n)
 
 
 def _valid_pin(s):
