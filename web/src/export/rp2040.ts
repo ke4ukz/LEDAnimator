@@ -1558,6 +1558,15 @@ def dispatch(line, origin=None):
             S.auth_pin = None
             _save_auth()
             return "OK CLEARPASS"
+        if c == "BOOTSEL":
+            # Reboot into the RP2040 USB bootloader (the RPI-RP2 mass-storage
+            # drive) so a new firmware UF2 can be dropped on — no BOOTSEL button or
+            # picotool needed. The connection drops immediately (the chip resets);
+            # the client then watches for the RPI-RP2 drive and copies the .uf2.
+            # Auth-gated like any non-INFO command, so a locked device needs LOGIN.
+            import machine
+            machine.bootloader()
+            return None  # not reached — the device has reset into the bootloader
         if c == "INFO":
             # Lean, control-only (fetched on every connect). Same line the device
             # broadcasts on state change (see _state_line / _persist_state).

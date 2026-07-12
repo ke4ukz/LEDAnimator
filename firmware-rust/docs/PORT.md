@@ -123,9 +123,16 @@ in the repo docs.
 - **`memory.x` needs a `BOOT2` region** (0x100 @ 0x10000000); embassy-rp's
   `link-rp.x` fills it with a default boot2 + CRC.
 - **No way back to BOOTSEL in software yet.** Re-flashing needs the physical
-  BOOTSEL button. Worth adding a picotool **reset interface** (a tiny
-  `embassy-usb` device) so `picotool reboot -f -u` works — that turns one-shot
-  flashing into iterate-on-hardware.
+  BOOTSEL button. Two fixes, both worth doing:
+  - **Now (for CLI dev iteration):** a tiny `embassy-usb` device exposing the
+    **picotool reset interface** (+ a CDC serial for `defmt`/logging — the
+    observability this firmware totally lacks), so `picotool reboot -f -u` works.
+  - **At parity:** a **`BOOTSEL` control command** (reboot into the RP2040 USB
+    bootloader via the bootrom `reset_to_usb_boot`) matching the one the
+    MicroPython firmware already has (see [`protocol.md`](../../docs/protocol.md)
+    → Maintenance) — so the app/CLI can drop the device into the `RPI-RP2` drive
+    over BLE/Wi‑Fi and a new `.uf2` is dragged on. The old firmware installs the
+    new one, no button.
 
 ## Bench state (2026-07-09)
 

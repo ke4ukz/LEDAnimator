@@ -97,6 +97,19 @@ argument usually *queries* the value.
 | `NAME [new name]` | No arg reports the device name; with an arg, renames + persists. |
 | `PIN [n]` | No arg reports the strip's data GP pin; `PIN <n>` re-points it live (0–29) + persists. |
 
+### Maintenance
+
+| Command | Meaning |
+|---|---|
+| `BOOTSEL` | Reboot into the RP2040 **USB bootloader** (the `RPI-RP2` mass-storage drive) so a new firmware UF2 can be dropped on — no BOOTSEL button or `picotool` needed. The connection **drops immediately** (the chip resets), so there's no reply; the client then watches for the `RPI-RP2` drive to mount and copies the `.uf2`. Auth-gated like any non-`INFO` command. |
+
+The intended flow (a Mac-side "update firmware" gesture, or by hand): send
+`BOOTSEL` over the existing BLE/Wi‑Fi connection → the device appears as the
+`RPI-RP2` drive → drag/copy a firmware `.uf2` onto it → it flashes and reboots
+into the new firmware. Requires physical USB access, so it's a maintenance/dev
+operation, not an end-user one. (The Rust firmware will grow the same command
+once its control channel is ported; see [`../firmware-rust/docs/PORT.md`](../firmware-rust/docs/PORT.md).)
+
 ### Multi-device sync
 
 | Command | Meaning |
