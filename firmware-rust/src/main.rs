@@ -4,13 +4,14 @@
 mod fs;
 mod leda;
 mod panic; // registers the #[panic_handler] (LED-0 red flutter)
+mod radio; // CYW43 Wi-Fi + BT bring-up
 mod status;
 mod usb; // picotool reset interface + CDC serial logger
 mod ws2812;
 
 use core::ptr::{addr_of, addr_of_mut};
 use embassy_executor::Spawner;
-use embassy_rp::peripherals::{DMA_CH2, PIO1, USB};
+use embassy_rp::peripherals::{DMA_CH0, DMA_CH1, DMA_CH2, PIO0, PIO1, USB};
 use embassy_rp::pio::{InterruptHandler, Pio};
 use embassy_rp::usb::{Driver as UsbDriver, InterruptHandler as UsbInterruptHandler};
 use embassy_rp::{bind_interrupts, dma};
@@ -20,13 +21,13 @@ use littlefs2::path::Path;
 use static_cell::StaticCell;
 use ws2812::Ws2812;
 
-// WS2812 lives on PIO1 + DMA_CH2 so PIO0 + DMA_CH0/CH1 stay free for the CYW43
-// PioSpi (added in the networking phase). Both PIOs are identical, so GP0 output
-// is unaffected. See docs/PORT.md → Phase B. USBCTRL_IRQ drives the dev-tooling
-// USB device (reset interface + serial log — Phase C).
+// WS2812 lives on PIO1 + DMA_CH2; the CYW43 PioSpi lives on PIO0 + DMA_CH0/CH1
+// (Phase D). Both PIOs are identical, so GP0 output is unaffected. USBCTRL_IRQ
+// drives the dev-tooling USB device (reset interface + serial log — Phase C).
 bind_interrupts!(struct Irqs {
+    PIO0_IRQ_0 => InterruptHandler<PIO0>;
     PIO1_IRQ_0 => InterruptHandler<PIO1>;
-    DMA_IRQ_0 => dma::InterruptHandler<DMA_CH2>;
+    DMA_IRQ_0 => dma::InterruptHandler<DMA_CH0>, dma::InterruptHandler<DMA_CH1>, dma::InterruptHandler<DMA_CH2>;
     USBCTRL_IRQ => UsbInterruptHandler<USB>;
 });
 
@@ -77,6 +78,17 @@ async fn main(spawner: Spawner) {
         let pbuf = unsafe { &mut *addr_of_mut!(PATTERN_BUF) };
         load_selected(&fs, pbuf)
     };
+
+    // --- Radio bring-up (BootStage::Radio, dim blue). Blocking chip init; a dead
+    // chip hangs here and LED 0 stays blue. Wi-Fi join + BLE start later as tasks. ---
+    buf[0] = status::BootStage::Radio.led0_word();
+    ws.show(&buf[..]).await;
+    let mut radio = radio::init(
+        spawner, p.PIO0, p.DMA_CH0, p.DMA_CH1, p.PIN_23, p.PIN_25, p.PIN_24, p.PIN_29,
+    )
+    .await;
+    radio.control.gpio_set(0, true).await; // onboard LED on = radio alive
+    log::info!("radio up (CYW43 Wi-Fi + BT firmware loaded)");
 
     // Boot complete — brief green LED-0 flash.
     buf[0] = status::BootStage::Complete.led0_word();

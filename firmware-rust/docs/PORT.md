@@ -23,7 +23,7 @@ a **translation**, not a redesign — those docs are the language-agnostic contr
 | LED-0 status indicator (pulse/blink/solid) | ✅ core | [`status.rs`](../src/status.rs) |
 | LED-0 boot diagnostics (stage indicator, boot-error codes, panic flutter) | ✅ framework (per [`docs/led0-status.md`](../../docs/led0-status.md)); error/recovery rows wired as subsystems land; **panic bit-bang HW-validated 2026-07-12** | [`status.rs`](../src/status.rs), [`panic.rs`](../src/panic.rs) |
 | Master brightness scaling | ✅ (in `fill_grb`) | `leda.rs` |
-| CYW43 bring-up (Wi-Fi+BT firmware, on-chip LED) | ✅ **bench-validated 2026-07-12** (spike-coex) | — |
+| CYW43 bring-up (Wi-Fi+BT firmware, on-chip LED) | ✅ **in the real firmware, HW-validated 2026-07-13** (Phase D) | [`radio.rs`](../src/radio.rs) |
 | **Wi-Fi + BLE COEXISTENCE** (the migration decider) | ✅ **bench-validated 2026-07-12** — Wi-Fi scan loop + trouble-host BLE advertise run concurrently on the one radio | spike-coex |
 | Config files / littlefs on flash | ✅ **read + write HW-validated 2026-07-12** — reads `selected.txt`/`bright.txt` + plays the selected `.leda` from the real web-written fs; flash **writes persist across reboots** (proven with a boot-counter round-trip). `fs.read`/`fs.write`/`fs.remove` all work. | [`fs.rs`](../src/fs.rs), [`main.rs`](../src/main.rs) |
 | Unified networking dep graph (cyw43+trouble+net+usb+littlefs) | ✅ **resolved + builds 2026-07-13** (Phase A; embassy main `9ae6c57`) | [`spike-graph/`](../spike-graph/) |
@@ -180,12 +180,29 @@ Spawned from `main` (`USBCTRL_IRQ` bound); `log::info!` heartbeat every ~5 s + a
   log readable on `/dev/cu.usbmodem*` (e.g. `screen /dev/cu.usbmodem* 115200`).
   **Once `reboot -f -u` works: the physical BOOTSEL button is retired.**
 
-### Phase D — CYW43 bring-up in the player
-- Fold in `cyw43::new_with_bluetooth` (from the spike): fw + btfw + clm + the real
-  **`nvram_rp2040.bin`** (empty nvram hangs init — see Gotchas); `control.init(clm)`;
-  wire `BootStage::Radio` (dim blue) + the `blue·red` radio error codes; onboard LED
-  via `control.gpio_set` as a liveness check.
-- Validate: radio up (onboard LED) while the pattern plays.
+### Phase D — CYW43 bring-up in the player — ✅ DONE (HW-validated 2026-07-13)
+[`src/radio.rs`](../src/radio.rs): `cyw43::new_with_bluetooth` (fw + btfw + clm +
+real `nvram_rp2040.bin`) on **PIO0 + DMA_CH0/CH1**, spawns the runner, `control.init`,
+onboard LED on via `control.gpio_set(0, true)`. Wired as `BootStage::Radio` (dim
+blue) — a **blocking** boot step: a dead chip hangs in init and LED 0 stays frozen
+blue (the designed hang-on-stage behavior). Returns `Radio { control, net_device,
+bt_device }` for Phases E/F.
+- **Design split (parity reconciliation):** the CYW43 *chip* comes up at boot
+  (blocking, fatal-on-hang — a dead radio = RMA); *joining a Wi-Fi AP* is a separate
+  background, non-fatal step (Phase F), matching MicroPython's lazy join and the
+  `Wifi=Warn` codes. So the pattern's start is delayed only by the ~sub-second chip
+  init, not by network association.
+- **Validated by control flow:** `radio::init()` is `await`ed *before* the play loop,
+  so the steady serial heartbeats (`alive — frame N/M`) prove init returned — a
+  non-responsive chip would hang with no heartbeats. Player + cyw43 runner coexist
+  (steady frame progress). Onboard LED driven on = radio-alive (visual confirm bench).
+- **First flash via the button-free workflow** (`picotool reboot -f -u` →
+  `load -x`), no BOOTSEL button. UF2 grew to 648 KB (embeds the 231 KB Wi-Fi + 6 KB
+  BT firmware blobs).
+- Observability note: the one-shot boot logs are emitted before the host re-opens
+  the CDC (~2 s post-reboot) so they're dropped; steady-state heartbeats are the
+  reliable signal. A richer periodic status line lands with the networking phases
+  (dynamic Wi-Fi/BLE state to report).
 
 ### Phase E+ — the rest
 Then the numbered contract below: recovery ritual (pure littlefs logic — bootcount
