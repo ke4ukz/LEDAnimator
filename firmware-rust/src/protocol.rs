@@ -94,6 +94,13 @@ fn cfg_path(nul: &[u8]) -> &Path {
     Path::from_bytes_with_nul(nul).unwrap()
 }
 
+/// Copy a `&str` into an owned heapless string (to drop a lock before using it).
+fn heapless_of(s: &str) -> String<64> {
+    let mut out = String::new();
+    let _ = out.push_str(s);
+    out
+}
+
 /// Persist a small config file (best-effort).
 async fn write_cfg(fs: &SharedFs, name: &[u8], contents: &[u8]) {
     let f = fs.lock().await;
@@ -357,9 +364,46 @@ pub async fn dispatch(line: &str, fs: &SharedFs, sink: &mut impl LineSink, conn:
             embassy_rp::rom_data::reset_to_usb_boot(0, 0);
         }
 
-        // --- Read-only status queries. Sensible defaults until Wi-Fi/sync/power land,
-        // so the app's Info pane gets clean answers instead of an ERR-unknown popup. ---
-        "WIFISTATUS" => sink.send("WIFI off").await,
+        // --- Wi-Fi provisioning: stash SSID/pass, then WIFICONNECT writes
+        // networks.txt + nudges the manager to join (no reboot). ---
+        "WIFISSID" => {
+            crate::wifi::PENDING.lock().await.0.set(arg);
+            sink.send("OK WIFISSID").await;
+        }
+        "WIFIPASS" => {
+            crate::wifi::PENDING.lock().await.1.set(arg);
+            sink.send("OK WIFIPASS").await;
+        }
+        "WIFICONNECT" => {
+            let (ssid, pass) = {
+                let p = crate::wifi::PENDING.lock().await;
+                (heapless_of(p.0.as_str()), heapless_of(p.1.as_str()))
+            };
+            if ssid.is_empty() {
+                sink.send("ERR no-ssid").await;
+            } else {
+                let mut buf: String<160> = String::new();
+                let _ = write!(buf, "{}\n{}", ssid.as_str(), pass.as_str());
+                write_cfg(fs, b"networks.txt\0", buf.as_bytes()).await;
+                crate::wifi::CONNECT_SIG.signal(());
+                sink.send("OK WIFICONNECT").await;
+            }
+        }
+        "WIFIFORGET" => {
+            {
+                let f = fs.lock().await;
+                let _ = f.remove(cfg_path(b"networks.txt\0"));
+            }
+            crate::wifi::CONNECT_SIG.signal(());
+            sink.send("OK WIFIFORGET").await;
+        }
+        "WIFISTATUS" => {
+            let s = crate::wifi::status_line().await;
+            sink.send(&s).await;
+        }
+
+        // --- Read-only status queries. Sensible defaults until sync/power land, so
+        // the app's Info pane gets clean answers instead of an ERR-unknown popup. ---
         "POWER" => sink.send("POWER unknown 0").await,
         "ROLE" => sink.send("ROLE standalone").await,
         "GROUP" => sink.send("GROUP 0").await,
