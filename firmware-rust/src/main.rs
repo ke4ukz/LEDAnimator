@@ -11,6 +11,7 @@ mod recovery; // power-cycle recovery ritual
 mod state; // shared control state (mode / brightness / speed)
 mod status;
 mod usb; // picotool reset interface + CDC serial logger
+mod wifi; // Wi-Fi join + TCP control server
 mod ws2812;
 
 use core::ptr::{addr_of, addr_of_mut};
@@ -141,9 +142,27 @@ async fn main(spawner: Spawner) {
     radio.control.gpio_set(0, true).await; // onboard LED on = radio alive
     log::info!("radio up (CYW43 Wi-Fi + BT firmware loaded)");
 
-    // Start the BLE control channel (owns the CYW43 BT HCI). net_device + control
-    // stay held for the Wi-Fi phase.
+    // Start the BLE control channel (owns the CYW43 BT HCI).
     spawner.spawn(ble::ble_task(radio.bt_device).unwrap());
+
+    // --- Wi-Fi: auto-join if networks.txt has credentials (non-fatal; the pattern
+    // plays regardless). Brings up embassy-net + the TCP control server on :4550. ---
+    if let Some((ssid, pass)) = read_wifi_creds(&fs) {
+        static NET_RES: StaticCell<embassy_net::StackResources<4>> = StaticCell::new();
+        let net_res = NET_RES.init(embassy_net::StackResources::new());
+        let (stack, net_runner) = embassy_net::new(
+            radio.net_device,
+            embassy_net::Config::dhcpv4(Default::default()),
+            net_res,
+            0x0123_4567_89ab_cdef,
+        );
+        spawner.spawn(wifi::net_runner_task(net_runner).unwrap());
+        spawner.spawn(wifi::wifi_task(radio.control, ssid, pass).unwrap());
+        spawner.spawn(wifi::tcp_task(stack).unwrap());
+        log::info!("wifi: configured — bringing up");
+    } else {
+        log::info!("wifi: no networks.txt — skipping");
+    }
 
     // Boot complete — brief green LED-0 flash.
     buf[0] = status::BootStage::Complete.led0_word();
@@ -263,6 +282,24 @@ fn read_cfg_line(fs: &fs::Fs, name_nul: &[u8]) -> Option<heapless::String<64>> {
     let mut out = heapless::String::new();
     out.push_str(s).ok()?;
     Some(out)
+}
+
+/// Read Wi-Fi credentials from `networks.txt` (line 1 = SSID, line 2 = password).
+/// `None` if the file is missing or has no SSID.
+fn read_wifi_creds(fs: &fs::Fs) -> Option<(heapless::String<64>, heapless::String<64>)> {
+    let v = fs.read::<160>(Path::from_bytes_with_nul(b"networks.txt\0").ok()?).ok()?;
+    let s = core::str::from_utf8(&v).ok()?;
+    let mut lines = s.split('\n');
+    let ssid = lines.next()?.trim();
+    if ssid.is_empty() {
+        return None;
+    }
+    let pass = lines.next().unwrap_or("").trim_end_matches(['\r', '\n']);
+    let mut ss = heapless::String::new();
+    ss.push_str(ssid).ok()?;
+    let mut pp = heapless::String::new();
+    pp.push_str(pass).ok()?;
+    Some((ss, pp))
 }
 
 /// Master brightness **percent** (0..=100) from `bright.txt`, full if unset.
