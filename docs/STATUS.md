@@ -54,6 +54,9 @@ A snapshot of what works today and what's next. Updated July 2026.
 - **More companions** — Windows/Android; a standalone watch remote.
 - **More export targets** — ATmega328 (Arduino) and Raspberry Pi are profiled in
   the exporter but their export paths aren't built.
+- **Shuffle / randomize animation-number assignment** (web) — a one-click way to
+  randomly (re)assign program numbers across animations instead of setting each by
+  hand. Small nice-to-have; someday.
 - **Longer-term directions** (design captured, not built) — browser-side pattern
   **scripting** (a procedural *texture* source, and a *global control function*
   that sees every LED's 3-D position + time, both baked to `.leda`); a **compiled

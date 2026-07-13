@@ -1,0 +1,70 @@
+[package]
+name = "graph-spike"
+version = "0.1.0"
+edition = "2021"
+resolver = "2"
+description = "Phase-A spike: prove the ONE unified dep graph (networking + USB + littlefs) resolves, compiles & links for thumbv6m"
+
+# The migration gate. spike-coex proved cyw43 + trouble coexist on embassy git rev
+# `1d3c3de`, but that rev's embassy-usb was broken by an embedded-io skew, so USB
+# (picotool-reset + serial logging) was impossible there. On embassy main today
+# (rev 9ae6c57, 2026-07-12), cyw43 has moved to bt-hci 0.9 (matching trouble-host
+# 0.7) AND embassy-usb is on embedded-io-async 0.7.0 (matching everything) — so the
+# skew that broke USB should be gone. This spike ADDS embassy-usb + usb-logger +
+# embassy-net + littlefs(fork) on top of the proven coex set to confirm they all
+# build together. Nothing else in the migration starts until this compiles+links.
+[dependencies]
+# --- embassy (all one git rev; see [patch] below) ---
+embassy-executor = { version = "0.10", features = ["platform-cortex-m", "executor-thread"] }
+embassy-rp = { version = "0.10", features = ["rp2040", "time-driver", "critical-section-impl", "unstable-pac"] }
+embassy-time = "0.5"
+embassy-sync = "0.8"
+embassy-futures = "0.1"
+embassy-net = { version = "0.9", features = ["tcp", "udp", "dhcpv4", "medium-ethernet"] }
+embassy-usb = "0.6"
+embassy-usb-logger = "0.6"
+
+# --- radio + BLE (crates.io; both now agree on bt-hci 0.9) ---
+cyw43 = { version = "0.7", features = ["bluetooth"] }
+cyw43-pio = "0.10"
+trouble-host = { version = "0.7", features = ["default-packet-pool-mtu-128"] }
+bt-hci = "0.9"
+
+# --- storage (same as the player: our disk-2.1 littlefs fork + C string fns) ---
+littlefs2 = { version = "0.8", default-features = false }
+littlefs2-sys = { version = "0.4", features = ["tinyrlibc"] }
+delog = { version = "0.1", features = ["portable-atomic"] }
+
+# --- glue ---
+cortex-m = { version = "0.7.7", features = ["inline-asm"] }
+cortex-m-rt = "0.7.5"
+panic-halt = "1"
+static_cell = "2"
+portable-atomic = { version = "1", features = ["critical-section"] }
+fixed = "1"
+log = "0.4"
+
+# All embassy + cyw43 crates from ONE embassy commit so bt-hci / embassy-sync /
+# embedded-io versions line up (the "one rev = no skew" rule from spike-coex). Bump
+# from the spike's 1d3c3de to today's main (9ae6c57) to pick up the embassy-usb
+# embedded-io fix. littlefs2 = our disk-2.1 fork (see firmware-rust/Cargo.toml).
+[patch.crates-io]
+embassy-executor = { git = "https://github.com/embassy-rs/embassy.git", rev = "9ae6c574e20d6e21ab19f31575adbc4559f3d082" }
+embassy-rp = { git = "https://github.com/embassy-rs/embassy.git", rev = "9ae6c574e20d6e21ab19f31575adbc4559f3d082" }
+embassy-time = { git = "https://github.com/embassy-rs/embassy.git", rev = "9ae6c574e20d6e21ab19f31575adbc4559f3d082" }
+embassy-sync = { git = "https://github.com/embassy-rs/embassy.git", rev = "9ae6c574e20d6e21ab19f31575adbc4559f3d082" }
+embassy-futures = { git = "https://github.com/embassy-rs/embassy.git", rev = "9ae6c574e20d6e21ab19f31575adbc4559f3d082" }
+embassy-net = { git = "https://github.com/embassy-rs/embassy.git", rev = "9ae6c574e20d6e21ab19f31575adbc4559f3d082" }
+embassy-usb = { git = "https://github.com/embassy-rs/embassy.git", rev = "9ae6c574e20d6e21ab19f31575adbc4559f3d082" }
+embassy-usb-logger = { git = "https://github.com/embassy-rs/embassy.git", rev = "9ae6c574e20d6e21ab19f31575adbc4559f3d082" }
+cyw43 = { git = "https://github.com/embassy-rs/embassy.git", rev = "9ae6c574e20d6e21ab19f31575adbc4559f3d082" }
+cyw43-pio = { git = "https://github.com/embassy-rs/embassy.git", rev = "9ae6c574e20d6e21ab19f31575adbc4559f3d082" }
+littlefs2 = { git = "https://github.com/ke4ukz/littlefs2.git", rev = "b008a1e" }
+
+[profile.dev]
+opt-level = "s"
+
+[profile.release]
+codegen-units = 1
+lto = "fat"
+opt-level = "s"

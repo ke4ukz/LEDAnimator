@@ -5,23 +5,58 @@ edition = "2021"
 resolver = "2"
 description = "LED Animator device firmware — Rust port of the MicroPython player (see ../web/src/export/rp2040.ts)"
 
+# --- MIGRATED 2026-07-12 onto the unified networking graph (docs/PORT.md Phase A/B). ---
+# Everything embassy comes from ONE git rev (see [patch] below) so that, as
+# networking lands (cyw43 + trouble + embassy-net + embassy-usb), it all resolves
+# against the SAME bt-hci / embassy-sync / embedded-io — the graph proven in
+# spike-graph/. The player itself only needs the crates below; networking deps are
+# added in their own phases (C: usb, D: cyw43).
 [dependencies]
-embassy-executor = { version = "0.7", features = ["arch-cortex-m", "executor-thread"] }
-embassy-rp = { version = "0.4", features = ["rp2040", "time-driver", "critical-section-impl"] }
-embassy-time = { version = "0.4" }
-embassy-sync = { version = "0.6" }
+embassy-executor = { version = "0.10", features = ["platform-cortex-m", "executor-thread"] }
+embassy-rp = { version = "0.10", features = ["rp2040", "time-driver", "critical-section-impl"] }
+embassy-time = { version = "0.5" }
+embassy-sync = { version = "0.8" }
 embassy-futures = { version = "0.1" }
+# USB dev tooling (Phase C): picotool reset interface (→ no BOOTSEL button) + a
+# CDC-ACM serial logger (the firmware's first real observability).
+embassy-usb = { version = "0.6" }
+embassy-usb-logger = { version = "0.6" }
+log = "0.4"
 
 cortex-m = { version = "0.7.7", features = ["inline-asm"] }
 cortex-m-rt = "0.7.5"
-panic-halt = "1"
 fixed = "1"
 static_cell = "2"
+# littlefs on the QSPI flash — reads the SAME on-flash fs the web UF2 builds
+# (block 4096 × 212 @ 0x1012c000, prog 256). C-backed (littlefs2-sys); cross-built
+# for thumbv6m via arm-none-eabi-gcc. See docs/PORT.md §1.
+littlefs2 = { version = "0.8", default-features = false }
+# littlefs2 → delog (logging) uses core atomic CAS, which thumbv6m (M0+) lacks.
+# delog's `portable-atomic` feature routes it to portable-atomic, whose
+# `critical-section` feature (enabled above) supplies the CAS polyfill.
+delog = { version = "0.1", features = ["portable-atomic"] }
+# littlefs's C path parsing (lfs_dir_find) calls strspn/strcspn/strchr — not in
+# no_std. littlefs2-sys's `tinyrlibc` feature supplies these C string functions.
+littlefs2-sys = { version = "0.4", features = ["tinyrlibc"] }
 # RP2040 is Cortex-M0+ (thumbv6m): no native atomic CAS. Emulate it via
 # critical-section so static_cell / embassy atomics compile.
 portable-atomic = { version = "1", features = ["critical-section"] }
 
-# Fast enough to hold framerate even in dev; embassy is unhappy at opt-level 0.
+# All embassy + cyw43 crates from ONE embassy commit so bt-hci / embassy-sync /
+# embedded-io line up as networking lands (proven in spike-graph/ → STATUS.md). On
+# this rev (main, 2026-07-12) cyw43 uses bt-hci 0.9 (matches trouble-host 0.7) AND
+# embassy-usb is on embedded-io-async 0.7 (the fix that un-broke USB). Bump only in
+# lockstep with trouble-host. littlefs2 = our disk-2.1 fork (DISK_VERSION → 2.1).
+[patch.crates-io]
+embassy-executor = { git = "https://github.com/embassy-rs/embassy.git", rev = "9ae6c574e20d6e21ab19f31575adbc4559f3d082" }
+embassy-rp = { git = "https://github.com/embassy-rs/embassy.git", rev = "9ae6c574e20d6e21ab19f31575adbc4559f3d082" }
+embassy-time = { git = "https://github.com/embassy-rs/embassy.git", rev = "9ae6c574e20d6e21ab19f31575adbc4559f3d082" }
+embassy-sync = { git = "https://github.com/embassy-rs/embassy.git", rev = "9ae6c574e20d6e21ab19f31575adbc4559f3d082" }
+embassy-futures = { git = "https://github.com/embassy-rs/embassy.git", rev = "9ae6c574e20d6e21ab19f31575adbc4559f3d082" }
+embassy-usb = { git = "https://github.com/embassy-rs/embassy.git", rev = "9ae6c574e20d6e21ab19f31575adbc4559f3d082" }
+embassy-usb-logger = { git = "https://github.com/embassy-rs/embassy.git", rev = "9ae6c574e20d6e21ab19f31575adbc4559f3d082" }
+littlefs2 = { git = "https://github.com/ke4ukz/littlefs2.git", rev = "b008a1e" }
+
 [profile.dev]
 opt-level = "s"
 

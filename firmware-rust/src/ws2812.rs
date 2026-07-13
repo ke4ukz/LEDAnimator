@@ -14,10 +14,10 @@
 //! the async equivalent of the Python's "kick DMA, do work, then sleep" loop.
 
 use embassy_rp::clocks::clk_sys_freq;
-use embassy_rp::dma::{AnyChannel, Channel};
+use embassy_rp::dma::{self, Channel, ChannelInstance};
 use embassy_rp::pio::program as piolib; // the `pio` crate, re-exported by embassy-rp
 use embassy_rp::pio::{Common, Config, FifoJoin, Instance, PioPin, ShiftConfig, ShiftDirection, StateMachine};
-use embassy_rp::{into_ref, Peripheral, PeripheralRef};
+use embassy_rp::{interrupt, Peri};
 use embassy_time::Timer;
 use fixed::types::U24F8;
 
@@ -35,19 +35,18 @@ pub fn grb_word(r: u8, g: u8, b: u8) -> u32 {
 }
 
 pub struct Ws2812<'d, P: Instance, const S: usize> {
-    dma: PeripheralRef<'d, AnyChannel>,
+    dma: Channel<'d>,
     sm: StateMachine<'d, P, S>,
 }
 
 impl<'d, P: Instance, const S: usize> Ws2812<'d, P, S> {
-    pub fn new(
+    pub fn new<D: ChannelInstance>(
         common: &mut Common<'d, P>,
         mut sm: StateMachine<'d, P, S>,
-        dma: impl Peripheral<P = impl Channel> + 'd,
-        pin: impl PioPin,
+        dma: Peri<'d, D>,
+        irq: impl interrupt::typelevel::Binding<D::Interrupt, dma::InterruptHandler<D>> + 'd,
+        pin: Peri<'d, impl PioPin>,
     ) -> Self {
-        into_ref!(dma);
-
         // Assemble the WS2812 program (side-set drives the data line; the T1/T2/T3
         // delays shape the 1-vs-0 pulse widths). Copied from embassy's ws2812.
         let side_set = piolib::SideSet::new(false, 1, false);
@@ -86,13 +85,13 @@ impl<'d, P: Instance, const S: usize> Ws2812<'d, P, S> {
         sm.set_config(&cfg);
         sm.set_enable(true);
 
-        Self { dma: dma.map_into(), sm }
+        Self { dma: Channel::new(dma, irq), sm }
     }
 
     /// Shift out one frame of GRB<<8 words (one per LED). Awaits the DMA, then
     /// holds the >50 µs reset latch before returning.
     pub async fn show(&mut self, words: &[u32]) {
-        self.sm.tx().dma_push(self.dma.reborrow(), words, false).await;
+        self.sm.tx().dma_push(&mut self.dma, words, false).await;
         Timer::after_micros(60).await;
     }
 }

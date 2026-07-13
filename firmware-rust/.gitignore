@@ -1,2 +1,3 @@
-/target
+# Rust build artifacts — any `target/` at any depth (firmware-rust + spike-coex)
+target/
 *.uf2

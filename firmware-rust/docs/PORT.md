@@ -21,8 +21,14 @@ a **translation**, not a redesign — those docs are the language-agnostic contr
 | WS2812 output (PIO + DMA, variable length) | ✅ | [`ws2812.rs`](../src/ws2812.rs) |
 | LEDA v1 format parse + fixed-rate player | ✅ (embedded test pattern) | [`leda.rs`](../src/leda.rs), [`main.rs`](../src/main.rs) |
 | LED-0 status indicator (pulse/blink/solid) | ✅ core | [`status.rs`](../src/status.rs) |
+| LED-0 boot diagnostics (stage indicator, boot-error codes, panic flutter) | ✅ framework (per [`docs/led0-status.md`](../../docs/led0-status.md)); error/recovery rows wired as subsystems land; **panic bit-bang HW-validated 2026-07-12** | [`status.rs`](../src/status.rs), [`panic.rs`](../src/panic.rs) |
 | Master brightness scaling | ✅ (in `fill_grb`) | `leda.rs` |
-| Config files / littlefs on flash | ⏳ not started | — |
+| CYW43 bring-up (Wi-Fi+BT firmware, on-chip LED) | ✅ **bench-validated 2026-07-12** (spike-coex) | — |
+| **Wi-Fi + BLE COEXISTENCE** (the migration decider) | ✅ **bench-validated 2026-07-12** — Wi-Fi scan loop + trouble-host BLE advertise run concurrently on the one radio | spike-coex |
+| Config files / littlefs on flash | ✅ **read + write HW-validated 2026-07-12** — reads `selected.txt`/`bright.txt` + plays the selected `.leda` from the real web-written fs; flash **writes persist across reboots** (proven with a boot-counter round-trip). `fs.read`/`fs.write`/`fs.remove` all work. | [`fs.rs`](../src/fs.rs), [`main.rs`](../src/main.rs) |
+| Unified networking dep graph (cyw43+trouble+net+usb+littlefs) | ✅ **resolved + builds 2026-07-13** (Phase A; embassy main `9ae6c57`) | [`spike-graph/`](../spike-graph/) |
+| Player migrated onto that graph (PIO1+DMA_CH2) | ✅ **HW-validated 2026-07-13** (Phase B) | `ws2812.rs`, `main.rs` |
+| USB dev tooling: picotool reset iface + CDC serial logger | ✅ **HW-validated 2026-07-13** (Phase C) — `reboot -f -u` → BOOTSEL no button; serial log works | [`usb.rs`](../src/usb.rs) |
 | BLE control (advertise + GATT + dispatch) | 📋 planned | — |
 | Wi-Fi provisioning + TCP :4550 + UDP discovery | 📋 planned | — |
 | Multi-device sync (beacon + follower PLL) | 📋 planned | — |
@@ -80,10 +86,118 @@ Key deps (pinned in `Cargo.toml` / `Cargo.lock`): `embassy-executor`,
 | `_STATUS` / `_status_env` / `_show_status` | `status.rs` | pulse/blink/solid envelopes off the ms clock. |
 | player loop (open/reload/render at fps) | `main.rs` | `Ticker` for fixed-rate; boot-clears the strip first. |
 
+## Forward plan — the networking migration (next major phase, 2026-07-12)
+
+Local storage (mount + read + **write**) is DONE and hardware-validated on the
+player's **embassy-rp 0.4** (crates.io) graph. Everything networking (CYW43, BLE,
+Wi‑Fi) needs the newer graph the **coex spike** proved. Decision: rather than bolt
+USB/networking onto 0.4 and redo it, **migrate once** to the final graph and do USB
+"right" there (the picotool reset interface + serial logging belong to this phase,
+not a 0.4 hack). littlefs code ports as‑is (`embedded-storage` traits are stable).
+
+### Phase A — Resolve ONE unified dependency graph (GATE) — ✅ DONE 2026-07-12
+**RESOLVED.** Approach (b) won: a **newer embassy git rev**. On embassy main today
+(`9ae6c574e20d6e21ab19f31575adbc4559f3d082`, 2026-07-12) cyw43 has moved to
+**bt-hci 0.9** (matching trouble-host 0.7) and embassy-usb is on
+**embedded-io-async 0.7.0** (matching cyw43 + bt-hci) — so the embedded-io skew
+that broke USB on the old coex rev `1d3c3de` is **gone**. Pure crates.io (approach a)
+is still blocked: published cyw43 0.7.0 pins `bt-hci ^0.8` while trouble-host 0.7.0
+pins `^0.9` (no overlap) — only embassy's *git* cyw43 has caught up to 0.9.
+
+The proven graph (spike lives at [`../spike-graph/`](../spike-graph/), builds
+clean, 0 warnings, 371 KB ELF; recipe + version table in
+[`spike-graph/STATUS.md`](../spike-graph/STATUS.md)):
+- **`[patch.crates-io]` all embassy + cyw43 + cyw43-pio → embassy git rev
+  `9ae6c574e20d6e21ab19f31575adbc4559f3d082`.**
+- `trouble-host = "0.7"` + `bt-hci = "0.9"` from **crates.io** (they resolve to the
+  same bt-hci 0.9.0 as cyw43 → `ExternalController::new(bt_device)` type-checks).
+- `littlefs2` = ke4ukz fork rev `b008a1e`; littlefs2-sys(tinyrlibc) + delog(portable-atomic) crates.io.
+- **API deltas vs the player's 0.4 graph** (Phase B must apply these): executor
+  feature `platform-cortex-m` (not `arch-cortex-m`); `PioSpi::new` takes **two** DMA
+  channels via `dma::Channel::new(ch, Irqs)`; cyw43 `Runner`/`SpiBus` gained the
+  `Cyw43439` generic; DMA IRQs bind through `dma::InterruptHandler`. Exact call
+  shapes are in [`spike-graph/src/main.rs`](../spike-graph/src/main.rs).
+- Deliverable met: the spike stub wires cyw43 BT→trouble, embassy-usb-logger over
+  the rp `usb::Driver`, embassy-net over the cyw43 net driver, and littlefs(fork)
+  all in one crate. **Gate cleared — Phase B may start.**
+
+### Phase B — Migrate the player crate onto that graph — ✅ DONE (HW-validated 2026-07-12)
+Player crate moved onto the Phase-A graph (embassy git rev `9ae6c57`). Builds clean
+(0 warnings), UF2 57.9 KB (≈ the 0.4 build). **Bench-validated 2026-07-12: green
+boot flash then the selected `.leda` plays** — reads the real littlefs config and
+drives GP0 via **PIO1 + DMA_CH2** on the new git-embassy HAL. Changes applied:
+- `Cargo.toml`: deps → `platform-cortex-m` executor feat + all embassy patched to the git rev.
+- `ws2812.rs`: struct field `PeripheralRef<AnyChannel>` → `dma::Channel<'d>`; ctor now
+  `new<D: ChannelInstance>(common, sm, dma: Peri<D>, irq, pin: Peri<impl PioPin>)`
+  building `dma::Channel::new(dma, irq)`; `show` → `dma_push(&mut self.dma, …)`.
+  (Assembler body unchanged — `pio::program` re-export still present.)
+- `main.rs`: **WS2812 moved to PIO1 + DMA_CH2** (PIO0 + DMA_CH0/CH1 reserved for the
+  CYW43 PioSpi in Phase D, so WS2812 won't need re-validating then); `Irqs` now binds
+  `PIO1_IRQ_0` + `DMA_IRQ_0 => dma::InterruptHandler<DMA_CH2>`; `Ws2812::new` gets `Irqs`.
+- `fs.rs`, `panic.rs`, `leda.rs`, `status.rs`: **no changes needed** — `Flash`
+  (`new_blocking`/`blocking_read`/`blocking_write`/`blocking_erase`), `Output::new`,
+  and `Peripherals::steal()` are all API-stable across the move.
+
+Validation target: reads the existing littlefs (`selected.txt`/`bright.txt`) and plays
+the selected `.leda` on GP0 — now via PIO1/CH2. Once the strip confirms → Phase B DONE.
+
+Original delta notes (the same ones that hit porting the coex `PioSpi`):
+- `ws2812.rs`: `Peripheral`/`PeripheralRef`/`into_ref!` → `Peri<'d, T>`; PIO
+  `Common`/`StateMachine` deltas; DMA `Channel::new(ch, Irqs)`.
+- `main.rs`: `Pio::new`, DMA binding, `Flash::new_blocking` (new Flash API),
+  `Output`, `bind_interrupts`.
+- `panic.rs`: `Output` + `Peripherals::steal` — re-verify on the new rev.
+- `status.rs`/`leda.rs`/`fs.rs`: HAL-light; `fs.rs` uses embassy-rp `Flash`
+  (`embedded-storage`, stable). Re-confirm `blocking_read`/`blocking_write`/`blocking_erase`.
+- **PIO/DMA allocation:** cyw43 `PioSpi` needs a PIO + 2 DMA (CH0+CH1); WS2812 needs
+  a PIO SM + 1 DMA. Put **WS2812 on PIO1**, **cyw43 on PIO0**; give WS2812 its own
+  DMA channel. (RP2040/RP2350 both have PIO0+PIO1.)
+- Validate: flash once (button), the selected pattern still plays.
+
+### Phase C — USB dev tooling (do it right, once) — ✅ DONE (HW-validated 2026-07-13)
+**Full button-free cycle proven on the bench:** running firmware →
+`picotool reboot -f -u` drops to BOOTSEL (no button) → `picotool load -x` reflashes
+→ back to playing, serial re-enumerates as `/dev/cu.usbmodemLEDA_00012` in ~2 s. CDC
+serial logger streams real telemetry (caught `alive — frame 120/180` heartbeat).
+**The physical BOOTSEL button is retired** — all further dev iteration is CLI.
+Details below.
+
+
+Built [`src/usb.rs`](../src/usb.rs): one embassy-usb device with **(1)** a picotool
+**reset interface** — vendor iface `0xFF`/`0x00`/`0x01`, a `Handler::control_out`
+that on a Class-to-Interface request with `bRequest 0x01` calls
+`embassy_rp::rom_data::reset_to_usb_boot(0, 0)` — and **(2)** a **CDC-ACM serial
+logger** (`embassy-usb-logger` `with_class!`, attached to the same `Builder`).
+Spawned from `main` (`USBCTRL_IRQ` bound); `log::info!` heartbeat every ~5 s + a
+"playing: N leds…" line so serial is verifiable anytime. Builds clean, UF2 **87.5 KB**
+(+30 KB for the USB stack). API note (this embassy rev): `#[task]` fns return
+`Result<SpawnToken,_>` and `Spawner::spawn` returns `()`, so spawn as
+`spawner.spawn(task(args).unwrap())`.
+- **PENDING: one last BOOTSEL-button flash** of `led-animator-phaseC.uf2` (Phase B
+  on the bench has no reset interface yet, so this first flash still needs the button).
+- Validate after flashing: `picotool reboot -f -u` drops the running device to
+  BOOTSEL (no button); `picotool load -x led-animator-phaseC.uf2` reflashes; serial
+  log readable on `/dev/cu.usbmodem*` (e.g. `screen /dev/cu.usbmodem* 115200`).
+  **Once `reboot -f -u` works: the physical BOOTSEL button is retired.**
+
+### Phase D — CYW43 bring-up in the player
+- Fold in `cyw43::new_with_bluetooth` (from the spike): fw + btfw + clm + the real
+  **`nvram_rp2040.bin`** (empty nvram hangs init — see Gotchas); `control.init(clm)`;
+  wire `BootStage::Radio` (dim blue) + the `blue·red` radio error codes; onboard LED
+  via `control.gpio_set` as a liveness check.
+- Validate: radio up (onboard LED) while the pattern plays.
+
+### Phase E+ — the rest
+Then the numbered contract below: recovery ritual (pure littlefs logic — bootcount
+5×/10× thresholds, commit-on-boot), Wi‑Fi (embassy-net TCP :4550 + UDP
+`LEDADISCOVER`), BLE control + sync (trouble NUS + connectionless beacon
+advertise/scan + follower PLL), auth PIN (`sha2` challenge-response), power sensing,
+and the **`BOOTSEL` protocol command** (app-driven firmware update over BLE/Wi‑Fi).
+
 ## Remaining work — the plan
 
 The order mirrors the Python's own build order. Each piece has a settled contract
-in the repo docs.
+in the repo docs. (Item 1 — config + littlefs — is **DONE**; see the status table.)
 
 1. **Config + littlefs on flash.** The Python reads `datapin.txt`, `bright.txt`,
    `selected.txt`, `state.txt`, `syncflags.txt`, `auth.txt`, `bootcount.txt`,
@@ -120,8 +234,58 @@ in the repo docs.
   for `core`".
 - **`portable-atomic` `critical-section` feature** is required — Cortex-M0+ has no
   native atomic CAS, so `static_cell`/embassy won't compile without it.
+- **littlefs2 drags in `delog`, which needs atomic CAS.** thumbv6m lacks it, so
+  delog fails to compile until you add a direct `delog = { features =
+  ["portable-atomic"] }` dep — that routes delog to `portable-atomic` (whose
+  `critical-section` feature supplies the CAS). Also use `littlefs2 = {
+  default-features = false }`. With that, littlefs2-sys's **C cross-compiles fine
+  for thumbv6m** via the Homebrew `arm-none-eabi-gcc` + the `cc` crate.
+- **littlefs2 pins on-disk version 2.0; our images are 2.1 → `-22` (INVAL) on
+  mount.** The crate hardcodes `DISK_VERSION = Version(0x0002_0000)` (2.0, via the
+  multiversion feature), but the web app's littlefs (wokwi `littlefs` npm 0.1.0)
+  and MicroPython write **disk version 2.1**, and littlefs refuses to mount a fs
+  newer than the configured disk version. Fix: a one-line **fork of littlefs2**
+  (`../../littlefs2`, commit `b008a1e`, `DISK_VERSION → 2.1`) wired via
+  `[patch.crates-io]`. The wokwi lib can't emit 2.0 (no multiversion), and existing
+  devices are all 2.1, so 2.1 is the standard. Root-caused/validated on host with
+  the real flash dump + littlefs-python (which mounts 2.1 since it uses latest).
+- **littlefs path ops need libc string fns.** `lfs_dir_find` (any open-by-name)
+  calls `strspn`/`strcspn`/`strchr`, absent in no_std — link fails with undefined
+  symbols the moment you open a file (bare `mount` links fine). Fix: enable
+  `littlefs2-sys`'s **`tinyrlibc`** feature (a no_std C-string impl). Its `c-stubs`
+  feature only covers `strcpy`/`strlen`, so it's not enough on its own.
 - **`memory.x` needs a `BOOT2` region** (0x100 @ 0x10000000); embassy-rp's
   `link-rp.x` fills it with a default boot2 + CRC.
+- **cyw43 + trouble-host version skew is the real wall, not capability.** The
+  crates.io release matrix is internally inconsistent: cyw43 0.7.0 pins bt-hci
+  0.8, trouble-host 0.7.0 pins bt-hci 0.9, and trouble-host 0.6 drags in an
+  incompatible embassy-sync. The fix (what trouble's own `examples/rp-pico-w`
+  does): take **trouble-host from git** and `[patch.crates-io]` **cyw43 + every
+  embassy crate to one embassy git rev** (spike-coex uses `1d3c3de`) where cyw43
+  has already moved to bt-hci 0.9 to match trouble main. One rev ⇒ one bt-hci,
+  one embassy-sync. Bump the rev only in lockstep with trouble-host. **Caveat:**
+  that git rev's `embassy-usb` doesn't build cleanly (an `embedded-io` skew) and
+  its USB `Driver` trait won't match a crates.io `embassy-usb`, so **no USB-CDC
+  logger on this graph** — spike-coex proves coexistence with physical telemetry
+  (on-chip LED = Wi-Fi liveness, phone BLE scanner = BT liveness) instead.
+  Also note the git embassy-rp `PioSpi::new` takes **two** DMA channels
+  (CH0+CH1) vs crates.io 0.10's one, and the cyw43 runner type gained a third
+  generic `Cyw43439`.
+- **CYW43 needs the real `nvram_rp2040.bin`** as the 6th arg to
+  `new_with_bluetooth` (and to `new`). Passing empty `Aligned([0u8; 0])` — which
+  is only valid with the `skip-cyw43-firmware` feature — makes the chip come up
+  unconfigured: init **hangs before returning**, the on-chip LED stays dark, and
+  (fatally for debugging) it hangs *before* the USB logger can flush, so the
+  serial console is silent too. Cost us a whole diagnostic cycle. Grab the blob
+  from `embassy/cyw43-firmware/nvram_rp2040.bin` and load it with
+  `cyw43::aligned_bytes!`. Confirmed on the bench 2026-07-12: with real NVRAM,
+  `new_with_bluetooth` → `control.init(clm)` → `control.gpio_set` all succeed and
+  the on-chip LED blinks.
+- **No debug probe → USB CDC logger is the only observability**, and it only
+  flushes when the executor keeps running. A hang/panic *before* the first yield
+  after a log call = silence, indistinguishable from "logger broken." When bring-up
+  is suspect, drive the **external WS2812 strip (GP0, independent of the CYW43)** as
+  a hardware stage-indicator too — it can't lie about how far boot got.
 - **No way back to BOOTSEL in software yet.** Re-flashing needs the physical
   BOOTSEL button. Two fixes, both worth doing:
   - **Now (for CLI dev iteration):** a tiny `embassy-usb` device exposing the
@@ -134,13 +298,24 @@ in the repo docs.
     over BLE/Wi‑Fi and a new `.uf2` is dragged on. The old firmware installs the
     new one, no button.
 
-## Bench state (2026-07-09)
+## Bench state (2026-07-13)
 
-The bench Pico W (GP0 strip, 8 LEDs — read from its `datapin.txt`) was **flashed
-with this Rust firmware** and is running the embedded moving-rainbow test pattern.
-Its original MicroPython + littlefs (patterns, config, `networks.txt`) is backed
-up at **`~/pico-bench-micropython-backup-2026-07-09.bin`** (full 2 MB). To restore
-Python: BOOTSEL, then `picotool load ~/pico-bench-micropython-backup-2026-07-09.bin`
-(or flash a fresh MicroPython UF2 — the littlefs survives a small-firmware flash).
+The bench Pico W runs the **Phase-C Rust firmware** (`firmware-rust/led-animator-phaseC.uf2`):
+plays the selected `.leda` from the real littlefs on **GP0 via PIO1 + DMA_CH2**, and
+exposes the **USB dev tooling** — reflash with **no button** via
+`picotool reboot -f -u` then `picotool load -x <uf2>`; serial log on
+`/dev/cu.usbmodemLEDA_00012` (e.g. `screen /dev/cu.usbmodemLEDA_00012 115200`).
+Build+flash from scratch:
+```bash
+cd firmware-rust && export PATH="$HOME/.rustup/toolchains/stable-aarch64-apple-darwin/bin:$PATH"
+cargo build --release
+~/.cargo/bin/elf2uf2-rs target/thumbv6m-none-eabi/release/led-animator-fw led-animator.uf2
+picotool reboot -f -u   # drop the running device to BOOTSEL (no button)
+picotool load -x led-animator.uf2
+```
+Original MicroPython + littlefs backed up at
+**`~/pico-bench-micropython-backup-2026-07-09.bin`** (full 2 MB). Restore Python:
+BOOTSEL, `picotool load ~/pico-bench-micropython-backup-2026-07-09.bin` (littlefs
+survives a small-firmware flash).
 
 [`littlefs2`]: https://crates.io/crates/littlefs2

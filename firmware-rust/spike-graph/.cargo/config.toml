@@ -1,0 +1,7 @@
+[build]
+target = "thumbv6m-none-eabi"
+
+# Link args come from the crates' build scripts (embassy-rp emits -Tlink-rp.x etc.),
+# so we don't set -T* here — doing both double-applied the script (BOOT2 redefined).
+[target.thumbv6m-none-eabi]
+rustflags = ["-C", "link-arg=--nmagic"]
