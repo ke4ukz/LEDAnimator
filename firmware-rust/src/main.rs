@@ -6,6 +6,7 @@ mod leda;
 mod panic; // registers the #[panic_handler] (LED-0 red flutter)
 mod radio; // CYW43 Wi-Fi + BT bring-up
 mod recovery; // power-cycle recovery ritual
+mod state; // shared control state (mode / brightness / speed)
 mod status;
 mod usb; // picotool reset interface + CDC serial logger
 mod ws2812;
@@ -34,6 +35,9 @@ bind_interrupts!(struct Irqs {
 
 // 1000 = the MicroPython STATUS_BLANK_LEDS ceiling (boot-clear / status writes).
 const MAX_LEDS: usize = 1000;
+// Strip span used by SOLID/OFF when no pattern is loaded (so those still light a
+// reasonable length on a device with no selected pattern to source a LED count).
+const DEFAULT_LEDS: usize = 60;
 // Kept off the task future (would blow the executor arena); lives in .bss.
 static FRAME_BUF: StaticCell<[u32; MAX_LEDS]> = StaticCell::new();
 
@@ -145,54 +149,90 @@ async fn main(spawner: Spawner) {
     // commit the recovery counter back to 0 (COMMIT_MS = 0: "let it start once" clears).
     recovery::commit(&fs);
 
-    // --- Play the selected pattern, or show "nofile" if none is playable ---
-    let pbuf_ref = unsafe { &*addr_of!(PATTERN_BUF) };
-    let pattern = pat_len.and_then(|n| leda::Pattern::parse(&pbuf_ref[..n]));
-    match pattern {
-        Some(pat) if pat.header.num_frames > 0 && pat.header.num_leds > 0 => {
-            let n = (pat.header.num_leds as usize).min(MAX_LEDS);
-            let fps = pat.header.fps.max(1) as u64;
-            log::info!(
-                "playing: {} leds, {} frames, {} fps, brightness {}",
-                pat.header.num_leds,
-                pat.header.num_frames,
-                pat.header.fps,
-                bright
-            );
-            let mut ticker = Ticker::every(Duration::from_micros(1_000_000 / fps));
-            let mut frame = 0u32;
-            // Serial heartbeat every ~5 s so the CDC log is verifiable anytime.
-            let heartbeat = (fps as u32 * 5).max(1);
-            let mut hb = 0u32;
-            loop {
-                if let Some(rgb) = pat.frame(frame) {
-                    leda::fill_grb(rgb, &mut buf[..n], bright);
-                    ws.show(&buf[..n]).await;
-                }
-                frame += 1;
-                if frame >= pat.header.num_frames {
-                    frame = 0;
-                }
-                hb += 1;
-                if hb >= heartbeat {
-                    hb = 0;
-                    log::info!("alive — frame {}/{}", frame, pat.header.num_frames);
-                }
-                ticker.next().await;
-            }
+    // --- State-driven player: seed shared control from config, then render per the
+    // current mode each frame. Setter commands (BLE/Wi-Fi) mutate `state::CONTROL`. ---
+    {
+        let mut c = state::CONTROL.lock().await;
+        c.bright = bright;
+    }
+    log::info!("player: starting (bright {})", bright);
+
+    // The initially-selected pattern (borrows PATTERN_BUF; reloaded on SELECT).
+    let mut pattern = {
+        let pbuf_ref = unsafe { &*addr_of!(PATTERN_BUF) };
+        pat_len.and_then(|n| leda::Pattern::parse(&pbuf_ref[..n]))
+    };
+
+    let mut frame = 0u32;
+    let mut last_hb = embassy_time::Instant::now();
+    loop {
+        let snap = state::take_snapshot().await;
+
+        // SELECT/PROGRAM changed the selection — reload the pattern from flash.
+        // Drop the old borrow BEFORE mutating PATTERN_BUF (aliasing safety).
+        if snap.reload {
+            let _ = pattern.take(); // drop the borrow BEFORE mutating PATTERN_BUF
+            let newlen = {
+                let pbuf = unsafe { &mut *addr_of_mut!(PATTERN_BUF) };
+                load_selected(&fs, pbuf)
+            };
+            let pbuf_ref = unsafe { &*addr_of!(PATTERN_BUF) };
+            pattern = newlen.and_then(|n| leda::Pattern::parse(&pbuf_ref[..n]));
+            frame = 0;
         }
-        // Nothing selected/playable: LED0 red "nofile" pulse, strip dark.
-        _ => {
-            log::info!("no playable pattern selected — showing nofile");
-            let mut ticker = Ticker::every(Duration::from_millis(33));
-            loop {
-                for w in buf.iter_mut() {
+
+        // Strip length from the pattern, or a default so SOLID/OFF light something.
+        let n = pattern
+            .as_ref()
+            .map(|p| (p.header.num_leds as usize).min(MAX_LEDS))
+            .unwrap_or(DEFAULT_LEDS);
+
+        match snap.mode {
+            state::Mode::Off => {
+                for w in buf[..n].iter_mut() {
                     *w = 0;
                 }
-                buf[0] = status::led0_word(status::Status::Nofile);
-                ws.show(&buf[..]).await;
-                ticker.next().await;
+                ws.show(&buf[..n]).await;
+                Timer::after_millis(50).await;
             }
+            state::Mode::Solid([r, g, b]) => {
+                let scale = |c: u8| ((c as u16 * snap.bright as u16) / 255) as u8;
+                let word = ws2812::grb_word(scale(r), scale(g), scale(b));
+                for w in buf[..n].iter_mut() {
+                    *w = word;
+                }
+                ws.show(&buf[..n]).await;
+                Timer::after_millis(50).await;
+            }
+            state::Mode::Play => match &pattern {
+                Some(pat) if pat.header.num_frames > 0 && pat.header.num_leds > 0 => {
+                    if let Some(rgb) = pat.frame(frame) {
+                        leda::fill_grb(rgb, &mut buf[..n], snap.bright);
+                        ws.show(&buf[..n]).await;
+                    }
+                    frame += 1;
+                    if frame >= pat.header.num_frames {
+                        frame = 0;
+                    }
+                    // Speed-scaled frame period: speed% of the authored fps.
+                    let eff = ((pat.header.fps.max(1) as u32) * snap.speed.max(1) as u32 / 100).max(1);
+                    Timer::after_micros((1_000_000 / eff) as u64).await;
+                }
+                // Nothing playable: LED 0 red "nofile" pulse, rest dark.
+                _ => {
+                    for w in buf.iter_mut() {
+                        *w = 0;
+                    }
+                    buf[0] = status::led0_word(status::Status::Nofile);
+                    ws.show(&buf[..]).await;
+                    Timer::after_millis(33).await;
+                }
+            },
+        }
+
+        if last_hb.elapsed().as_millis() >= 5000 {
+            last_hb = embassy_time::Instant::now();
+            log::info!("alive — frame {}", frame);
         }
     }
 }
