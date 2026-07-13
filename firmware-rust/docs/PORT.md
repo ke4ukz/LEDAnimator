@@ -32,6 +32,8 @@ a **translation**, not a redesign — those docs are the language-agnostic contr
 | State-driven player (Play/Solid/Off + live brightness/speed) | ✅ HW-validated 2026-07-13 | [`state.rs`](../src/state.rs), `main.rs` |
 | Command dispatch (transport-agnostic) | ✅ core built (no-fs verbs + BOOTSEL) | [`protocol.rs`](../src/protocol.rs) |
 | BLE control (advertise + NUS GATT + dispatch) | 🔬 **code done + advertising-validated**; live command round-trip pending a BLE central (see below) | [`ble.rs`](../src/ble.rs) |
+| Wi-Fi auto-join + TCP :4550 control server | 🔬 **code done**; live join pending credentials (bench has no `networks.txt`) | [`wifi.rs`](../src/wifi.rs) |
+| BOOTSEL protocol command (reboot to bootloader over the wire) | ✅ built (in dispatch) | [`protocol.rs`](../src/protocol.rs) |
 | Wi-Fi provisioning + TCP :4550 + UDP discovery | 📋 planned | — |
 | Multi-device sync (beacon + follower PLL) | 📋 planned | — |
 | Auth PIN, power-cycle recovery ritual | 📋 planned | — |
@@ -230,12 +232,42 @@ the scan response.
   MOREINFO/NAME-set + persistence), auth (LOGIN/SETPASS/CLEARPASS + locking),
   manufacturer-data device id in the advert, unsolicited INFO broadcast on change.
 
-### Phase E+ — the rest
-Then the numbered contract below: recovery ritual (pure littlefs logic — bootcount
-5×/10× thresholds, commit-on-boot), Wi‑Fi (embassy-net TCP :4550 + UDP
-`LEDADISCOVER`), BLE control + sync (trouble NUS + connectionless beacon
-advertise/scan + follower PLL), auth PIN (`sha2` challenge-response), power sensing,
-and the **`BOOTSEL` protocol command** (app-driven firmware update over BLE/Wi‑Fi).
+### Phase F — Wi-Fi — 🔬 CODE DONE 2026-07-13 (live join pending credentials)
+[`src/wifi.rs`](../src/wifi.rs): if `networks.txt` has credentials (line 1 SSID, line
+2 password), bring up embassy-net over the CYW43 net driver, join (retry loop;
+non-fatal), and serve the shared `protocol::dispatch` over **TCP :4550** (line in →
+reply out — same commands as BLE). Gated on `networks.txt`; a device with none skips
+cleanly. **Bench-checked: no regression** (no `networks.txt` → logs "skipping", BLE +
+player run normally). Live join + TCP validate with real credentials.
+- **TODO on Wi-Fi:** the `WIFI*` provisioning commands (WIFISCAN/WIFISSID/WIFIPASS/
+  WIFICONNECT/WIFISTATUS/WIFIFORGET — WIFICONNECT writes `networks.txt` + triggers a
+  join, needs shared-fs dispatch + a join trigger), the **UDP `LEDADISCOVER`**
+  responder (`LEDA <hostname> <name>`), and reporting Wi-Fi state in `INFO`/`MOREINFO`.
+
+### Done this session (2026-07-13): status recap
+✅ Phase D radio · ✅ recovery ritual · ✅ state-driven player · ✅ command dispatch core
+· ✅ **BOOTSEL protocol command** (in `protocol.rs`) · 🔬 BLE control (advertises) · 🔬
+Wi-Fi auto-join + TCP. Everything committed to `main` (not pushed).
+
+### Validation plan for the next bench/app session
+1. **BLE control round-trip** — run [`tools/ble_test.py`](../tools/ble_test.py) from a
+   BLE-capable machine, or nRF Connect / the app. Expect PING→OK, INFO→state line,
+   SOLID/BRIGHT/OFF/PLAY visibly change the strip. (Blocked tonight: no free BLE central.)
+2. **Wi-Fi** — put a `networks.txt` on the device (SSID\npassword) — or build+use
+   WIFICONNECT — then `nc <device-ip> 4550` and send commands. Watch for `wifi: IP …`
+   in the serial log.
+3. Once the BLE/Wi-Fi *foundation* is confirmed, build the rest **on proven ground**:
+   fs-backed verbs, auth, Wi-Fi provisioning, sync, power.
+
+### Phase E+ / G+ — the remaining parity work
+The numbered contract below, still to port: **fs-backed control verbs** (LIST/SELECT/
+DELETE/FREE/MOREINFO/NAME-set + `bright.txt`/`state.txt`/`selected.txt` persistence —
+needs a shared-fs refactor: `FlashStorage`+`Allocation` via `StaticCell`, fs behind a
+`Mutex`, passed to dispatch), **auth PIN** (`sha2` challenge-response + per-connection
+lock, gating all but PING/INFO/LOGIN), **BLE sync** (connectionless beacon advertise/
+scan + follower PLL — `sync-beacon.md`), **Wi-Fi provisioning + UDP discover**, and
+**power sensing** (⚠️ on Pico W, VSYS/GPIO29 is shared with the CYW43 SPI clock this
+firmware uses — needs ADC/radio coordination, not a plain `ADC(29)` read).
 
 ## Remaining work — the plan
 
