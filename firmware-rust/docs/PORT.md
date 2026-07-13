@@ -32,7 +32,7 @@ a **translation**, not a redesign — those docs are the language-agnostic contr
 | State-driven player (Play/Solid/Off + live brightness/speed) | ✅ HW-validated 2026-07-13 | [`state.rs`](../src/state.rs), `main.rs` |
 | Command dispatch (transport-agnostic) | ✅ core built (no-fs verbs + BOOTSEL) | [`protocol.rs`](../src/protocol.rs) |
 | BLE control (advertise + NUS GATT + dispatch + fs verbs + persistence) | ✅ **HW-validated 2026-07-13** (app + Pi/bleak): PING/INFO/LIST/SELECT/DELETE/FREE/BRIGHT/SPEED/SOLID/OFF/PLAY/NAME/MOREINFO + settings survive reboot | [`ble.rs`](../src/ble.rs), [`protocol.rs`](../src/protocol.rs) |
-| Wi-Fi auto-join + TCP :4550 control server | 🔬 **code done**; live join pending credentials (bench has no `networks.txt`) | [`wifi.rs`](../src/wifi.rs) |
+| Wi-Fi: provisioning + join + auto-join + TCP :4550 + UDP discovery | ✅ **HW-validated 2026-07-13** (real network): BLE provision → DHCP → TCP control (LIST streams) + LEDADISCOVER (broadcast/unicast); auto-joins on boot | [`wifi.rs`](../src/wifi.rs) |
 | BOOTSEL protocol command (reboot to bootloader over the wire) | ✅ built (in dispatch) | [`protocol.rs`](../src/protocol.rs) |
 | Wi-Fi provisioning + TCP :4550 + UDP discovery | 📋 planned | — |
 | Multi-device sync (beacon + follower PLL) | 📋 planned | — |
