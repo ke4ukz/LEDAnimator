@@ -38,6 +38,7 @@ cortex-m-rt = "0.7.5"
 fixed = "1"
 static_cell = "2"
 heapless = "0.9" # fixed-capacity String for protocol replies (already in the tree)
+sha2 = { version = "0.10", default-features = false } # auth PIN challenge-response
 # littlefs on the QSPI flash — reads the SAME on-flash fs the web UF2 builds
 # (block 4096 × 212 @ 0x1012c000, prog 256). C-backed (littlefs2-sys); cross-built
 # for thumbv6m via arm-none-eabi-gcc. See docs/PORT.md §1.

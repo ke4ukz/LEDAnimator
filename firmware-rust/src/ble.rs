@@ -150,6 +150,7 @@ async fn gatt_events<P: PacketPool>(
 ) {
     let rx_handle = server.nus.rx.handle;
     let tx = &server.nus.tx;
+    let mut conn_state = protocol::ConnState::new(); // per-connection auth state
     loop {
         match conn.next().await {
             GattConnectionEvent::Disconnected { .. } => break,
@@ -173,7 +174,7 @@ async fn gatt_events<P: PacketPool>(
                 // Dispatch; replies notify on TX (possibly several lines for LIST).
                 if !cmd.is_empty() {
                     let mut sink = BleSink { tx, conn };
-                    protocol::dispatch(cmd.as_str(), fs, &mut sink).await;
+                    protocol::dispatch(cmd.as_str(), fs, &mut sink, &mut conn_state).await;
                 }
             }
             _ => {}

@@ -89,6 +89,7 @@ pub async fn tcp_task(stack: Stack<'static>, fs: &'static SharedFs) {
 /// One connection: line-buffered read → dispatch → newline-terminated reply.
 async fn serve(sock: &mut TcpSocket<'_>, fs: &'static SharedFs) {
     let mut line: heapless::String<200> = heapless::String::new();
+    let mut conn_state = protocol::ConnState::new(); // per-connection auth state
     let mut buf = [0u8; 128];
     loop {
         let n = match sock.read(&mut buf).await {
@@ -100,7 +101,7 @@ async fn serve(sock: &mut TcpSocket<'_>, fs: &'static SharedFs) {
             if b == b'\n' {
                 if !line.is_empty() {
                     let mut sink = TcpSink { sock: &mut *sock };
-                    protocol::dispatch(line.as_str(), fs, &mut sink).await;
+                    protocol::dispatch(line.as_str(), fs, &mut sink, &mut conn_state).await;
                     line.clear();
                 }
             } else if b != b'\r' && line.push(b as char).is_err() {

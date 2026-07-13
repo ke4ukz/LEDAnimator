@@ -7,11 +7,79 @@
 use crate::fs::{make_path, SharedFs};
 use crate::state::{Mode, CONTROL};
 use core::fmt::Write;
+use core::sync::atomic::{AtomicU32, Ordering};
+use embassy_time::Instant;
 use heapless::String;
 use littlefs2::path::Path;
+use sha2::{Digest, Sha256};
 
 pub const FW_VERSION: &str = "rust-0.1";
 pub const PLATFORM: &str = "Raspberry Pi Pico W with RP2040";
+
+/// After a failed LOGIN, further attempts are refused for this long (non-blocking
+/// rate limit — a casual brute-force deterrent). Shared across connections.
+const AUTH_RETRY_MS: u32 = 5000;
+static AUTH_FAIL_AT: AtomicU32 = AtomicU32::new(0);
+
+/// Per-connection auth state — forgotten on disconnect (each connection gets a
+/// fresh one). A PIN in `auth.txt` locks the device; a connection must LOGIN
+/// (challenge-response) before any command but PING/INFO/LOGIN.
+pub struct ConnState {
+    authed: bool,
+    nonce: String<16>,
+}
+
+impl ConnState {
+    pub fn new() -> Self {
+        Self {
+            authed: false,
+            nonce: String::new(),
+        }
+    }
+}
+
+impl Default for ConnState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+fn valid_pin(s: &str) -> bool {
+    (4..=8).contains(&s.len()) && s.bytes().all(|b| b.is_ascii_digit())
+}
+
+/// The set PIN from `auth.txt`, or `None` if the device is open.
+async fn read_pin(fs: &SharedFs) -> Option<String<8>> {
+    let v = fs.lock().await.read::<8>(cfg_path(b"auth.txt\0")).ok()?;
+    let s = core::str::from_utf8(&v).ok()?.trim();
+    if valid_pin(s) {
+        let mut p = String::new();
+        p.push_str(s).ok()?;
+        Some(p)
+    } else {
+        None
+    }
+}
+
+/// An 8-byte challenge nonce (16 hex chars) from the ring-oscillator RNG.
+fn gen_nonce() -> String<16> {
+    let mut rng = embassy_rp::clocks::RoscRng;
+    let mut s = String::new();
+    let _ = write!(s, "{:08x}{:08x}", rng.next_u32(), rng.next_u32());
+    s
+}
+
+/// `sha256(pin + nonce)` as lowercase hex — the expected `LOGIN` hash.
+fn expected_hash(pin: &str, nonce: &str) -> String<64> {
+    let mut h = Sha256::new();
+    h.update(pin.as_bytes());
+    h.update(nonce.as_bytes());
+    let mut s = String::new();
+    for byte in h.finalize() {
+        let _ = write!(s, "{:02x}", byte);
+    }
+    s
+}
 
 /// A single reply line's max length.
 pub type Reply = String<160>;
@@ -32,8 +100,9 @@ async fn write_cfg(fs: &SharedFs, name: &[u8], contents: &[u8]) {
     let _ = f.write(cfg_path(name), contents);
 }
 
-/// Handle one command line, sending any reply lines to `sink`.
-pub async fn dispatch(line: &str, fs: &SharedFs, sink: &mut impl LineSink) {
+/// Handle one command line, sending any reply lines to `sink`. `conn` carries the
+/// per-connection auth state.
+pub async fn dispatch(line: &str, fs: &SharedFs, sink: &mut impl LineSink, conn: &mut ConnState) {
     let line = line.trim();
     if line.is_empty() {
         return;
@@ -46,8 +115,63 @@ pub async fn dispatch(line: &str, fs: &SharedFs, sink: &mut impl LineSink) {
         let _ = vb.push(ch.to_ascii_uppercase());
     }
 
+    // --- Auth gate: a locked device (auth.txt set) answers only PING, INFO (hands
+    // back a login challenge), and LOGIN until this connection authenticates. ---
+    let pin = read_pin(fs).await;
+    if let Some(ref pin) = pin {
+        if !conn.authed {
+            match vb.as_str() {
+                "LOGIN" => {
+                    do_login(arg, pin, conn, sink).await;
+                    return;
+                }
+                "PING" => {
+                    sink.send("OK").await;
+                    return;
+                }
+                "INFO" => {
+                    conn.nonce = gen_nonce();
+                    reply(sink, format_args!("NEEDPIN {}", conn.nonce.as_str())).await;
+                    return;
+                }
+                _ => {
+                    sink.send("ERR auth").await;
+                    return;
+                }
+            }
+        }
+    }
+
     match vb.as_str() {
         "PING" => sink.send("OK").await,
+
+        "LOGIN" => {
+            // Past the gate (open, or already authed) → idempotent OK.
+            conn.authed = true;
+            sink.send("OK LOGIN").await;
+        }
+
+        "SETPASS" => {
+            if arg.is_empty() {
+                sink.send("ERR args").await;
+            } else if pin.is_some() {
+                sink.send("ERR exists").await; // CLEARPASS first, then set a new one
+            } else if !valid_pin(arg) {
+                sink.send("ERR args").await;
+            } else {
+                write_cfg(fs, b"auth.txt\0", arg.as_bytes()).await;
+                conn.authed = true; // keep the setter logged in
+                sink.send("OK SETPASS").await;
+            }
+        }
+
+        "CLEARPASS" => {
+            {
+                let f = fs.lock().await;
+                let _ = f.remove(cfg_path(b"auth.txt\0"));
+            }
+            sink.send("OK CLEARPASS").await;
+        }
 
         "VERSION" => reply(sink, format_args!("VERSION {}", FW_VERSION)).await,
         "PLATFORM" => reply(sink, format_args!("PLATFORM {}", PLATFORM)).await,
@@ -295,6 +419,28 @@ async fn persist_state(fs: &SharedFs, mode: Mode, solid: [u8; 3]) {
     let mut s: String<32> = String::new();
     let _ = write!(s, "{} {} {} {}", mode.as_str(), solid[0], solid[1], solid[2]);
     write_cfg(fs, b"state.txt\0", s.as_bytes()).await;
+}
+
+/// Verify a `LOGIN <hash>` against the current challenge, with a rate limit.
+async fn do_login(arg: &str, pin: &str, conn: &mut ConnState, sink: &mut impl LineSink) {
+    let now = Instant::now().as_millis() as u32;
+    let fail_at = AUTH_FAIL_AT.load(Ordering::Relaxed);
+    if fail_at != 0 && now.wrapping_sub(fail_at) < AUTH_RETRY_MS {
+        sink.send("ERR auth-wait").await;
+        return;
+    }
+    if conn.nonce.is_empty() || arg.is_empty() {
+        sink.send("ERR auth").await; // must fetch a challenge (INFO) first
+        return;
+    }
+    let expected = expected_hash(pin, conn.nonce.as_str());
+    if arg.eq_ignore_ascii_case(expected.as_str()) {
+        conn.authed = true;
+        sink.send("OK LOGIN").await;
+    } else {
+        AUTH_FAIL_AT.store(now.max(1), Ordering::Relaxed);
+        sink.send("ERR auth").await;
+    }
 }
 
 /// A pattern's program number = its zero-padded `NN-` filename prefix (else 0).
