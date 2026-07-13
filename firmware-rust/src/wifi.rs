@@ -6,10 +6,11 @@
 
 use crate::fs::SharedFs;
 use crate::protocol::{self, ConnState, LineSink};
-use crate::state::FixedStr;
+use crate::state::{FixedStr, CONTROL};
 use core::fmt::Write as _;
 use cyw43::{Control, JoinOptions, NetDriver};
 use embassy_net::tcp::TcpSocket;
+use embassy_net::udp::{PacketMetadata, UdpSocket};
 use embassy_net::{Runner, Stack};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::mutex::Mutex as AsyncMutex;
@@ -19,6 +20,9 @@ use embedded_io_async::Write;
 use littlefs2::path::Path;
 
 pub const PORT: u16 = 4550;
+/// Wi-Fi hostname reported in the `LEDADISCOVER` reply. TODO: make per-device
+/// (suffix = the BLE manufacturer-data device id) so the app dedups BLE vs Wi-Fi.
+const HOSTNAME: &str = "ledanimator";
 
 /// Credentials stashed by `WIFISSID`/`WIFIPASS`, committed by `WIFICONNECT`.
 pub static PENDING: AsyncMutex<CriticalSectionRawMutex, (FixedStr<64>, FixedStr<64>)> =
@@ -111,6 +115,42 @@ pub async fn manager_task(
         }
         // Block until a WIFICONNECT / WIFIFORGET asks us to re-evaluate.
         CONNECT_SIG.wait().await;
+    }
+}
+
+/// UDP discovery: reply `LEDA <hostname> <name>` to a `LEDADISCOVER` broadcast on
+/// :4550, so the app finds the device (and its IP, from the packet source) on Wi-Fi.
+#[embassy_executor::task]
+pub async fn discover_task(stack: Stack<'static>) {
+    stack.wait_config_up().await;
+    let mut rx_meta = [PacketMetadata::EMPTY; 8];
+    let mut tx_meta = [PacketMetadata::EMPTY; 8];
+    let mut rx_buf = [0u8; 256];
+    let mut tx_buf = [0u8; 256];
+    let mut sock = UdpSocket::new(stack, &mut rx_meta, &mut rx_buf, &mut tx_meta, &mut tx_buf);
+    if sock.bind(PORT).is_err() {
+        log::info!("udp: bind :{} failed", PORT);
+        return;
+    }
+    log::info!("udp: LEDADISCOVER responder on :{}", PORT);
+    loop {
+        let (is_discover, endpoint) = sock
+            .recv_from_with(|data, meta| (data.starts_with(b"LEDADISCOVER"), meta.endpoint))
+            .await;
+        if is_discover {
+            let mut name: heapless::String<32> = heapless::String::new();
+            {
+                let c = CONTROL.lock().await;
+                let _ = name.push_str(if c.name.is_empty() {
+                    "LED Animator"
+                } else {
+                    c.name.as_str()
+                });
+            }
+            let mut reply: heapless::String<96> = heapless::String::new();
+            let _ = write!(reply, "LEDA {} {}", HOSTNAME, name.as_str());
+            let _ = sock.send_to(reply.as_bytes(), endpoint).await;
+        }
     }
 }
 

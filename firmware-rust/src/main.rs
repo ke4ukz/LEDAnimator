@@ -172,6 +172,7 @@ async fn main(spawner: Spawner) {
     );
     spawner.spawn(wifi::net_runner_task(net_runner).unwrap());
     spawner.spawn(wifi::tcp_task(stack, fs).unwrap());
+    spawner.spawn(wifi::discover_task(stack).unwrap());
     spawner.spawn(wifi::manager_task(radio.control, stack, fs).unwrap());
 
     // Boot complete — brief green LED-0 flash.
