@@ -25,11 +25,16 @@ log = "0.4"
 # CYW43 radio (Wi-Fi + BT) over PIO SPI (Phase D). Firmware blobs in cyw43-firmware/.
 cyw43 = { version = "0.7", features = ["bluetooth"] }
 cyw43-pio = { version = "0.10" }
+# BLE control channel (Phase E) — trouble-host over the CYW43 HCI. crates.io
+# (both agree on bt-hci 0.9 — see spike-graph/STATUS.md).
+trouble-host = { version = "0.7", features = ["default-packet-pool-mtu-128"] }
+bt-hci = { version = "0.9" }
 
 cortex-m = { version = "0.7.7", features = ["inline-asm"] }
 cortex-m-rt = "0.7.5"
 fixed = "1"
 static_cell = "2"
+heapless = "0.9" # fixed-capacity String for protocol replies (already in the tree)
 # littlefs on the QSPI flash — reads the SAME on-flash fs the web UF2 builds
 # (block 4096 × 212 @ 0x1012c000, prog 256). C-backed (littlefs2-sys); cross-built
 # for thumbv6m via arm-none-eabi-gcc. See docs/PORT.md §1.

@@ -1,9 +1,11 @@
 #![no_std]
 #![no_main]
 
+mod ble; // BLE control channel (trouble-host NUS)
 mod fs;
 mod leda;
 mod panic; // registers the #[panic_handler] (LED-0 red flutter)
+mod protocol; // transport-agnostic command dispatch
 mod radio; // CYW43 Wi-Fi + BT bring-up
 mod recovery; // power-cycle recovery ritual
 mod state; // shared control state (mode / brightness / speed)
@@ -139,6 +141,10 @@ async fn main(spawner: Spawner) {
     radio.control.gpio_set(0, true).await; // onboard LED on = radio alive
     log::info!("radio up (CYW43 Wi-Fi + BT firmware loaded)");
 
+    // Start the BLE control channel (owns the CYW43 BT HCI). net_device + control
+    // stay held for the Wi-Fi phase.
+    spawner.spawn(ble::ble_task(radio.bt_device).unwrap());
+
     // Boot complete — brief green LED-0 flash.
     buf[0] = status::BootStage::Complete.led0_word();
     ws.show(&buf[..]).await;
@@ -154,6 +160,12 @@ async fn main(spawner: Spawner) {
     {
         let mut c = state::CONTROL.lock().await;
         c.bright = bright;
+        if let Some(s) = read_cfg_line(&fs, b"selected.txt\0") {
+            c.file.set(s.as_str());
+        }
+        if let Some(s) = read_cfg_line(&fs, b"devicename.txt\0") {
+            c.name.set(s.as_str());
+        }
     }
     log::info!("player: starting (bright {})", bright);
 
@@ -187,6 +199,9 @@ async fn main(spawner: Spawner) {
             .map(|p| (p.header.num_leds as usize).min(MAX_LEDS))
             .unwrap_or(DEFAULT_LEDS);
 
+        // Brightness percent (0..=100) → 0..=255 for the render path.
+        let bright255 = (snap.bright as u16 * 255 / 100) as u8;
+
         match snap.mode {
             state::Mode::Off => {
                 for w in buf[..n].iter_mut() {
@@ -195,8 +210,9 @@ async fn main(spawner: Spawner) {
                 ws.show(&buf[..n]).await;
                 Timer::after_millis(50).await;
             }
-            state::Mode::Solid([r, g, b]) => {
-                let scale = |c: u8| ((c as u16 * snap.bright as u16) / 255) as u8;
+            state::Mode::Solid => {
+                let [r, g, b] = snap.solid;
+                let scale = |c: u8| ((c as u16 * bright255 as u16) / 255) as u8;
                 let word = ws2812::grb_word(scale(r), scale(g), scale(b));
                 for w in buf[..n].iter_mut() {
                     *w = word;
@@ -207,7 +223,7 @@ async fn main(spawner: Spawner) {
             state::Mode::Play => match &pattern {
                 Some(pat) if pat.header.num_frames > 0 && pat.header.num_leds > 0 => {
                     if let Some(rgb) = pat.frame(frame) {
-                        leda::fill_grb(rgb, &mut buf[..n], snap.bright);
+                        leda::fill_grb(rgb, &mut buf[..n], bright255);
                         ws.show(&buf[..n]).await;
                     }
                     frame += 1;
@@ -237,7 +253,19 @@ async fn main(spawner: Spawner) {
     }
 }
 
-/// Master brightness (0..=255) from `bright.txt` (a 0–100 percent), full if unset.
+/// Read a small single-line config file (trimmed) into a heapless string, or None.
+fn read_cfg_line(fs: &fs::Fs, name_nul: &[u8]) -> Option<heapless::String<64>> {
+    let v = fs.read::<64>(Path::from_bytes_with_nul(name_nul).ok()?).ok()?;
+    let s = core::str::from_utf8(&v).ok()?.trim();
+    if s.is_empty() {
+        return None;
+    }
+    let mut out = heapless::String::new();
+    out.push_str(s).ok()?;
+    Some(out)
+}
+
+/// Master brightness **percent** (0..=100) from `bright.txt`, full if unset.
 fn read_bright(fs: &fs::Fs) -> u8 {
     match fs.read::<8>(Path::from_bytes_with_nul(b"bright.txt\0").unwrap()) {
         Ok(v) => {
@@ -245,7 +273,7 @@ fn read_bright(fs: &fs::Fs) -> u8 {
                 .ok()
                 .and_then(|s| s.trim().parse().ok())
                 .unwrap_or(100);
-            (pct.min(100) * 255 / 100) as u8
+            pct.min(100) as u8
         }
         Err(_) => 255,
     }

@@ -29,7 +29,9 @@ a **translation**, not a redesign — those docs are the language-agnostic contr
 | Unified networking dep graph (cyw43+trouble+net+usb+littlefs) | ✅ **resolved + builds 2026-07-13** (Phase A; embassy main `9ae6c57`) | [`spike-graph/`](../spike-graph/) |
 | Player migrated onto that graph (PIO1+DMA_CH2) | ✅ **HW-validated 2026-07-13** (Phase B) | `ws2812.rs`, `main.rs` |
 | USB dev tooling: picotool reset iface + CDC serial logger | ✅ **HW-validated 2026-07-13** (Phase C) — `reboot -f -u` → BOOTSEL no button; serial log works | [`usb.rs`](../src/usb.rs) |
-| BLE control (advertise + GATT + dispatch) | 📋 planned | — |
+| State-driven player (Play/Solid/Off + live brightness/speed) | ✅ HW-validated 2026-07-13 | [`state.rs`](../src/state.rs), `main.rs` |
+| Command dispatch (transport-agnostic) | ✅ core built (no-fs verbs + BOOTSEL) | [`protocol.rs`](../src/protocol.rs) |
+| BLE control (advertise + NUS GATT + dispatch) | 🔬 **code done + advertising-validated**; live command round-trip pending a BLE central (see below) | [`ble.rs`](../src/ble.rs) |
 | Wi-Fi provisioning + TCP :4550 + UDP discovery | 📋 planned | — |
 | Multi-device sync (beacon + follower PLL) | 📋 planned | — |
 | Auth PIN, power-cycle recovery ritual | 📋 planned | — |
@@ -203,6 +205,30 @@ bt_device }` for Phases E/F.
   the CDC (~2 s post-reboot) so they're dropped; steady-state heartbeats are the
   reliable signal. A richer periodic status line lands with the networking phases
   (dynamic Wi-Fi/BLE state to report).
+
+### Phase E — BLE control channel — 🔬 CODE DONE 2026-07-13 (live round-trip pending)
+Built the shared control path: [`state.rs`](../src/state.rs) (mode/brightness/speed/
+file/name behind an async Mutex), [`protocol.rs`](../src/protocol.rs) (transport-
+agnostic `dispatch` — PING/INFO/VERSION/PLATFORM/BRIGHT/SPEED/SOLID/OFF/PLAY/
+NAME-query/BOOTSEL), and [`ble.rs`](../src/ble.rs) (trouble-host **NUS** service on
+the LED Animator service UUID; RX write → `dispatch` → TX notify). Advertises the
+service UUID (verified LE byte order = `u128::to_le_bytes`) with the device name in
+the scan response.
+- **Validated:** compiles clean; on the bench it advertises (`BLE: advertising as
+  "LED Animator"`) while the player keeps running — and the underlying trouble-host
+  transport (advertise + connect + GATT + notify) was already bench-proven by the
+  coex spike.
+- **Pending (needs a BLE central):** the live command round-trip. Blocked here
+  because the Pi bench's BT adapter is held by a running `leader_headless.py` sync
+  leader (raw HCI, so BlueZ/bleak can't use it) and this Mac's CLI Bluetooth is TCC-
+  blocked. **To validate:** run [`tools/ble_test.py`](../tools/ble_test.py) from any
+  machine with a free BLE central, or use nRF Connect (write a command to the RX
+  char `6E40…0002`, read the reply on the TX char `6E40…0003`). The app will also
+  exercise it. Watch the strip: `SOLID 0 255 0` → green, `BRIGHT 25` → dim, `OFF` →
+  blank, `PLAY` → resume.
+- **Still TODO on BLE control:** filesystem-backed verbs (LIST/SELECT/DELETE/FREE/
+  MOREINFO/NAME-set + persistence), auth (LOGIN/SETPASS/CLEARPASS + locking),
+  manufacturer-data device id in the advert, unsolicited INFO broadcast on change.
 
 ### Phase E+ — the rest
 Then the numbered contract below: recovery ritual (pure littlefs logic — bootcount
