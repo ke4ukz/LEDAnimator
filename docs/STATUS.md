@@ -57,6 +57,9 @@ A snapshot of what works today and what's next. Updated July 2026.
 - **Shuffle / randomize animation-number assignment** (web) — a one-click way to
   randomly (re)assign program numbers across animations instead of setting each by
   hand. Small nice-to-have; someday.
+- **Mode-driven control UI** (iOS/macOS app) — let the current playback mode hide
+  irrelevant controls: in **Solid** or **Off**, don't show the patterns list; in
+  **Off**, also hide the brightness + speed controls. Less clutter, clearer state.
 - **Longer-term directions** (design captured, not built) — browser-side pattern
   **scripting** (a procedural *texture* source, and a *global control function*
   that sees every LED's 3-D position + time, both baked to `.leda`); a **compiled

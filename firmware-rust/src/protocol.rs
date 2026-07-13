@@ -233,6 +233,32 @@ pub async fn dispatch(line: &str, fs: &SharedFs, sink: &mut impl LineSink) {
             embassy_rp::rom_data::reset_to_usb_boot(0, 0);
         }
 
+        // --- Read-only status queries. Sensible defaults until Wi-Fi/sync/power land,
+        // so the app's Info pane gets clean answers instead of an ERR-unknown popup. ---
+        "WIFISTATUS" => sink.send("WIFI off").await,
+        "POWER" => sink.send("POWER unknown 0").await,
+        "ROLE" => sink.send("ROLE standalone").await,
+        "GROUP" => sink.send("GROUP 0").await,
+        "DEVICE" => sink.send("DEVICE 0").await,
+        "PROGRAM" => {
+            // No-arg reports the program # from the selected file's `NN-` prefix.
+            // (The setter — load the NN- slice + drive the group — lands with sync.)
+            let prog = {
+                let c = CONTROL.lock().await;
+                program_of(c.file.as_str())
+            };
+            reply(sink, format_args!("PROGRAM {}", prog)).await;
+        }
+        "LOSS" => sink.send("LOSS indicate").await,
+        "STARTUP" => sink.send("STARTUP go").await,
+        "TEARDOWN" => sink.send("ERR not-leader").await,
+        "WIFISCAN" => {
+            // No radio scan wired yet — return an empty (but well-formed) result so
+            // the app doesn't error.
+            sink.send("WIFISCANLEN 0").await;
+            sink.send("WIFISCANEND").await;
+        }
+
         _ => sink.send("ERR unknown").await,
     }
 }
@@ -269,6 +295,16 @@ async fn persist_state(fs: &SharedFs, mode: Mode, solid: [u8; 3]) {
     let mut s: String<32> = String::new();
     let _ = write!(s, "{} {} {} {}", mode.as_str(), solid[0], solid[1], solid[2]);
     write_cfg(fs, b"state.txt\0", s.as_bytes()).await;
+}
+
+/// A pattern's program number = its zero-padded `NN-` filename prefix (else 0).
+fn program_of(name: &str) -> u8 {
+    let b = name.as_bytes();
+    if b.len() >= 3 && b[2] == b'-' && b[0].is_ascii_digit() && b[1].is_ascii_digit() {
+        (b[0] - b'0') * 10 + (b[1] - b'0')
+    } else {
+        0
+    }
 }
 
 /// Format + send a single reply line.
