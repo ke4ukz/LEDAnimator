@@ -31,7 +31,7 @@ a **translation**, not a redesign — those docs are the language-agnostic contr
 | USB dev tooling: picotool reset iface + CDC serial logger | ✅ **HW-validated 2026-07-13** (Phase C) — `reboot -f -u` → BOOTSEL no button; serial log works | [`usb.rs`](../src/usb.rs) |
 | State-driven player (Play/Solid/Off + live brightness/speed) | ✅ HW-validated 2026-07-13 | [`state.rs`](../src/state.rs), `main.rs` |
 | Command dispatch (transport-agnostic) | ✅ core built (no-fs verbs + BOOTSEL) | [`protocol.rs`](../src/protocol.rs) |
-| BLE control (advertise + NUS GATT + dispatch) | 🔬 **code done + advertising-validated**; live command round-trip pending a BLE central (see below) | [`ble.rs`](../src/ble.rs) |
+| BLE control (advertise + NUS GATT + dispatch + fs verbs + persistence) | ✅ **HW-validated 2026-07-13** (app + Pi/bleak): PING/INFO/LIST/SELECT/DELETE/FREE/BRIGHT/SPEED/SOLID/OFF/PLAY/NAME/MOREINFO + settings survive reboot | [`ble.rs`](../src/ble.rs), [`protocol.rs`](../src/protocol.rs) |
 | Wi-Fi auto-join + TCP :4550 control server | 🔬 **code done**; live join pending credentials (bench has no `networks.txt`) | [`wifi.rs`](../src/wifi.rs) |
 | BOOTSEL protocol command (reboot to bootloader over the wire) | ✅ built (in dispatch) | [`protocol.rs`](../src/protocol.rs) |
 | Wi-Fi provisioning + TCP :4550 + UDP discovery | 📋 planned | — |
