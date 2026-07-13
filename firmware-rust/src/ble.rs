@@ -116,11 +116,18 @@ async fn advertise<'values, 'server, C: Controller>(
     peripheral: &mut Peripheral<'values, C, DefaultPacketPool>,
     server: &'server Server<'values>,
 ) -> Result<GattConnection<'values, 'server, DefaultPacketPool>, BleHostError<C::Error>> {
+    // Manufacturer data: company 0xFFFF + the 3-byte device id (the app matches this
+    // to the Wi-Fi hostname suffix to dedup one device across BLE + Wi-Fi).
+    let dev_id = crate::state::device_id_bytes();
     let mut adv = [0u8; 31];
     let adv_len = AdStructure::encode_slice(
         &[
             AdStructure::Flags(LE_GENERAL_DISCOVERABLE | BR_EDR_NOT_SUPPORTED),
             AdStructure::CompleteServiceUuids128(&[SVC_UUID_LE]),
+            AdStructure::ManufacturerSpecificData {
+                company_identifier: 0xFFFF,
+                payload: &dev_id,
+            },
         ],
         &mut adv[..],
     )?;

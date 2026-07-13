@@ -20,9 +20,6 @@ use embedded_io_async::Write;
 use littlefs2::path::Path;
 
 pub const PORT: u16 = 4550;
-/// Wi-Fi hostname reported in the `LEDADISCOVER` reply. TODO: make per-device
-/// (suffix = the BLE manufacturer-data device id) so the app dedups BLE vs Wi-Fi.
-const HOSTNAME: &str = "ledanimator";
 
 /// Credentials stashed by `WIFISSID`/`WIFIPASS`, committed by `WIFICONNECT`.
 pub static PENDING: AsyncMutex<CriticalSectionRawMutex, (FixedStr<64>, FixedStr<64>)> =
@@ -147,8 +144,15 @@ pub async fn discover_task(stack: Stack<'static>) {
                     c.name.as_str()
                 });
             }
+            // Hostname suffix = the 3-byte device id (hex), so the app matches this
+            // Wi-Fi device to the same device seen over BLE.
             let mut reply: heapless::String<96> = heapless::String::new();
-            let _ = write!(reply, "LEDA {} {}", HOSTNAME, name.as_str());
+            let _ = write!(
+                reply,
+                "LEDA leda-{} {}",
+                crate::state::device_id_hex().as_str(),
+                name.as_str()
+            );
             let _ = sock.send_to(reply.as_bytes(), endpoint).await;
         }
     }

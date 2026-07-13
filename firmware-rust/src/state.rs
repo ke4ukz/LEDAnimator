@@ -5,8 +5,37 @@
 //! The Rust equivalent of the MicroPython `S.mode`/`S.bright`/`S.speed`/`S.solid`/
 //! `S.file`/`S.name`/`S.reload` runtime state (see `web/src/export/rp2040.ts`).
 
+use core::fmt::Write as _;
+use core::sync::atomic::{AtomicU32, Ordering};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::mutex::Mutex;
+
+/// The 3-byte device id (last 3 bytes of the Wi-Fi MAC), packed in the low 24 bits.
+/// It ties the BLE advert (manufacturer data) to the Wi-Fi hostname suffix so the
+/// app recognizes one physical device across both transports. Set once at boot.
+static DEVICE_ID: AtomicU32 = AtomicU32::new(0);
+
+/// Seed the device id from the 6-byte MAC (uses the last 3 bytes).
+pub fn set_device_id(mac: &[u8; 6]) {
+    let id = ((mac[3] as u32) << 16) | ((mac[4] as u32) << 8) | (mac[5] as u32);
+    DEVICE_ID.store(id, Ordering::Relaxed);
+}
+
+/// The device id as 3 raw bytes (for the BLE manufacturer data payload).
+pub fn device_id_bytes() -> [u8; 3] {
+    let v = DEVICE_ID.load(Ordering::Relaxed);
+    [(v >> 16) as u8, (v >> 8) as u8, v as u8]
+}
+
+/// The device id as 6 uppercase hex chars (for the Wi-Fi hostname suffix).
+pub fn device_id_hex() -> FixedStr<8> {
+    let [a, b, c] = device_id_bytes();
+    let mut s: heapless::String<8> = heapless::String::new();
+    let _ = write!(s, "{:02X}{:02X}{:02X}", a, b, c);
+    let mut out = FixedStr::new();
+    out.set(s.as_str());
+    out
+}
 
 /// A tiny fixed-capacity UTF-8 string (const-constructible, no alloc) for the
 /// device name + selected filename living in the shared state.

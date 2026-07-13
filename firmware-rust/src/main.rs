@@ -155,41 +155,13 @@ async fn main(spawner: Spawner) {
     radio.control.gpio_set(0, true).await; // onboard LED on = radio alive
     log::info!("radio up (CYW43 Wi-Fi + BT firmware loaded)");
 
-    // Start the BLE control channel (owns the CYW43 BT HCI + the shared fs for
-    // filesystem-backed commands like LIST/SELECT).
-    spawner.spawn(ble::ble_task(radio.bt_device, fs).unwrap());
+    // Device id = last 3 bytes of the Wi-Fi MAC. Ties the BLE advert (manufacturer
+    // data) to the Wi-Fi hostname suffix so the app sees ONE device across both.
+    let mac = radio.control.address().await;
+    state::set_device_id(&mac);
 
-    // --- Wi-Fi: always bring up the net stack; the manager joins on demand from
-    // networks.txt (present at boot, or written live by WIFICONNECT). Non-fatal —
-    // the pattern plays regardless. TCP control server on :4550. ---
-    static NET_RES: StaticCell<embassy_net::StackResources<4>> = StaticCell::new();
-    let net_res = NET_RES.init(embassy_net::StackResources::new());
-    let (stack, net_runner) = embassy_net::new(
-        radio.net_device,
-        embassy_net::Config::dhcpv4(Default::default()),
-        net_res,
-        0x0123_4567_89ab_cdef,
-    );
-    spawner.spawn(wifi::net_runner_task(net_runner).unwrap());
-    spawner.spawn(wifi::tcp_task(stack, fs).unwrap());
-    spawner.spawn(wifi::discover_task(stack).unwrap());
-    spawner.spawn(wifi::manager_task(radio.control, stack, fs).unwrap());
-
-    // Boot complete — brief green LED-0 flash.
-    buf[0] = status::BootStage::Complete.led0_word();
-    ws.show(&buf[..]).await;
-    Timer::after_millis(150).await;
-    buf[0] = 0;
-
-    // We reached the run loop — the boot completed instead of being interrupted, so
-    // commit the recovery counter back to 0 (COMMIT_MS = 0: "let it start once" clears).
-    {
-        let g = fs.lock().await;
-        recovery::commit(&g);
-    }
-
-    // --- State-driven player: seed shared control from config, then render per the
-    // current mode each frame. Setter commands (BLE/Wi-Fi) mutate `state::CONTROL`. ---
+    // Seed shared control state from config NOW — before the control channels start —
+    // so the BLE advert name (frozen at task startup) is the real device name.
     let sel = {
         let g = fs.lock().await;
         read_cfg_line(&g, b"selected.txt\0")
@@ -228,6 +200,42 @@ async fn main(spawner: Spawner) {
             }
         }
     }
+
+    // Start the BLE control channel (owns the CYW43 BT HCI + the shared fs for
+    // filesystem-backed commands like LIST/SELECT).
+    spawner.spawn(ble::ble_task(radio.bt_device, fs).unwrap());
+
+    // --- Wi-Fi: always bring up the net stack; the manager joins on demand from
+    // networks.txt (present at boot, or written live by WIFICONNECT). Non-fatal —
+    // the pattern plays regardless. TCP control server on :4550. ---
+    static NET_RES: StaticCell<embassy_net::StackResources<4>> = StaticCell::new();
+    let net_res = NET_RES.init(embassy_net::StackResources::new());
+    let (stack, net_runner) = embassy_net::new(
+        radio.net_device,
+        embassy_net::Config::dhcpv4(Default::default()),
+        net_res,
+        0x0123_4567_89ab_cdef,
+    );
+    spawner.spawn(wifi::net_runner_task(net_runner).unwrap());
+    spawner.spawn(wifi::tcp_task(stack, fs).unwrap());
+    spawner.spawn(wifi::discover_task(stack).unwrap());
+    spawner.spawn(wifi::manager_task(radio.control, stack, fs).unwrap());
+
+    // Boot complete — brief green LED-0 flash.
+    buf[0] = status::BootStage::Complete.led0_word();
+    ws.show(&buf[..]).await;
+    Timer::after_millis(150).await;
+    buf[0] = 0;
+
+    // We reached the run loop — the boot completed instead of being interrupted, so
+    // commit the recovery counter back to 0 (COMMIT_MS = 0: "let it start once" clears).
+    {
+        let g = fs.lock().await;
+        recovery::commit(&g);
+    }
+
+    // --- State-driven player (shared control state was seeded before the control
+    // channels started, above). Render per the current mode each frame. ---
     log::info!("player: starting (bright {})", bright);
 
     // The initially-selected pattern (borrows PATTERN_BUF; reloaded on SELECT).
