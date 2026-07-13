@@ -1,144 +1,266 @@
 //! Transport-agnostic control command dispatch (docs/protocol.md). The SAME
-//! command strings run over BLE now and Wi-Fi/TCP later. One line in, an optional
-//! text reply out; setters mutate the shared `state::CONTROL` and the player picks
-//! the change up on its next frame.
-//!
-//! This first cut covers the commands that work off the live control state (no
-//! filesystem): PING/INFO/VERSION/PLATFORM/BRIGHT/SPEED/SOLID/OFF/PLAY/NAME(query)
-//! and BOOTSEL. Filesystem-backed verbs (LIST/SELECT/DELETE/NAME set/FREE/MOREINFO)
-//! and auth land with shared-fs access.
+//! command strings run over BLE and Wi-Fi/TCP. Replies (one or many lines) are
+//! written to a `LineSink` the transport provides — a BLE TX notification per line,
+//! or a newline-terminated TCP line — so streamed responses (LIST) work everywhere.
+//! Setters mutate the shared `state::CONTROL`; filesystem verbs use the shared fs.
 
+use crate::fs::{make_path, SharedFs};
 use crate::state::{Mode, CONTROL};
 use core::fmt::Write;
 use heapless::String;
+use littlefs2::path::Path;
 
 pub const FW_VERSION: &str = "rust-0.1";
 pub const PLATFORM: &str = "Raspberry Pi Pico W with RP2040";
 
-/// A single-line reply (a BLE TX notification / a TCP line).
+/// A single reply line's max length.
 pub type Reply = String<160>;
 
-fn lit(s: &str) -> Option<Reply> {
-    let mut r = Reply::new();
-    let _ = r.push_str(s);
-    Some(r)
+/// Where replies go — one call per line. Implemented by each transport (BLE notify
+/// / TCP write). `async` so a slow link back-pressures the streamer.
+pub trait LineSink {
+    async fn send(&mut self, line: &str);
 }
 
-/// Handle one command line. Returns the reply, or `None` for no reply (e.g.
-/// `BOOTSEL`, which resets the chip before it could send one).
-pub async fn dispatch(line: &str) -> Option<Reply> {
+fn cfg_path(nul: &[u8]) -> &Path {
+    Path::from_bytes_with_nul(nul).unwrap()
+}
+
+/// Persist a small config file (best-effort).
+async fn write_cfg(fs: &SharedFs, name: &[u8], contents: &[u8]) {
+    let f = fs.lock().await;
+    let _ = f.write(cfg_path(name), contents);
+}
+
+/// Handle one command line, sending any reply lines to `sink`.
+pub async fn dispatch(line: &str, fs: &SharedFs, sink: &mut impl LineSink) {
     let line = line.trim();
     if line.is_empty() {
-        return None;
+        return;
     }
-    let mut parts = line.split_whitespace();
-    let verb = parts.next().unwrap_or("");
+    let verb_end = line.find(|c: char| c.is_whitespace()).unwrap_or(line.len());
+    let (verb, rest) = line.split_at(verb_end);
+    let arg = rest.trim();
     let mut vb: String<16> = String::new();
     for ch in verb.chars().take(16) {
         let _ = vb.push(ch.to_ascii_uppercase());
     }
 
     match vb.as_str() {
-        "PING" => lit("OK"),
+        "PING" => sink.send("OK").await,
 
-        "VERSION" => {
+        "VERSION" => reply(sink, format_args!("VERSION {}", FW_VERSION)).await,
+        "PLATFORM" => reply(sink, format_args!("PLATFORM {}", PLATFORM)).await,
+
+        "INFO" => {
+            let c = CONTROL.lock().await;
             let mut r = Reply::new();
-            let _ = write!(r, "VERSION {}", FW_VERSION);
-            Some(r)
-        }
-        "PLATFORM" => {
-            let mut r = Reply::new();
-            let _ = write!(r, "PLATFORM {}", PLATFORM);
-            Some(r)
+            let _ = write!(
+                r,
+                "INFO {} {} {} {} {} {} {}",
+                c.mode.as_str(),
+                c.bright,
+                c.speed,
+                c.solid[0],
+                c.solid[1],
+                c.solid[2],
+                c.file.as_str()
+            );
+            sink.send(&r).await;
         }
 
-        "INFO" => Some(info_line().await),
-
-        "BRIGHT" => match parts.next().and_then(|s| s.parse::<i32>().ok()) {
-            Some(n) => {
+        "BRIGHT" => match arg.parse::<i32>() {
+            Ok(n) => {
                 let pct = n.clamp(0, 100) as u8;
                 CONTROL.lock().await.bright = pct;
-                let mut r = Reply::new();
-                let _ = write!(r, "OK BRIGHT {}", pct);
-                Some(r)
+                let mut b: String<4> = String::new();
+                let _ = write!(b, "{}", pct);
+                write_cfg(fs, b"bright.txt\0", b.as_bytes()).await;
+                reply(sink, format_args!("OK BRIGHT {}", pct)).await;
             }
-            None => lit("ERR args"),
+            Err(_) => sink.send("ERR args").await,
         },
 
-        "SPEED" => match parts.next().and_then(|s| s.parse::<i32>().ok()) {
-            Some(n) => {
+        "SPEED" => match arg.parse::<i32>() {
+            Ok(n) => {
                 let sp = n.clamp(10, 400) as u16;
                 CONTROL.lock().await.speed = sp;
-                let mut r = Reply::new();
-                let _ = write!(r, "OK SPEED {}", sp);
-                Some(r)
+                reply(sink, format_args!("OK SPEED {}", sp)).await;
             }
-            None => lit("ERR args"),
+            Err(_) => sink.send("ERR args").await,
         },
 
         "SOLID" => {
-            let r = parts.next().and_then(|s| s.parse::<u16>().ok());
-            let g = parts.next().and_then(|s| s.parse::<u16>().ok());
-            let b = parts.next().and_then(|s| s.parse::<u16>().ok());
+            let mut it = arg.split_whitespace();
+            let r = it.next().and_then(|s| s.parse::<u16>().ok());
+            let g = it.next().and_then(|s| s.parse::<u16>().ok());
+            let b = it.next().and_then(|s| s.parse::<u16>().ok());
             match (r, g, b) {
                 (Some(r), Some(g), Some(b)) => {
-                    let mut c = CONTROL.lock().await;
-                    c.solid = [(r & 255) as u8, (g & 255) as u8, (b & 255) as u8];
-                    c.mode = Mode::Solid;
-                    lit("OK SOLID")
+                    let solid = [(r & 255) as u8, (g & 255) as u8, (b & 255) as u8];
+                    {
+                        let mut c = CONTROL.lock().await;
+                        c.solid = solid;
+                        c.mode = Mode::Solid;
+                    }
+                    persist_state(fs, Mode::Solid, solid).await;
+                    sink.send("OK SOLID").await;
                 }
-                _ => lit("ERR args"),
+                _ => sink.send("ERR args").await,
             }
         }
 
         "OFF" => {
-            let mut c = CONTROL.lock().await;
-            c.solid = [0, 0, 0];
-            c.mode = Mode::Off;
-            lit("OK OFF")
+            {
+                let mut c = CONTROL.lock().await;
+                c.solid = [0, 0, 0];
+                c.mode = Mode::Off;
+            }
+            persist_state(fs, Mode::Off, [0, 0, 0]).await;
+            sink.send("OK OFF").await;
         }
 
         "PLAY" => {
-            let mut c = CONTROL.lock().await;
-            c.mode = Mode::Play;
-            c.reload = true;
-            lit("OK PLAY")
+            let solid = {
+                let mut c = CONTROL.lock().await;
+                c.mode = Mode::Play;
+                c.reload = true;
+                c.solid
+            };
+            persist_state(fs, Mode::Play, solid).await;
+            sink.send("OK PLAY").await;
+        }
+
+        "LIST" => list_patterns(fs, sink).await,
+
+        "SELECT" => {
+            if arg.is_empty() {
+                sink.send("ERR args").await;
+                return;
+            }
+            let exists = {
+                let mut nb = [0u8; 64];
+                match make_path(arg, &mut nb) {
+                    Some(p) => fs.lock().await.exists(p),
+                    None => false,
+                }
+            };
+            if exists {
+                write_cfg(fs, b"selected.txt\0", arg.as_bytes()).await;
+                {
+                    let mut c = CONTROL.lock().await;
+                    c.file.set(arg);
+                    c.mode = Mode::Play;
+                    c.reload = true;
+                }
+                reply(sink, format_args!("OK SELECT {}", arg)).await;
+            } else {
+                sink.send("ERR no-file").await;
+            }
+        }
+
+        "DELETE" => {
+            if arg.is_empty() {
+                sink.send("ERR args").await;
+                return;
+            }
+            // Refuse to delete the active pattern.
+            if CONTROL.lock().await.file.as_str() == arg {
+                sink.send("ERR in-use").await;
+                return;
+            }
+            let ok = {
+                let mut nb = [0u8; 64];
+                match make_path(arg, &mut nb) {
+                    Some(p) => fs.lock().await.remove(p).is_ok(),
+                    None => false,
+                }
+            };
+            if ok {
+                reply(sink, format_args!("OK DELETE {}", arg)).await;
+            } else {
+                sink.send("ERR no-file").await;
+            }
+        }
+
+        "FREE" => {
+            let free = fs.lock().await.available_space().unwrap_or(0);
+            reply(sink, format_args!("FREE {}", free)).await;
         }
 
         "NAME" => {
-            // Query only for now; the persisting setter arrives with shared-fs access.
-            let c = CONTROL.lock().await;
-            let mut r = Reply::new();
-            let _ = write!(r, "NAME {}", c.name.as_str());
-            Some(r)
+            if arg.is_empty() {
+                let c = CONTROL.lock().await;
+                let mut r = Reply::new();
+                let _ = write!(r, "NAME {}", c.name.as_str());
+                sink.send(&r).await;
+            } else {
+                // Printable ASCII only, capped at 26 (the name rides the advert).
+                let mut clean: String<26> = String::new();
+                for ch in arg.chars() {
+                    if (32..127).contains(&(ch as u32)) && clean.push(ch).is_err() {
+                        break;
+                    }
+                }
+                let trimmed = clean.as_str().trim();
+                if trimmed.is_empty() {
+                    sink.send("ERR args").await;
+                } else {
+                    write_cfg(fs, b"devicename.txt\0", trimmed.as_bytes()).await;
+                    CONTROL.lock().await.name.set(trimmed);
+                    // NB: the live BLE advert name updates on next reboot.
+                    reply(sink, format_args!("OK NAME {}", trimmed)).await;
+                }
+            }
         }
 
         "BOOTSEL" => {
-            // Reboot into the ROM USB bootloader (the RPI-RP2 drive) so a new UF2 can
-            // be dropped on — matches the MicroPython BOOTSEL command (protocol.md
-            // → Maintenance). The chip resets, so there is no reply.
+            // Reboot into the ROM USB bootloader (RPI-RP2) — the protocol.md
+            // Maintenance command. The chip resets, so there is no reply.
             embassy_rp::rom_data::reset_to_usb_boot(0, 0);
-            None
         }
 
-        _ => lit("ERR unknown"),
+        _ => sink.send("ERR unknown").await,
     }
 }
 
-/// The lean `INFO` control-state line: `INFO <mode> <bright%> <speed%> <r> <g> <b> <file>`.
-async fn info_line() -> Reply {
-    let c = CONTROL.lock().await;
+/// Stream the `.leda` pattern files: `LISTLEN <n>`, one `FILE <name>` each, `ENDLIST`.
+async fn list_patterns(fs: &SharedFs, sink: &mut impl LineSink) {
+    let mut names: heapless::Vec<String<48>, 64> = heapless::Vec::new();
+    {
+        let f = fs.lock().await;
+        let _ = f.read_dir_and_then(cfg_path(b"/\0"), |rd| {
+            for entry in rd.flatten() {
+                if entry.file_type().is_file() {
+                    let nm: &str = entry.file_name().as_ref();
+                    if nm.ends_with(".leda") {
+                        let mut s = String::new();
+                        if s.push_str(nm).is_ok() {
+                            let _ = names.push(s);
+                        }
+                    }
+                }
+            }
+            Ok(())
+        });
+    }
+    reply(sink, format_args!("LISTLEN {}", names.len())).await;
+    for nm in &names {
+        reply(sink, format_args!("FILE {}", nm.as_str())).await;
+    }
+    sink.send("ENDLIST").await;
+}
+
+/// Persist the playback mode + solid color to `state.txt` ("<mode> <r> <g> <b>").
+async fn persist_state(fs: &SharedFs, mode: Mode, solid: [u8; 3]) {
+    let mut s: String<32> = String::new();
+    let _ = write!(s, "{} {} {} {}", mode.as_str(), solid[0], solid[1], solid[2]);
+    write_cfg(fs, b"state.txt\0", s.as_bytes()).await;
+}
+
+/// Format + send a single reply line.
+async fn reply(sink: &mut impl LineSink, args: core::fmt::Arguments<'_>) {
     let mut r = Reply::new();
-    let _ = write!(
-        r,
-        "INFO {} {} {} {} {} {} {}",
-        c.mode.as_str(),
-        c.bright,
-        c.speed,
-        c.solid[0],
-        c.solid[1],
-        c.solid[2],
-        c.file.as_str()
-    );
-    r
+    let _ = r.write_fmt(args);
+    sink.send(&r).await;
 }

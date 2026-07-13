@@ -72,10 +72,15 @@ async fn main(spawner: Spawner) {
     buf[0] = status::BootStage::Storage.led0_word();
     ws.show(&buf[..]).await;
     let flash = embassy_rp::flash::Flash::new_blocking(p.FLASH);
-    let mut storage = fs::FlashStorage::new(flash);
-    let mut alloc = Filesystem::allocate();
-    let fs = match Filesystem::mount(&mut alloc, &mut storage) {
-        Ok(fs) => fs,
+    static STORAGE: StaticCell<fs::FlashStorage> = StaticCell::new();
+    static ALLOC: StaticCell<littlefs2::fs::Allocation<fs::FlashStorage>> = StaticCell::new();
+    static FS: StaticCell<fs::SharedFs> = StaticCell::new();
+    let storage = STORAGE.init(fs::FlashStorage::new(flash));
+    let alloc = ALLOC.init(Filesystem::allocate());
+    // `fs` is now a `&'static` mutex shared by the player, recovery, and the control
+    // dispatch (BLE + Wi-Fi). Lock it briefly for each op.
+    let fs: &'static fs::SharedFs = match Filesystem::mount(alloc, storage) {
+        Ok(f) => FS.init(embassy_sync::mutex::Mutex::new(f)),
         // Fatal: no readable storage — show the RMA code on LED 0, forever.
         Err(_) => halt_error(&mut ws, buf, status::errors::FS_MOUNT_FAILED).await,
     };
@@ -83,7 +88,11 @@ async fn main(spawner: Spawner) {
     // --- Power-cycle recovery ritual — bump the counter BEFORE radio bring-up, so
     // it climbs even if a dead radio would hang the boot. Feedback is rendered now
     // (before the ~0.7 s radio init) so a rapid cycler sees it immediately. ---
-    match recovery::bump_and_act(&fs) {
+    let recovery_action = {
+        let g = fs.lock().await;
+        recovery::bump_and_act(&g)
+    };
+    match recovery_action {
         recovery::Action::None => {}
         recovery::Action::Climb(n) => {
             // "You're at N" — light N dim-white pixels for ~0.6 s.
@@ -125,10 +134,14 @@ async fn main(spawner: Spawner) {
     }
 
     // --- Config: master brightness + the selected pattern (loaded into PATTERN_BUF) ---
-    let bright = read_bright(&fs);
+    let bright = {
+        let g = fs.lock().await;
+        read_bright(&g)
+    };
     let pat_len = {
         let pbuf = unsafe { &mut *addr_of_mut!(PATTERN_BUF) };
-        load_selected(&fs, pbuf)
+        let g = fs.lock().await;
+        load_selected(&g, pbuf)
     };
 
     // --- Radio bring-up (BootStage::Radio, dim blue). Blocking chip init; a dead
@@ -142,12 +155,17 @@ async fn main(spawner: Spawner) {
     radio.control.gpio_set(0, true).await; // onboard LED on = radio alive
     log::info!("radio up (CYW43 Wi-Fi + BT firmware loaded)");
 
-    // Start the BLE control channel (owns the CYW43 BT HCI).
-    spawner.spawn(ble::ble_task(radio.bt_device).unwrap());
+    // Start the BLE control channel (owns the CYW43 BT HCI + the shared fs for
+    // filesystem-backed commands like LIST/SELECT).
+    spawner.spawn(ble::ble_task(radio.bt_device, fs).unwrap());
 
     // --- Wi-Fi: auto-join if networks.txt has credentials (non-fatal; the pattern
     // plays regardless). Brings up embassy-net + the TCP control server on :4550. ---
-    if let Some((ssid, pass)) = read_wifi_creds(&fs) {
+    let creds = {
+        let g = fs.lock().await;
+        read_wifi_creds(&g)
+    };
+    if let Some((ssid, pass)) = creds {
         static NET_RES: StaticCell<embassy_net::StackResources<4>> = StaticCell::new();
         let net_res = NET_RES.init(embassy_net::StackResources::new());
         let (stack, net_runner) = embassy_net::new(
@@ -158,7 +176,7 @@ async fn main(spawner: Spawner) {
         );
         spawner.spawn(wifi::net_runner_task(net_runner).unwrap());
         spawner.spawn(wifi::wifi_task(radio.control, ssid, pass).unwrap());
-        spawner.spawn(wifi::tcp_task(stack).unwrap());
+        spawner.spawn(wifi::tcp_task(stack, fs).unwrap());
         log::info!("wifi: configured — bringing up");
     } else {
         log::info!("wifi: no networks.txt — skipping");
@@ -172,17 +190,28 @@ async fn main(spawner: Spawner) {
 
     // We reached the run loop — the boot completed instead of being interrupted, so
     // commit the recovery counter back to 0 (COMMIT_MS = 0: "let it start once" clears).
-    recovery::commit(&fs);
+    {
+        let g = fs.lock().await;
+        recovery::commit(&g);
+    }
 
     // --- State-driven player: seed shared control from config, then render per the
     // current mode each frame. Setter commands (BLE/Wi-Fi) mutate `state::CONTROL`. ---
+    let sel = {
+        let g = fs.lock().await;
+        read_cfg_line(&g, b"selected.txt\0")
+    };
+    let nm = {
+        let g = fs.lock().await;
+        read_cfg_line(&g, b"devicename.txt\0")
+    };
     {
         let mut c = state::CONTROL.lock().await;
         c.bright = bright;
-        if let Some(s) = read_cfg_line(&fs, b"selected.txt\0") {
+        if let Some(s) = sel {
             c.file.set(s.as_str());
         }
-        if let Some(s) = read_cfg_line(&fs, b"devicename.txt\0") {
+        if let Some(s) = nm {
             c.name.set(s.as_str());
         }
     }
@@ -205,7 +234,8 @@ async fn main(spawner: Spawner) {
             let _ = pattern.take(); // drop the borrow BEFORE mutating PATTERN_BUF
             let newlen = {
                 let pbuf = unsafe { &mut *addr_of_mut!(PATTERN_BUF) };
-                load_selected(&fs, pbuf)
+                let g = fs.lock().await;
+                load_selected(&g, pbuf)
             };
             let pbuf_ref = unsafe { &*addr_of!(PATTERN_BUF) };
             pattern = newlen.and_then(|n| leda::Pattern::parse(&pbuf_ref[..n]));

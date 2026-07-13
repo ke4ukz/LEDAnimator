@@ -9,7 +9,8 @@
 //!
 //! The UDP `LEDADISCOVER` responder is a follow-up (see docs/PORT.md).
 
-use crate::protocol;
+use crate::fs::SharedFs;
+use crate::protocol::{self, LineSink};
 use cyw43::{Control, JoinOptions, NetDriver};
 use embassy_net::tcp::TcpSocket;
 use embassy_net::{Runner, Stack};
@@ -48,9 +49,21 @@ pub async fn wifi_task(
     }
 }
 
+/// A `LineSink` that writes each reply line + newline to the TCP socket.
+struct TcpSink<'a, 'b> {
+    sock: &'a mut TcpSocket<'b>,
+}
+
+impl LineSink for TcpSink<'_, '_> {
+    async fn send(&mut self, line: &str) {
+        let _ = self.sock.write_all(line.as_bytes()).await;
+        let _ = self.sock.write_all(b"\n").await;
+    }
+}
+
 /// Accept control connections on :4550 and run each command through `dispatch`.
 #[embassy_executor::task]
-pub async fn tcp_task(stack: Stack<'static>) {
+pub async fn tcp_task(stack: Stack<'static>, fs: &'static SharedFs) {
     stack.wait_config_up().await;
     if let Some(cfg) = stack.config_v4() {
         log::info!("wifi: IP {} — TCP control on :{}", cfg.address.address(), PORT);
@@ -66,7 +79,7 @@ pub async fn tcp_task(stack: Stack<'static>) {
             continue;
         }
         log::info!("tcp: client connected");
-        serve(&mut sock).await;
+        serve(&mut sock, fs).await;
         sock.abort();
         let _ = sock.flush().await;
         log::info!("tcp: client disconnected");
@@ -74,7 +87,7 @@ pub async fn tcp_task(stack: Stack<'static>) {
 }
 
 /// One connection: line-buffered read → dispatch → newline-terminated reply.
-async fn serve(sock: &mut TcpSocket<'_>) {
+async fn serve(sock: &mut TcpSocket<'_>, fs: &'static SharedFs) {
     let mut line: heapless::String<200> = heapless::String::new();
     let mut buf = [0u8; 128];
     loop {
@@ -82,13 +95,12 @@ async fn serve(sock: &mut TcpSocket<'_>) {
             Ok(0) | Err(_) => return,
             Ok(n) => n,
         };
-        for &b in &buf[..n] {
+        for i in 0..n {
+            let b = buf[i];
             if b == b'\n' {
                 if !line.is_empty() {
-                    if let Some(resp) = protocol::dispatch(line.as_str()).await {
-                        let _ = sock.write_all(resp.as_bytes()).await;
-                        let _ = sock.write_all(b"\n").await;
-                    }
+                    let mut sink = TcpSink { sock: &mut *sock };
+                    protocol::dispatch(line.as_str(), fs, &mut sink).await;
                     line.clear();
                 }
             } else if b != b'\r' && line.push(b as char).is_err() {

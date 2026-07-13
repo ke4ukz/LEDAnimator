@@ -66,6 +66,16 @@ impl Storage for FlashStorage {
 /// The mounted filesystem over the flash `FlashStorage`.
 pub type Fs<'a> = littlefs2::fs::Filesystem<'a, FlashStorage>;
 
+/// The shared, `'static` filesystem behind an async mutex — so the player,
+/// recovery, and the control-command dispatch (BLE + Wi-Fi tasks) all serialize
+/// their flash access. littlefs ops are blocking (they never yield mid-op), so the
+/// mutex is held only briefly; it also supplies the `Sync` the shared `&'static`
+/// needs. Built once in `main` after a successful mount.
+pub type SharedFs = embassy_sync::mutex::Mutex<
+    embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex,
+    Fs<'static>,
+>;
+
 /// Build a nul-terminated littlefs `Path` from a runtime filename into `buf`
 /// (for the dynamically-named selected pattern; known config names use `path!`).
 pub fn make_path<'a>(name: &str, buf: &'a mut [u8; 64]) -> Option<&'a littlefs2::path::Path> {

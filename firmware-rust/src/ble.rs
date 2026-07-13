@@ -4,7 +4,8 @@
 //! (docs/protocol.md → Bluetooth LE). Command handling is the shared, transport-
 //! agnostic `protocol::dispatch`.
 
-use crate::protocol;
+use crate::fs::SharedFs;
+use crate::protocol::{self, LineSink};
 use crate::state::CONTROL;
 use cyw43::bluetooth::BtDriver;
 use embassy_futures::join::join;
@@ -36,14 +37,26 @@ struct NusService {
     tx: heapless::Vec<u8, 200>,
 }
 
-/// The BLE control task: owns the CYW43 BT HCI and runs the host forever.
-#[embassy_executor::task]
-pub async fn ble_task(bt_device: BtDriver<'static>) {
-    let controller: ExternalController<BtDriver<'static>, 10> = ExternalController::new(bt_device);
-    run(controller).await;
+/// A `LineSink` that notifies each reply line on the TX characteristic.
+struct BleSink<'a, 'stack, 'server, P: PacketPool> {
+    tx: &'a Characteristic<heapless::Vec<u8, 200>>,
+    conn: &'a GattConnection<'stack, 'server, P>,
 }
 
-async fn run<C: Controller>(controller: C) {
+impl<P: PacketPool> LineSink for BleSink<'_, '_, '_, P> {
+    async fn send(&mut self, line: &str) {
+        let _ = self.tx.notify_raw(self.conn, line.as_bytes(), false).await;
+    }
+}
+
+/// The BLE control task: owns the CYW43 BT HCI and runs the host forever.
+#[embassy_executor::task]
+pub async fn ble_task(bt_device: BtDriver<'static>, fs: &'static SharedFs) {
+    let controller: ExternalController<BtDriver<'static>, 10> = ExternalController::new(bt_device);
+    run(controller, fs).await;
+}
+
+async fn run<C: Controller>(controller: C, fs: &'static SharedFs) {
     // A fixed random address for now (a real device would use its BT MAC).
     let address: Address = Address::random([0xff, 0x8f, 0x1a, 0x05, 0xe4, 0xff]);
     let mut resources: HostResources<C, DefaultPacketPool, CONNECTIONS_MAX, L2CAP_CHANNELS_MAX> =
@@ -78,7 +91,7 @@ async fn run<C: Controller>(controller: C) {
             match advertise(name.as_str(), &mut peripheral, &server).await {
                 Ok(conn) => {
                     log::info!("BLE: connected");
-                    gatt_events(&server, &conn).await;
+                    gatt_events(&server, &conn, fs).await;
                     log::info!("BLE: disconnected");
                 }
                 Err(_) => Timer::after_millis(500).await,
@@ -130,7 +143,11 @@ async fn advertise<'values, 'server, C: Controller>(
 }
 
 /// Handle GATT events for one connection: RX writes → dispatch → TX notify.
-async fn gatt_events<P: PacketPool>(server: &Server<'_>, conn: &GattConnection<'_, '_, P>) {
+async fn gatt_events<P: PacketPool>(
+    server: &Server<'_>,
+    conn: &GattConnection<'_, '_, P>,
+    fs: &'static SharedFs,
+) {
     let rx_handle = server.nus.rx.handle;
     let tx = &server.nus.tx;
     loop {
@@ -153,11 +170,10 @@ async fn gatt_events<P: PacketPool>(server: &Server<'_>, conn: &GattConnection<'
                     Ok(reply) => reply.send().await,
                     Err(_) => {}
                 }
-                // Dispatch and notify the reply, if any.
+                // Dispatch; replies notify on TX (possibly several lines for LIST).
                 if !cmd.is_empty() {
-                    if let Some(resp) = protocol::dispatch(cmd.as_str()).await {
-                        let _ = tx.notify_raw(conn, resp.as_bytes(), false).await;
-                    }
+                    let mut sink = BleSink { tx, conn };
+                    protocol::dispatch(cmd.as_str(), fs, &mut sink).await;
                 }
             }
             _ => {}

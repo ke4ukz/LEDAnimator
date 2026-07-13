@@ -47,8 +47,11 @@ littlefs2 = { version = "0.8", default-features = false }
 # `critical-section` feature (enabled above) supplies the CAS polyfill.
 delog = { version = "0.1", features = ["portable-atomic"] }
 # littlefs's C path parsing (lfs_dir_find) calls strspn/strcspn/strchr — not in
-# no_std. littlefs2-sys's `tinyrlibc` feature supplies these C string functions.
+# no_std. littlefs2-sys's `tinyrlibc` feature supplies these; but its feature set
+# omits strcpy/strcmp/strncmp (which read_dir / entry-name handling need), so pull
+# tinyrlibc directly for those — Cargo feature-unification adds them to the build.
 littlefs2-sys = { version = "0.4", features = ["tinyrlibc"] }
+tinyrlibc = { version = "0.5", default-features = false, features = ["strcpy", "strcmp", "strncmp"] }
 # RP2040 is Cortex-M0+ (thumbv6m): no native atomic CAS. Emulate it via
 # critical-section so static_cell / embassy atomics compile.
 portable-atomic = { version = "1", features = ["critical-section"] }
