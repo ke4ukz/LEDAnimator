@@ -205,6 +205,10 @@ async fn main(spawner: Spawner) {
         let g = fs.lock().await;
         read_cfg_line(&g, b"devicename.txt\0")
     };
+    let st = {
+        let g = fs.lock().await;
+        read_cfg_line(&g, b"state.txt\0")
+    };
     {
         let mut c = state::CONTROL.lock().await;
         c.bright = bright;
@@ -213,6 +217,22 @@ async fn main(spawner: Spawner) {
         }
         if let Some(s) = nm {
             c.name.set(s.as_str());
+        }
+        // Restore last mode + solid color ("<mode> <r> <g> <b>") so play/solid/off
+        // survives a reboot (matches the MicroPython state.txt behavior).
+        if let Some(s) = st {
+            let mut it = s.split_whitespace();
+            if let Some(m) = it.next() {
+                let r = it.next().and_then(|x| x.parse().ok()).unwrap_or(0);
+                let g = it.next().and_then(|x| x.parse().ok()).unwrap_or(0);
+                let b = it.next().and_then(|x| x.parse().ok()).unwrap_or(0);
+                c.solid = [r, g, b];
+                c.mode = match m {
+                    "solid" => state::Mode::Solid,
+                    "off" => state::Mode::Off,
+                    _ => state::Mode::Play,
+                };
+            }
         }
     }
     log::info!("player: starting (bright {})", bright);

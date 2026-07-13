@@ -131,6 +131,19 @@ pub async fn dispatch(line: &str, fs: &SharedFs, sink: &mut impl LineSink) {
             sink.send("OK PLAY").await;
         }
 
+        "MOREINFO" => {
+            // Heavier device details, streamed as self-describing KEY <value> lines
+            // (the app ignores keys it doesn't know + shows N/A for missing ones, so
+            // fields we can't source yet — MACs, sync, power — are simply omitted).
+            reply(sink, format_args!("VERSION {}", FW_VERSION)).await;
+            let free = fs.lock().await.available_space().unwrap_or(0);
+            reply(sink, format_args!("FREE {}", free)).await;
+            reply(sink, format_args!("PLATFORM {}", PLATFORM)).await;
+            sink.send("PIN 0").await; // data pin fixed at GP0
+            sink.send("AUTH none").await; // no PIN support yet
+            sink.send("ENDINFO").await;
+        }
+
         "LIST" => list_patterns(fs, sink).await,
 
         "SELECT" => {
