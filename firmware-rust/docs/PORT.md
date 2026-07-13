@@ -223,9 +223,18 @@ in the repo docs. (Item 1 — config + littlefs — is **DONE**; see the status 
    (embassy-rp `Flash`), reusing the **same layout** the web UF2 builds
    (`fsBase 0x1012c000`, 212×4096) so existing bundles Just Work. This unblocks
    playing real patterns + all persisted settings.
-2. **Power-cycle recovery ritual.** Pure logic (`bootcount.txt`, 5×/10× thresholds,
-   commit-on-boot-completion). Trivial once (1) exists — port
-   [`config-and-auth-plan.md`](../../docs/config-and-auth-plan.md) §3 directly.
+2. **Power-cycle recovery ritual.** ✅ **CODE DONE 2026-07-13** ([`src/recovery.rs`](../src/recovery.rs)).
+   `bump_and_act` bumps `bootcount.txt` right after mount (before radio, so it climbs
+   even if a dead radio hangs boot); `commit` removes it at the top of the run loop
+   (COMMIT_MS = 0). 5th short boot → remove `auth.txt` (cyan whole-strip flash); 10th
+   → also remove `networks.txt` + write `standalone.txt` (magenta). Counts 2–4/6–9
+   light N dim-white pixels; 1 is silent. **No regression** (boots + plays normally,
+   so bump/commit work on the live path) and built on the already-HW-validated
+   littlefs write/remove. **Physical 5×/10× ritual pending bench validation** — CLI
+   reboots can't reliably interrupt within the boot window and the early boot logs
+   drop before the host re-enumerates the CDC, so the strip-watching validation
+   (like the MicroPython one) is a bench task. Note: de-group via `standalone.txt` is
+   written now; it takes effect once sync/role lands (Phase 5).
 3. **CYW43 bring-up.** `cyw43` + `cyw43-pio` (the SPI-over-PIO the Pico W uses),
    embedding the firmware + CLM blobs. Gateway to both Wi-Fi and BLE. Finicky;
    do it in isolation first (join a network, blink the on-chip LED).

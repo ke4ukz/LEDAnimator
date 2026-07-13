@@ -5,6 +5,7 @@ mod fs;
 mod leda;
 mod panic; // registers the #[panic_handler] (LED-0 red flutter)
 mod radio; // CYW43 Wi-Fi + BT bring-up
+mod recovery; // power-cycle recovery ritual
 mod status;
 mod usb; // picotool reset interface + CDC serial logger
 mod ws2812;
@@ -72,6 +73,50 @@ async fn main(spawner: Spawner) {
         Err(_) => halt_error(&mut ws, buf, status::errors::FS_MOUNT_FAILED).await,
     };
 
+    // --- Power-cycle recovery ritual — bump the counter BEFORE radio bring-up, so
+    // it climbs even if a dead radio would hang the boot. Feedback is rendered now
+    // (before the ~0.7 s radio init) so a rapid cycler sees it immediately. ---
+    match recovery::bump_and_act(&fs) {
+        recovery::Action::None => {}
+        recovery::Action::Climb(n) => {
+            // "You're at N" — light N dim-white pixels for ~0.6 s.
+            let lit = (n as usize).min(MAX_LEDS);
+            for w in buf.iter_mut() {
+                *w = 0;
+            }
+            let dim_white = ws2812::grb_word(40, 40, 40);
+            for w in buf[..lit].iter_mut() {
+                *w = dim_white;
+            }
+            ws.show(&buf[..lit]).await;
+            Timer::after_millis(600).await;
+            for w in buf[..lit].iter_mut() {
+                *w = 0;
+            }
+            ws.show(&buf[..lit]).await;
+        }
+        action => {
+            if let Some(kind) = action.recovery() {
+                // Whole-strip flash (~1.5 s). Show the full buffer so the entire
+                // physical strip flashes regardless of its length.
+                status::paint_recovery(kind, buf);
+                ws.show(&buf[..]).await;
+                log::info!(
+                    "recovery: {}",
+                    match kind {
+                        status::Recovery::PinCleared => "PIN cleared (cyan)",
+                        status::Recovery::FactoryReset => "factory reset (magenta)",
+                    }
+                );
+                Timer::after_millis(1500).await;
+                for w in buf.iter_mut() {
+                    *w = 0;
+                }
+                ws.show(&buf[..]).await;
+            }
+        }
+    }
+
     // --- Config: master brightness + the selected pattern (loaded into PATTERN_BUF) ---
     let bright = read_bright(&fs);
     let pat_len = {
@@ -95,6 +140,10 @@ async fn main(spawner: Spawner) {
     ws.show(&buf[..]).await;
     Timer::after_millis(150).await;
     buf[0] = 0;
+
+    // We reached the run loop — the boot completed instead of being interrupted, so
+    // commit the recovery counter back to 0 (COMMIT_MS = 0: "let it start once" clears).
+    recovery::commit(&fs);
 
     // --- Play the selected pattern, or show "nofile" if none is playable ---
     let pbuf_ref = unsafe { &*addr_of!(PATTERN_BUF) };
