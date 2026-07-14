@@ -84,6 +84,10 @@ struct ControlView: View {
                     Text("Off").tag(PlaybackMode.off)
                 }
                 .pickerStyle(.segmented)
+                // Hide the "Mode" label so the segmented control takes the full width
+                // instead of the label wrapping ("M o d e") in a narrow pane. The
+                // "Playback" section header + the segments make the meaning clear.
+                .labelsHidden()
 
                 if playback == .solid {
                     ColorPicker("Color", selection: Binding<Color>(
@@ -115,6 +119,15 @@ struct ControlView: View {
                     Spacer()
                     Text("\(session.brightness)%")
                         .foregroundStyle(.secondary)
+                }
+            } footer: {
+                if session.brightness <= 50 {
+                    Label(
+                        "Low brightness can make color fades step instead of blending smoothly.",
+                        systemImage: "exclamationmark.triangle"
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 }
             }
 
