@@ -303,6 +303,37 @@ async fn main(spawner: Spawner) {
                 ws.show(&buf[..n]).await;
                 Timer::after_millis(50).await;
             }
+            state::Mode::Play if snap.role.is_follower() => match &pattern {
+                // Follower: the displayed frame comes from the phase-lock loop.
+                Some(pat) if pat.header.num_frames > 0 && pat.header.num_leds > 0 => {
+                    let ff = state::follower_frame();
+                    if ff == state::NO_LOCK {
+                        // Acquiring — blue LED-0 pulse, strip dark, until a lock.
+                        for w in buf.iter_mut() {
+                            *w = 0;
+                        }
+                        buf[0] = status::led0_word(status::Status::Acquiring);
+                        ws.show(&buf[..]).await;
+                        Timer::after_millis(33).await;
+                    } else {
+                        let f = ff.min(pat.header.num_frames - 1);
+                        if let Some(rgb) = pat.frame(f) {
+                            leda::fill_grb(rgb, &mut buf[..n], bright255);
+                            ws.show(&buf[..n]).await;
+                        }
+                        // The PLL advances the phase; just refresh (~60 Hz) to track it.
+                        Timer::after_millis(16).await;
+                    }
+                }
+                _ => {
+                    for w in buf.iter_mut() {
+                        *w = 0;
+                    }
+                    buf[0] = status::led0_word(status::Status::Nofile);
+                    ws.show(&buf[..]).await;
+                    Timer::after_millis(33).await;
+                }
+            },
             state::Mode::Play => match &pattern {
                 Some(pat) if pat.header.num_frames > 0 && pat.header.num_leds > 0 => {
                     if let Some(rgb) = pat.frame(frame) {

@@ -54,6 +54,18 @@ pub fn position() -> (u32, u32) {
     (POS_FRAME.load(Ordering::Relaxed), POS_TS_MS.load(Ordering::Relaxed))
 }
 
+/// The frame a **follower** should currently display (from its phase-lock loop), or
+/// `NO_LOCK` while acquiring/searching. Published by the follower, read by the player.
+pub const NO_LOCK: u32 = u32::MAX;
+static FOLLOWER_FRAME: AtomicU32 = AtomicU32::new(NO_LOCK);
+
+pub fn set_follower_frame(f: u32) {
+    FOLLOWER_FRAME.store(f, Ordering::Relaxed);
+}
+pub fn follower_frame() -> u32 {
+    FOLLOWER_FRAME.load(Ordering::Relaxed)
+}
+
 /// Sync role (the `.leda` header byte): does this device lead, follow, or neither?
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Role {
@@ -77,6 +89,10 @@ impl Role {
     /// Does this role broadcast the sync beacon?
     pub fn is_leader(self) -> bool {
         matches!(self, Role::Leader | Role::LeaderOnly)
+    }
+    /// Does this role scan + phase-lock to a leader's beacon?
+    pub fn is_follower(self) -> bool {
+        matches!(self, Role::Follower)
     }
 }
 
@@ -185,6 +201,7 @@ pub struct Snapshot {
     pub mode: Mode,
     pub solid: [u8; 3],
     pub reload: bool,
+    pub role: Role,
 }
 
 /// Copy out the current state (clearing `reload`, since the caller acts on it).
@@ -196,6 +213,7 @@ pub async fn take_snapshot() -> Snapshot {
         mode: c.mode,
         solid: c.solid,
         reload: c.reload,
+        role: c.role,
     };
     c.reload = false;
     snap

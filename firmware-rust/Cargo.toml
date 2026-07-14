@@ -27,7 +27,7 @@ cyw43 = { version = "0.7", features = ["bluetooth"] }
 cyw43-pio = { version = "0.10" }
 # BLE control channel (Phase E) — trouble-host over the CYW43 HCI. crates.io
 # (both agree on bt-hci 0.9 — see spike-graph/STATUS.md).
-trouble-host = { version = "0.7", features = ["default-packet-pool-mtu-128"] }
+trouble-host = { version = "0.7", features = ["default-packet-pool-mtu-128", "scan"] }
 bt-hci = { version = "0.9" }
 # Wi-Fi networking (Phase F) — embassy-net (smoltcp) over the CYW43 net driver.
 embassy-net = { version = "0.9", features = ["tcp", "udp", "dhcpv4", "medium-ethernet"] }

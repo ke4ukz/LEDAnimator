@@ -9,8 +9,33 @@ use crate::protocol::{self, LineSink};
 use crate::state::CONTROL;
 use cyw43::bluetooth::BtDriver;
 use embassy_futures::join::join;
-use embassy_time::Timer;
+use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
+use embassy_sync::signal::Signal;
+use bt_hci::cmd::le::{
+    LeAddDeviceToFilterAcceptList, LeClearFilterAcceptList, LeSetScanEnable, LeSetScanParams,
+};
+use bt_hci::controller::ControllerCmdSync;
+use bt_hci::param::FilterDuplicates;
+use embassy_time::{Duration, Instant, Timer};
 use trouble_host::prelude::*;
+
+/// The HCI scan commands a follower's `Central` needs from its controller.
+trait ScanController:
+    Controller
+    + ControllerCmdSync<LeSetScanParams>
+    + ControllerCmdSync<LeSetScanEnable>
+    + ControllerCmdSync<LeClearFilterAcceptList>
+    + ControllerCmdSync<LeAddDeviceToFilterAcceptList>
+{
+}
+impl<C> ScanController for C where
+    C: Controller
+        + ControllerCmdSync<LeSetScanParams>
+        + ControllerCmdSync<LeSetScanEnable>
+        + ControllerCmdSync<LeClearFilterAcceptList>
+        + ControllerCmdSync<LeAddDeviceToFilterAcceptList>
+{
+}
 
 const CONNECTIONS_MAX: usize = 1;
 const L2CAP_CHANNELS_MAX: usize = 2; // signalling + ATT
@@ -56,7 +81,7 @@ pub async fn ble_task(bt_device: BtDriver<'static>, fs: &'static SharedFs) {
     run(controller, fs).await;
 }
 
-async fn run<C: Controller>(controller: C, fs: &'static SharedFs) {
+async fn run<C: ScanController>(controller: C, fs: &'static SharedFs) {
     // A fixed random address for now (a real device would use its BT MAC).
     let address: Address = Address::random([0xff, 0x8f, 0x1a, 0x05, 0xe4, 0xff]);
     let mut resources: HostResources<C, DefaultPacketPool, CONNECTIONS_MAX, L2CAP_CHANNELS_MAX> =
@@ -64,12 +89,14 @@ async fn run<C: Controller>(controller: C, fs: &'static SharedFs) {
     let stack = trouble_host::new(controller, &mut resources)
         .set_random_address(address)
         .build();
-    let mut peripheral = stack.peripheral();
-    let runner = stack.runner();
+    let role = { CONTROL.lock().await.role };
 
-    // A leader broadcasts the connectionless sync beacon (control is over Wi-Fi);
-    // everyone else advertises connectable device-info + GATT for the app.
-    if { CONTROL.lock().await.role }.is_leader() {
+    // A leader broadcasts the connectionless sync beacon (control of a leader is over
+    // Wi-Fi); a follower scans + phase-locks to it; everyone else advertises
+    // connectable device-info + GATT for the app.
+    if role.is_leader() {
+        let mut peripheral = stack.peripheral();
+        let runner = stack.runner();
         log::info!("BLE: leader — broadcasting sync beacon");
         let mut seq: u8 = 0;
         join(host_task(runner), async {
@@ -95,6 +122,18 @@ async fn run<C: Controller>(controller: C, fs: &'static SharedFs) {
         .await;
         return;
     }
+
+    if role.is_follower() {
+        log::info!("BLE: follower — scanning for the leader beacon");
+        let group = { CONTROL.lock().await.group };
+        let central = stack.central();
+        let mut runner = stack.runner();
+        run_follower(central, &mut runner, group).await;
+        return;
+    }
+
+    let mut peripheral = stack.peripheral();
+    let runner = stack.runner();
 
     // Device name for GAP + the advert scan response (default if none set yet).
     let mut name: heapless::String<32> = heapless::String::new();
@@ -174,6 +213,247 @@ async fn host_task<C: Controller, P: PacketPool>(mut runner: Runner<'_, C, P>) {
     loop {
         let _ = runner.run().await;
     }
+}
+
+// ======================= Follower: scan + phase-lock =======================
+
+/// A decoded leader sync beacon (type 0x02).
+#[derive(Clone, Copy)]
+struct Beacon {
+    group: u8,
+    frame: u32,
+    ts: u32,
+    flags: u8,
+    rssi: i8,
+}
+
+/// Latest beacon from the scan event handler → the PLL loop.
+static BEACON_SIG: Signal<CriticalSectionRawMutex, Beacon> = Signal::new();
+
+/// Parse a beacon from raw advert bytes: an AD `0xFF` manufacturer block with
+/// company `FFFF`, magic `LD`, type `0x02`, then the 13-byte payload.
+fn parse_beacon(data: &[u8]) -> Option<Beacon> {
+    let mut i = 0usize;
+    while i + 1 < data.len() {
+        let len = data[i] as usize;
+        if len == 0 || i + 1 + len > data.len() {
+            break;
+        }
+        let ad_type = data[i + 1];
+        let ad = &data[i + 2..i + 1 + len];
+        if ad_type == 0xFF
+            && ad.len() >= 18
+            && ad[0] == 0xFF
+            && ad[1] == 0xFF
+            && ad[2] == b'L'
+            && ad[3] == b'D'
+            && ad[4] == 0x02
+        {
+            let p = &ad[5..18];
+            return Some(Beacon {
+                group: p[0],
+                frame: u32::from_le_bytes([p[1], p[2], p[3], p[4]]),
+                ts: u32::from_le_bytes([p[5], p[6], p[7], p[8]]),
+                flags: p[11],
+                rssi: 0,
+            });
+        }
+        i += 1 + len;
+    }
+    None
+}
+
+/// Delivers matching beacons to the PLL loop.
+struct BeaconHandler {
+    group: u8,
+}
+
+impl EventHandler for BeaconHandler {
+    fn on_adv_reports(&self, mut it: LeAdvReportsIter<'_>) {
+        while let Some(Ok(report)) = it.next() {
+            if let Some(mut b) = parse_beacon(report.data) {
+                if b.group == self.group {
+                    b.rssi = report.rssi;
+                    BEACON_SIG.signal(b);
+                }
+            }
+        }
+    }
+}
+
+#[inline]
+fn fabs(x: f32) -> f32 {
+    if x < 0.0 {
+        -x
+    } else {
+        x
+    }
+}
+/// `x mod n` in `[0, n)`.
+#[inline]
+fn wrapf(x: f32, n: f32) -> f32 {
+    let mut e = x % n;
+    if e < 0.0 {
+        e += n;
+    }
+    e
+}
+/// Signed shortest error `target - local` on the ring of size `n` (in `[-n/2, n/2)`).
+#[inline]
+fn wrap_err(target: f32, local: f32, n: f32) -> f32 {
+    let mut e = (target - local) % n;
+    if e < 0.0 {
+        e += n;
+    }
+    if e > n * 0.5 {
+        e -= n;
+    }
+    e
+}
+
+/// Scan for the leader's beacon and run the PI phase-locked loop (port of
+/// PiSyncTest/follower.py). Publishes the locked frame via `state::set_follower_frame`.
+async fn run_follower<C: ScanController, P: PacketPool>(
+    central: Central<'_, C, P>,
+    runner: &mut Runner<'_, C, P>,
+    group: u8,
+) {
+    let handler = BeaconHandler { group };
+    let mut scanner = Scanner::new(central);
+    let _ = join(runner.run_with_handler(&handler), async {
+        let mut config = ScanConfig::default();
+        config.active = false; // passive — the beacon is non-connectable
+        config.interval = Duration::from_millis(30);
+        config.window = Duration::from_millis(30);
+        config.filter_duplicates = FilterDuplicates::Disabled;
+        let _session = scanner.scan(&config).await;
+
+        const KP: f32 = 0.25; // phase gain (P)
+        const KI: f32 = 0.03; // rate gain (I)
+        const R_MIN: f32 = 1.0;
+        const R_MAX: f32 = 240.0;
+        const OFF_DECAY: f32 = 2.0; // clock-offset filter decay, ms/s
+        const LOCK_TOL: f32 = 2.0; // |drift| under this (frames) = locked
+
+        let mut phase = 0.0f32; // displayed frame (float)
+        let mut r = 30.0f32; // rate (frames/s), tuned by the I term
+        let mut nf = 300.0f32; // loop length, auto-detected from a wrap
+        let mut off: Option<f32> = None; // clock offset (leader_ms - local_ms)
+        let mut seeded = false;
+        let mut prev_frame: Option<u32> = None;
+        let mut prev_ts = 0u32;
+        let mut playing = true;
+        let mut drift = 0.0f32;
+        let mut last_beacon_ms = Instant::now().as_millis();
+        let mut prev_us = Instant::now().as_micros();
+        let mut last_log_ms = Instant::now().as_millis();
+
+        loop {
+            let now = Instant::now();
+            let nowms = now.as_millis() as f32;
+            let now_us = now.as_micros();
+            let dt = now_us.wrapping_sub(prev_us) as f32 / 1_000_000.0;
+            prev_us = now_us;
+            if playing {
+                phase = wrapf(phase + dt * r, nf); // free-run at the current rate
+            }
+
+            if let Some(b) = BEACON_SIG.try_take() {
+                last_beacon_ms = now.as_millis();
+                playing = b.flags & 1 != 0;
+
+                // Clock offset: max of (leader_ts - local) rejects packet-age noise;
+                // slow decay tracks crystal skew.
+                let osamp = b.ts as f32 - nowms;
+                off = Some(match off {
+                    None => osamp,
+                    Some(o) => {
+                        let decayed = o - OFF_DECAY * dt;
+                        if osamp > decayed {
+                            osamp
+                        } else {
+                            decayed
+                        }
+                    }
+                });
+
+                // Seed the rate + detect loop length from consecutive beacons.
+                if let Some(pf) = prev_frame {
+                    let dts = b.ts.wrapping_sub(prev_ts) as f32;
+                    if dts > 0.0 && dts < 5000.0 {
+                        let dfr = if b.frame >= pf {
+                            (b.frame - pf) as f32
+                        } else {
+                            let nf_est = pf as f32 - b.frame as f32 + r * dts / 1000.0;
+                            if nf_est > 10.0 && nf_est < 100000.0 {
+                                nf = nf_est;
+                            }
+                            b.frame as f32 + nf - pf as f32
+                        };
+                        let meas = dfr / (dts / 1000.0);
+                        if meas > 1.0 && meas < 240.0 && !seeded {
+                            r = meas;
+                            seeded = true;
+                        }
+                    }
+                }
+                prev_frame = Some(b.frame);
+                prev_ts = b.ts;
+
+                // Predict the leader's current frame and correct.
+                let age = {
+                    let a = nowms + off.unwrap_or(0.0) - b.ts as f32;
+                    if a > 0.0 {
+                        a
+                    } else {
+                        0.0
+                    }
+                };
+                let target = wrapf(b.frame as f32 + r * age / 1000.0, nf);
+                if !playing {
+                    phase = target;
+                } else {
+                    drift = wrap_err(target, phase, nf);
+                    if fabs(drift) > nf * 0.3 {
+                        phase = target; // big jump (restart / new program): resync
+                    } else {
+                        phase = wrapf(phase + KP * drift, nf);
+                        r += KI * drift;
+                        if r < R_MIN {
+                            r = R_MIN;
+                        }
+                        if r > R_MAX {
+                            r = R_MAX;
+                        }
+                    }
+                }
+            }
+
+            let searching =
+                now.as_millis().wrapping_sub(last_beacon_ms) > 1000 || prev_frame.is_none();
+            let locked = !searching && fabs(drift) <= LOCK_TOL;
+            if searching {
+                crate::state::set_follower_frame(crate::state::NO_LOCK);
+            } else {
+                let nfi = (nf as u32).max(1);
+                crate::state::set_follower_frame((phase as u32) % nfi);
+            }
+            if now.as_millis().wrapping_sub(last_log_ms) > 1000 {
+                last_log_ms = now.as_millis();
+                log::info!(
+                    "follower: phase={} drift(x10)={} R={} nf={} locked={} searching={}",
+                    phase as u32,
+                    (drift * 10.0) as i32,
+                    r as u32,
+                    nf as u32,
+                    locked,
+                    searching,
+                );
+            }
+            Timer::after_millis(15).await;
+        }
+    })
+    .await;
 }
 
 /// Advertise: service UUID in the advert (for filtering), name in the scan response.
