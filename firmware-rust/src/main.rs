@@ -174,6 +174,16 @@ async fn main(spawner: Spawner) {
         let g = fs.lock().await;
         read_cfg_line(&g, b"state.txt\0")
     };
+    // Sync role/group from the pattern header + program from the NN- filename prefix,
+    // set BEFORE the control channels start so the BLE task picks leader vs device
+    // advertising correctly.
+    let (role, group) = {
+        let pbuf_ref = unsafe { &*addr_of!(PATTERN_BUF) };
+        match pat_len.and_then(|n| leda::Pattern::parse(&pbuf_ref[..n])) {
+            Some(p) => (state::Role::from_header(p.header.role), p.header.group),
+            None => (state::Role::Standalone, 0),
+        }
+    };
     {
         let mut c = state::CONTROL.lock().await;
         c.bright = bright;
@@ -183,6 +193,9 @@ async fn main(spawner: Spawner) {
         if let Some(s) = nm {
             c.name.set(s.as_str());
         }
+        c.role = role;
+        c.group = group;
+        c.program = program_of(c.file.as_str());
         // Restore last mode + solid color ("<mode> <r> <g> <b>") so play/solid/off
         // survives a reboot (matches the MicroPython state.txt behavior).
         if let Some(s) = st {
@@ -296,6 +309,9 @@ async fn main(spawner: Spawner) {
                         leda::fill_grb(rgb, &mut buf[..n], bright255);
                         ws.show(&buf[..n]).await;
                     }
+                    // Publish the position for the sync beacon (leader) — this frame
+                    // and the clock (ms) at which we showed it.
+                    state::set_position(frame, embassy_time::Instant::now().as_millis() as u32);
                     frame += 1;
                     if frame >= pat.header.num_frames {
                         frame = 0;
@@ -320,6 +336,16 @@ async fn main(spawner: Spawner) {
             last_hb = embassy_time::Instant::now();
             log::info!("alive — frame {}", frame);
         }
+    }
+}
+
+/// A pattern's program number = its zero-padded `NN-` filename prefix (else 0).
+fn program_of(name: &str) -> u8 {
+    let b = name.as_bytes();
+    if b.len() >= 3 && b[2] == b'-' && b[0].is_ascii_digit() && b[1].is_ascii_digit() {
+        (b[0] - b'0') * 10 + (b[1] - b'0')
+    } else {
+        0
     }
 }
 

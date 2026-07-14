@@ -67,6 +67,35 @@ async fn run<C: Controller>(controller: C, fs: &'static SharedFs) {
     let mut peripheral = stack.peripheral();
     let runner = stack.runner();
 
+    // A leader broadcasts the connectionless sync beacon (control is over Wi-Fi);
+    // everyone else advertises connectable device-info + GATT for the app.
+    if { CONTROL.lock().await.role }.is_leader() {
+        log::info!("BLE: leader — broadcasting sync beacon");
+        let mut seq: u8 = 0;
+        join(host_task(runner), async {
+            loop {
+                let mut adv = [0u8; 31];
+                let len = build_beacon(&mut adv, seq).await;
+                let params = AdvertisementParameters::default();
+                match peripheral
+                    .advertise(
+                        &params,
+                        Advertisement::NonconnectableNonscannableUndirected { adv_data: &adv[..len] },
+                    )
+                    .await
+                {
+                    // Hold the advertiser ~100 ms (a few-Hz refresh), then rebuild with
+                    // a fresh frame/ts/seq. Dropping `_adv` stops it before the next round.
+                    Ok(_adv) => Timer::after_millis(100).await,
+                    Err(_) => Timer::after_millis(200).await,
+                }
+                seq = seq.wrapping_add(1);
+            }
+        })
+        .await;
+        return;
+    }
+
     // Device name for GAP + the advert scan response (default if none set yet).
     let mut name: heapless::String<32> = heapless::String::new();
     {
@@ -99,6 +128,45 @@ async fn run<C: Controller>(controller: C, fs: &'static SharedFs) {
         }
     })
     .await;
+}
+
+/// Build the sync-beacon advertising data (docs/sync-beacon.md, byte-exact with the
+/// Pi rig): flags + 16-bit UUID `0x1EDA` + manufacturer(`FFFF` + `LD` + type `0x02` +
+/// `<group,frame,ts_ms,program,bright,flags,seq>`). Returns the length.
+async fn build_beacon(adv: &mut [u8; 31], seq: u8) -> usize {
+    let (group, program, bright255, playing) = {
+        let c = CONTROL.lock().await;
+        (
+            c.group,
+            c.program,
+            (c.bright as u16 * 255 / 100) as u8,
+            c.mode == crate::state::Mode::Play,
+        )
+    };
+    let (frame, ts) = crate::state::position();
+    let mut mfg = [0u8; 16];
+    mfg[0] = b'L';
+    mfg[1] = b'D';
+    mfg[2] = 0x02; // type: sync beacon
+    mfg[3] = group;
+    mfg[4..8].copy_from_slice(&frame.to_le_bytes());
+    mfg[8..12].copy_from_slice(&ts.to_le_bytes());
+    mfg[12] = program;
+    mfg[13] = bright255;
+    mfg[14] = if playing { 0x01 } else { 0x00 }; // bit0 = playing (bit1 = teardown)
+    mfg[15] = seq;
+    AdStructure::encode_slice(
+        &[
+            AdStructure::Flags(LE_GENERAL_DISCOVERABLE | BR_EDR_NOT_SUPPORTED),
+            AdStructure::CompleteServiceUuids16(&[[0xda, 0x1e]]),
+            AdStructure::ManufacturerSpecificData {
+                company_identifier: 0xFFFF,
+                payload: &mfg,
+            },
+        ],
+        adv,
+    )
+    .unwrap_or(0)
 }
 
 /// The trouble-host background runner (must run for the whole BLE lifetime).

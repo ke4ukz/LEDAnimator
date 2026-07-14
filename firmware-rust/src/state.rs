@@ -37,6 +37,49 @@ pub fn device_id_hex() -> FixedStr<8> {
     out
 }
 
+// --- Playback position for the sync beacon: the last shown frame + the clock (ms)
+// when it was shown. Written by the player each frame, read by the leader beacon.
+// Lightweight atomics (load/store only) to avoid contending CONTROL every frame. ---
+static POS_FRAME: AtomicU32 = AtomicU32::new(0);
+static POS_TS_MS: AtomicU32 = AtomicU32::new(0);
+
+/// Record that `frame` was shown at `ts_ms` (embassy `Instant` millis).
+pub fn set_position(frame: u32, ts_ms: u32) {
+    POS_FRAME.store(frame, Ordering::Relaxed);
+    POS_TS_MS.store(ts_ms, Ordering::Relaxed);
+}
+
+/// The last shown `(frame, ts_ms)`.
+pub fn position() -> (u32, u32) {
+    (POS_FRAME.load(Ordering::Relaxed), POS_TS_MS.load(Ordering::Relaxed))
+}
+
+/// Sync role (the `.leda` header byte): does this device lead, follow, or neither?
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Role {
+    Standalone,
+    Leader,
+    LeaderOnly,
+    Follower,
+    Auto,
+}
+
+impl Role {
+    pub fn from_header(b: u8) -> Self {
+        match b {
+            1 => Role::Leader,
+            2 => Role::LeaderOnly,
+            3 => Role::Follower,
+            4 => Role::Auto,
+            _ => Role::Standalone,
+        }
+    }
+    /// Does this role broadcast the sync beacon?
+    pub fn is_leader(self) -> bool {
+        matches!(self, Role::Leader | Role::LeaderOnly)
+    }
+}
+
 /// A tiny fixed-capacity UTF-8 string (const-constructible, no alloc) for the
 /// device name + selected filename living in the shared state.
 #[derive(Clone, Copy)]
@@ -106,6 +149,12 @@ pub struct Control {
     pub file: FixedStr<64>,
     /// The user-visible device name (for `INFO`/`NAME` and the BLE advert).
     pub name: FixedStr<32>,
+    /// Sync role from the active `.leda` header.
+    pub role: Role,
+    /// Sync group id (header) — followers bind to a leader's group.
+    pub group: u8,
+    /// Program number (the selected file's `NN-` prefix) — carried in the beacon.
+    pub program: u8,
 }
 
 impl Control {
@@ -118,6 +167,9 @@ impl Control {
             reload: false,
             file: FixedStr::new(),
             name: FixedStr::new(),
+            role: Role::Standalone,
+            group: 0,
+            program: 0,
         }
     }
 }
