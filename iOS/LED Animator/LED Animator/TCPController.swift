@@ -48,6 +48,7 @@ final class TCPController: DeviceTransport {
 
     /// Cancel the socket and reset connection state.
     func disconnect() {
+        stopKeepalive()
         connection?.cancel()
         connection = nil
         session = nil
@@ -80,9 +81,18 @@ final class TCPController: DeviceTransport {
             self.session = session
             connectionState = .connected
             session.start()
+            startKeepalive()
         case .failed(let error):
             session = nil
-            connectionState = .failed(error.localizedDescription)
+            stopKeepalive()
+            // A drop *after* we were connected (idle timeout, Wi-Fi blip, device
+            // reset) is a transient disconnect, not an initial connect failure — so
+            // disconnect quietly instead of raising the "Couldn't Connect" alert.
+            if connectionState == .connected {
+                connectionState = .disconnected
+            } else {
+                connectionState = .failed(error.localizedDescription)
+            }
         case .waiting:
             // Transient (no route yet) or waiting on the Local Network prompt —
             // stay "connecting" rather than failing, so a granted permission can
@@ -90,11 +100,37 @@ final class TCPController: DeviceTransport {
             break
         case .cancelled:
             session = nil
+            stopKeepalive()
             if connectionState == .connected || connectionState == .connecting {
                 connectionState = .disconnected
             }
         default:
             break
+        }
+    }
+
+    // MARK: Keepalive
+    //
+    // The device times out an idle TCP control socket (~60 s) and resets it, which
+    // would otherwise surface as a "Couldn't Connect" alert while just sitting on
+    // the Control tab. A light periodic PING keeps the socket warm.
+    @ObservationIgnored private var keepaliveGen = 0
+
+    private func startKeepalive() {
+        keepaliveGen += 1
+        scheduleKeepalive(keepaliveGen)
+    }
+
+    private func stopKeepalive() {
+        keepaliveGen += 1 // invalidates any pending tick
+    }
+
+    private func scheduleKeepalive(_ gen: Int) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 25) { [weak self] in
+            guard let self, self.keepaliveGen == gen, self.connectionState == .connected
+            else { return }
+            self.send("PING", expectResponse: false)
+            self.scheduleKeepalive(gen)
         }
     }
 
@@ -108,6 +144,7 @@ final class TCPController: DeviceTransport {
                 self.receive(on: conn)   // keep reading
             } else {
                 self.session = nil
+                self.stopKeepalive()
                 if self.connectionState == .connected { self.connectionState = .disconnected }
             }
         }
