@@ -244,7 +244,108 @@ pub async fn tcp_task(stack: Stack<'static>, fs: &'static SharedFs) {
     }
 }
 
-/// One connection: line-buffered read → dispatch → newline-terminated reply.
+/// Max bulk-upload size (a `.leda`) — matches the player's pattern buffer.
+const UPLOAD_MAX: usize = 128 * 1024;
+
+/// Parse `UPLOAD <length> <name>`; the name is the rest of the line (may have spaces).
+fn parse_upload(line: &str) -> Option<(usize, heapless::String<64>)> {
+    let line = line.trim();
+    let sp = line.find(' ')?;
+    if !line[..sp].eq_ignore_ascii_case("UPLOAD") {
+        return None;
+    }
+    let rest = line[sp + 1..].trim_start();
+    let sp2 = rest.find(' ')?;
+    let len: usize = rest[..sp2].parse().ok()?;
+    let name = rest[sp2 + 1..].trim();
+    if name.is_empty() {
+        return None;
+    }
+    let mut n = heapless::String::new();
+    n.push_str(name).ok()?;
+    Some((len, n))
+}
+
+/// Bulk `.leda` upload (docs/protocol.md): reply `OK UPLOAD`, stream `len` raw bytes,
+/// verify the `LEDA` magic, save. `initial` is any binary already read after the line.
+async fn handle_upload(
+    sock: &mut TcpSocket<'_>,
+    fs: &'static SharedFs,
+    initial: &[u8],
+    len: usize,
+    name: &str,
+) {
+    if len == 0 || len > UPLOAD_MAX {
+        let _ = sock.write_all(b"ERR size\n").await;
+        return;
+    }
+    let mut nb = [0u8; 64];
+    if crate::fs::make_path(name, &mut nb).is_none() {
+        let _ = sock.write_all(b"ERR name\n").await;
+        return;
+    }
+    let _ = sock.write_all(b"OK UPLOAD\n").await;
+
+    // Stream to flash in small chunks (no big RAM buffer): the first chunk creates
+    // the file (fs.write), the rest append via write_chunk at the running offset.
+    let mut src = initial;
+    let mut chunk = [0u8; 512];
+    let mut got = 0usize;
+    let mut first = true;
+    let mut aborted = false;
+    while got < len {
+        let want = (len - got).min(chunk.len());
+        let mut filled = 0;
+        if !src.is_empty() {
+            let t = src.len().min(want);
+            chunk[..t].copy_from_slice(&src[..t]);
+            src = &src[t..];
+            filled = t;
+        }
+        while filled < want {
+            match sock.read(&mut chunk[filled..want]).await {
+                Ok(0) | Err(_) => {
+                    aborted = true;
+                    break;
+                }
+                Ok(k) => filled += k,
+            }
+        }
+        if aborted {
+            break;
+        }
+        // Validate the LEDA magic on the first chunk before writing anything.
+        if first && (filled < 4 || &chunk[0..4] != b"LEDA") {
+            let _ = sock.write_all(b"ERR badfile\n").await;
+            return;
+        }
+        let mut nb2 = [0u8; 64];
+        let ok = match crate::fs::make_path(name, &mut nb2) {
+            Some(p) => {
+                let f = fs.lock().await;
+                if first {
+                    f.write(p, &chunk[..filled]).is_ok()
+                } else {
+                    f.write_chunk(p, &chunk[..filled], littlefs2::io::OpenSeekFrom::Start(got as u32))
+                        .is_ok()
+                }
+            }
+            None => false,
+        };
+        if !ok {
+            let _ = sock.write_all(b"ERR open\n").await;
+            return;
+        }
+        first = false;
+        got += filled;
+    }
+    let _ = sock
+        .write_all(if aborted { b"ERR badfile\n" } else { b"OK UPLOADED\n" })
+        .await;
+}
+
+/// One connection: line-buffered read → dispatch → newline-terminated reply, with a
+/// binary-mode escape for `UPLOAD`.
 async fn serve(sock: &mut TcpSocket<'_>, fs: &'static SharedFs) {
     let mut line: heapless::String<200> = heapless::String::new();
     let mut conn_state = ConnState::new(); // per-connection auth state
@@ -254,10 +355,18 @@ async fn serve(sock: &mut TcpSocket<'_>, fs: &'static SharedFs) {
             Ok(0) | Err(_) => return,
             Ok(n) => n,
         };
-        for i in 0..n {
+        let mut i = 0;
+        while i < n {
             let b = buf[i];
             if b == b'\n' {
                 if !line.is_empty() {
+                    if let Some((ulen, uname)) = parse_upload(line.as_str()) {
+                        // Switch to binary mode; any bytes after the newline are the
+                        // start of the stream. handle_upload consumes the rest.
+                        handle_upload(sock, fs, &buf[i + 1..n], ulen, uname.as_str()).await;
+                        line.clear();
+                        break;
+                    }
                     let mut sink = TcpSink { sock: &mut *sock };
                     protocol::dispatch(line.as_str(), fs, &mut sink, &mut conn_state).await;
                     line.clear();
@@ -265,6 +374,7 @@ async fn serve(sock: &mut TcpSocket<'_>, fs: &'static SharedFs) {
             } else if b != b'\r' && line.push(b as char).is_err() {
                 line.clear(); // overflow — drop the oversized line
             }
+            i += 1;
         }
     }
 }
