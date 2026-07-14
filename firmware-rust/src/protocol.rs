@@ -421,9 +421,25 @@ pub async fn dispatch(line: &str, fs: &SharedFs, sink: &mut impl LineSink, conn:
         "STARTUP" => sink.send("STARTUP go").await,
         "TEARDOWN" => sink.send("ERR not-leader").await,
         "WIFISCAN" => {
-            // No radio scan wired yet — return an empty (but well-formed) result so
-            // the app doesn't error.
-            sink.send("WIFISCANLEN 0").await;
+            // Ask the Wi-Fi manager (which owns the radio Control) to scan, then
+            // stream the results: WIFISCANLEN <n>, WIFINET <rssi> <ssid> …, WIFISCANEND.
+            crate::wifi::SCAN_DONE.reset();
+            crate::wifi::SCAN_REQ.signal(());
+            match embassy_time::with_timeout(
+                embassy_time::Duration::from_secs(12),
+                crate::wifi::SCAN_DONE.wait(),
+            )
+            .await
+            {
+                Ok(()) => {
+                    let results = crate::wifi::SCAN_RESULTS.lock().await;
+                    reply(sink, format_args!("WIFISCANLEN {}", results.len())).await;
+                    for e in results.iter() {
+                        reply(sink, format_args!("WIFINET {} {}", e.rssi, e.ssid.as_str())).await;
+                    }
+                }
+                Err(_) => sink.send("WIFISCANLEN 0").await,
+            }
             sink.send("WIFISCANEND").await;
         }
 

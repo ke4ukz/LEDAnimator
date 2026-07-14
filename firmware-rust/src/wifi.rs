@@ -8,7 +8,8 @@ use crate::fs::SharedFs;
 use crate::protocol::{self, ConnState, LineSink};
 use crate::state::{FixedStr, CONTROL};
 use core::fmt::Write as _;
-use cyw43::{Control, JoinOptions, NetDriver};
+use cyw43::{Control, JoinOptions, NetDriver, ScanOptions};
+use embassy_futures::select::{select, Either};
 use embassy_net::tcp::TcpSocket;
 use embassy_net::udp::{PacketMetadata, UdpSocket};
 use embassy_net::{Runner, Stack};
@@ -29,6 +30,20 @@ pub static CONNECT_SIG: Signal<CriticalSectionRawMutex, ()> = Signal::new();
 /// Current status for `WIFISTATUS` ("off" / "connecting" / "connected <ip>" / …).
 pub static STATE: AsyncMutex<CriticalSectionRawMutex, FixedStr<48>> =
     AsyncMutex::new(FixedStr::new());
+
+/// One `WIFISCAN` result.
+#[derive(Clone, Copy)]
+pub struct ScanEntry {
+    pub rssi: i16,
+    pub ssid: FixedStr<32>,
+}
+
+/// `WIFISCAN` handshake: dispatch signals REQ; the manager (which owns `Control`)
+/// scans into RESULTS and signals DONE; dispatch streams RESULTS to the client.
+pub static SCAN_REQ: Signal<CriticalSectionRawMutex, ()> = Signal::new();
+pub static SCAN_DONE: Signal<CriticalSectionRawMutex, ()> = Signal::new();
+pub static SCAN_RESULTS: AsyncMutex<CriticalSectionRawMutex, heapless::Vec<ScanEntry, 24>> =
+    AsyncMutex::new(heapless::Vec::new());
 
 async fn set_state(s: &str) {
     STATE.lock().await.set(s);
@@ -110,9 +125,43 @@ pub async fn manager_task(
                 set_state("off").await;
             }
         }
-        // Block until a WIFICONNECT / WIFIFORGET asks us to re-evaluate.
-        CONNECT_SIG.wait().await;
+        // Wait for a reconnect request (re-evaluate creds) or a scan request. A scan
+        // keeps us in this inner loop; a connect request breaks out to re-join.
+        loop {
+            match select(CONNECT_SIG.wait(), SCAN_REQ.wait()).await {
+                Either::First(_) => break,
+                Either::Second(_) => run_scan(&mut control).await,
+            }
+        }
     }
+}
+
+/// Scan for nearby networks into `SCAN_RESULTS` (deduped by SSID), then signal DONE.
+async fn run_scan(control: &mut Control<'static>) {
+    let mut results: heapless::Vec<ScanEntry, 24> = heapless::Vec::new();
+    let mut scanner = control.scan(ScanOptions::default()).await;
+    while let Some(bss) = scanner.next().await {
+        let len = (bss.ssid_len as usize).min(32);
+        if len == 0 {
+            continue;
+        }
+        let ssid = match core::str::from_utf8(&bss.ssid[..len]) {
+            Ok(s) => s,
+            Err(_) => continue,
+        };
+        // Keep the strongest per SSID; skip if we've already seen it.
+        if results.iter().any(|e| e.ssid.as_str() == ssid) {
+            continue;
+        }
+        let mut fs = FixedStr::new();
+        fs.set(ssid);
+        if results.push(ScanEntry { rssi: bss.rssi, ssid: fs }).is_err() {
+            break; // buffer full
+        }
+    }
+    drop(scanner);
+    *SCAN_RESULTS.lock().await = results;
+    SCAN_DONE.signal(());
 }
 
 /// UDP discovery: reply `LEDA <hostname> <name>` to a `LEDADISCOVER` broadcast on
