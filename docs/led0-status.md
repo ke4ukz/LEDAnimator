@@ -40,6 +40,25 @@ feedback, so they're safe to tune; keep the two firmwares in step with this doc.
    blinked a small count. Errors are evaluated **only at boot**; there is no
    runtime error monitoring.
 
+### Aside: the follower sync-loss "indicate" (amber LED 0)
+
+The multi-device **on-sync-loss** policy (set per animation, a `LOSS` override, or
+in the web editor) has an **`indicate`** choice that blinks **amber on LED 0** while
+a follower is free-running with its leader lost. This looks like a runtime "error
+indicator," which seems to contradict *"errors are boot-only, LED 0 is a break-glass
+diagnostic."* It doesn't, and it's fine as-is — but the distinction is worth stating:
+
+- It is **not an error code** and not device-diagnostic. It is a **user-selected,
+  per-animation behavior** — one of `indicate` / `silent` / `blackout` — for *how a
+  follower should behave when it loses the beat*. The user opted into the amber blink
+  as the visible "we're out of sync" cue; `silent` keeps free-running with no hint,
+  `blackout` goes dark.
+- It is **ambient status (category 1 above)**, the same family as a follower
+  *acquiring* sync (blue) — normal sync UX, not the boot fault language.
+- So amber-on-LED-0 here is intentional and stays a user choice. It just lives in a
+  different bucket than the boot subsystem/severity codes; the web option and this
+  doc are consistent once you read it as *"chosen sync behavior,"* not *"fault."*
+
 ## Design rules
 
 - **LED 0 only.** No whole-strip status or error signaling, ever. (Whole-strip is
