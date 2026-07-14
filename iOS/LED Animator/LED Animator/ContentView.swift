@@ -133,6 +133,20 @@ struct MacRootView: View {
                 ProgressView()
                 Text("Connecting…").foregroundStyle(.secondary)
             }
+        } else if selection != nil {
+            // A device is still selected but not connected (dropped, or a connect
+            // that failed) — offer to reconnect, since re-clicking the already-
+            // selected sidebar row doesn't re-fire onChange(of: selection).
+            VStack(spacing: 14) {
+                Image(systemName: "wifi.exclamationmark")
+                    .font(.largeTitle)
+                    .foregroundStyle(.secondary)
+                Text("Disconnected").font(.headline)
+                Text("The connection to this device was lost.")
+                    .foregroundStyle(.secondary)
+                Button("Reconnect") { connect(to: selection) }
+                    .buttonStyle(.borderedProminent)
+            }
         } else {
             ContentUnavailableView(
                 "No Device Selected",
