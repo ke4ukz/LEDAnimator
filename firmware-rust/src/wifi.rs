@@ -219,13 +219,12 @@ impl LineSink for TcpSink<'_, '_> {
     }
 }
 
-/// Accept control connections on :4550 and run each command through `dispatch`.
-#[embassy_executor::task]
+/// Accept a control connection on :4550 and run each command through `dispatch`.
+/// Pooled so several clients (e.g. the macOS + iOS apps) can connect at once — each
+/// pool instance owns one socket and its own buffers.
+#[embassy_executor::task(pool_size = 3)]
 pub async fn tcp_task(stack: Stack<'static>, fs: &'static SharedFs) {
     stack.wait_config_up().await;
-    if let Some(cfg) = stack.config_v4() {
-        log::info!("wifi: IP {} — TCP control on :{}", cfg.address.address(), PORT);
-    }
 
     let mut rx = [0u8; 512];
     let mut tx = [0u8; 512];

@@ -221,7 +221,9 @@ async fn main(spawner: Spawner) {
     // --- Wi-Fi: always bring up the net stack; the manager joins on demand from
     // networks.txt (present at boot, or written live by WIFICONNECT). Non-fatal —
     // the pattern plays regardless. TCP control server on :4550. ---
-    static NET_RES: StaticCell<embassy_net::StackResources<4>> = StaticCell::new();
+    // Room for the socket set: up to 3 concurrent TCP control clients + the UDP
+    // discovery responder + DHCP, with margin.
+    static NET_RES: StaticCell<embassy_net::StackResources<8>> = StaticCell::new();
     let net_res = NET_RES.init(embassy_net::StackResources::new());
     let (stack, net_runner) = embassy_net::new(
         radio.net_device,
@@ -230,6 +232,9 @@ async fn main(spawner: Spawner) {
         0x0123_4567_89ab_cdef,
     );
     spawner.spawn(wifi::net_runner_task(net_runner).unwrap());
+    // Three pooled TCP servers so multiple apps can connect at once.
+    spawner.spawn(wifi::tcp_task(stack, fs).unwrap());
+    spawner.spawn(wifi::tcp_task(stack, fs).unwrap());
     spawner.spawn(wifi::tcp_task(stack, fs).unwrap());
     spawner.spawn(wifi::discover_task(stack).unwrap());
     spawner.spawn(wifi::manager_task(radio.control, stack, fs).unwrap());
