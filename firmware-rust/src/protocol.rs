@@ -264,14 +264,34 @@ pub async fn dispatch(line: &str, fs: &SharedFs, sink: &mut impl LineSink, conn:
 
         "MOREINFO" => {
             // Heavier device details, streamed as self-describing KEY <value> lines
-            // (the app ignores keys it doesn't know + shows N/A for missing ones, so
-            // fields we can't source yet — MACs, sync, power — are simply omitted).
+            // (the app ignores keys it doesn't know + shows N/A for missing ones).
             reply(sink, format_args!("VERSION {}", FW_VERSION)).await;
             let free = fs.lock().await.available_space().unwrap_or(0);
             reply(sink, format_args!("FREE {}", free)).await;
+            let m = crate::state::mac_bytes();
+            reply(
+                sink,
+                format_args!(
+                    "WIFIMAC {:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}",
+                    m[0], m[1], m[2], m[3], m[4], m[5]
+                ),
+            )
+            .await;
+            reply(sink, format_args!("HOSTNAME leda-{}", crate::state::device_id_hex().as_str())).await;
             reply(sink, format_args!("PLATFORM {}", PLATFORM)).await;
             sink.send("PIN 0").await; // data pin fixed at GP0
-            sink.send("AUTH none").await; // no PIN support yet
+            {
+                let c = CONTROL.lock().await;
+                reply(sink, format_args!("ROLE {}", role_name(c.role))).await;
+                reply(sink, format_args!("GROUP {}", c.group)).await;
+                reply(sink, format_args!("PROGRAM {}", program_of(c.file.as_str()))).await;
+            }
+            reply(
+                sink,
+                format_args!("AUTH {}", if read_pin(fs).await.is_some() { "set" } else { "none" }),
+            )
+            .await;
+            sink.send("POWER unknown 0").await; // no power sensing yet (Pico W VSYS caveat)
             sink.send("ENDINFO").await;
         }
 
@@ -405,8 +425,14 @@ pub async fn dispatch(line: &str, fs: &SharedFs, sink: &mut impl LineSink, conn:
         // --- Read-only status queries. Sensible defaults until sync/power land, so
         // the app's Info pane gets clean answers instead of an ERR-unknown popup. ---
         "POWER" => sink.send("POWER unknown 0").await,
-        "ROLE" => sink.send("ROLE standalone").await,
-        "GROUP" => sink.send("GROUP 0").await,
+        "ROLE" => {
+            let r = { role_name(CONTROL.lock().await.role) };
+            reply(sink, format_args!("ROLE {}", r)).await;
+        }
+        "GROUP" => {
+            let g = { CONTROL.lock().await.group };
+            reply(sink, format_args!("GROUP {}", g)).await;
+        }
         "DEVICE" => sink.send("DEVICE 0").await,
         "PROGRAM" => {
             // No-arg reports the program # from the selected file's `NN-` prefix.
@@ -500,6 +526,18 @@ async fn do_login(arg: &str, pin: &str, conn: &mut ConnState, sink: &mut impl Li
     } else {
         AUTH_FAIL_AT.store(now.max(1), Ordering::Relaxed);
         sink.send("ERR auth").await;
+    }
+}
+
+/// The protocol token for a sync role.
+fn role_name(role: crate::state::Role) -> &'static str {
+    use crate::state::Role;
+    match role {
+        Role::Standalone => "standalone",
+        Role::Leader => "leader",
+        Role::LeaderOnly => "leader-only",
+        Role::Follower => "follower",
+        Role::Auto => "auto",
     }
 }
 

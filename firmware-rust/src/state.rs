@@ -15,10 +15,30 @@ use embassy_sync::mutex::Mutex;
 /// app recognizes one physical device across both transports. Set once at boot.
 static DEVICE_ID: AtomicU32 = AtomicU32::new(0);
 
-/// Seed the device id from the 6-byte MAC (uses the last 3 bytes).
+/// Full Wi-Fi MAC (packed: bytes 0..4 in LOW, bytes 4..6 in HIGH) for `MOREINFO`.
+static MAC_LOW: AtomicU32 = AtomicU32::new(0);
+static MAC_HIGH: AtomicU32 = AtomicU32::new(0);
+
+/// Seed the device id + full MAC from the 6-byte Wi-Fi MAC (id = the last 3 bytes).
 pub fn set_device_id(mac: &[u8; 6]) {
     let id = ((mac[3] as u32) << 16) | ((mac[4] as u32) << 8) | (mac[5] as u32);
     DEVICE_ID.store(id, Ordering::Relaxed);
+    MAC_LOW.store(u32::from_le_bytes([mac[0], mac[1], mac[2], mac[3]]), Ordering::Relaxed);
+    MAC_HIGH.store(u32::from_le_bytes([mac[4], mac[5], 0, 0]), Ordering::Relaxed);
+}
+
+/// The full Wi-Fi MAC as 6 bytes.
+pub fn mac_bytes() -> [u8; 6] {
+    let l = MAC_LOW.load(Ordering::Relaxed);
+    let h = MAC_HIGH.load(Ordering::Relaxed);
+    [
+        l as u8,
+        (l >> 8) as u8,
+        (l >> 16) as u8,
+        (l >> 24) as u8,
+        h as u8,
+        (h >> 8) as u8,
+    ]
 }
 
 /// The device id as 3 raw bytes (for the BLE manufacturer data payload).
