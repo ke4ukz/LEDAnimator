@@ -124,11 +124,44 @@ async fn run<C: ScanController>(controller: C, fs: &'static SharedFs) {
     }
 
     if role.is_follower() {
-        log::info!("BLE: follower — scanning for the leader beacon");
+        log::info!("BLE: follower — scanning + device advert");
         let group = { CONTROL.lock().await.group };
         let central = stack.central();
+        let mut peripheral = stack.peripheral();
         let mut runner = stack.runner();
-        run_follower(central, &mut runner, group).await;
+        let mut name: heapless::String<32> = heapless::String::new();
+        {
+            let c = CONTROL.lock().await;
+            let _ = name.push_str(if c.name.is_empty() {
+                "LED Animator"
+            } else {
+                c.name.as_str()
+            });
+        }
+        let server = Server::new_with_config(GapConfig::Peripheral(PeripheralConfig {
+            name: name.as_str(),
+            appearance: &appearance::power_device::GENERIC_POWER_DEVICE,
+        }))
+        .unwrap();
+        let handler = BeaconHandler { group };
+        let mut scanner = Scanner::new(central);
+        // One runner drives everything (beacon adv-reports + app connections). The
+        // scan + PLL run alongside a connectable device-info advert so the app can
+        // still find + control the follower while it phase-locks.
+        let _ = join(runner.run_with_handler(&handler), async {
+            let mut config = ScanConfig::default();
+            config.active = false; // passive — the beacon is non-connectable
+            config.interval = Duration::from_millis(30);
+            config.window = Duration::from_millis(30);
+            config.filter_duplicates = FilterDuplicates::Disabled;
+            let _session = scanner.scan(&config).await;
+            join(
+                pll_loop(),
+                device_serve(name.as_str(), &mut peripheral, &server, fs),
+            )
+            .await;
+        })
+        .await;
         return;
     }
 
@@ -154,19 +187,30 @@ async fn run<C: ScanController>(controller: C, fs: &'static SharedFs) {
 
     log::info!("BLE: advertising as \"{}\"", name.as_str());
 
-    join(host_task(runner), async {
-        loop {
-            match advertise(name.as_str(), &mut peripheral, &server).await {
-                Ok(conn) => {
-                    log::info!("BLE: connected");
-                    gatt_events(&server, &conn, fs).await;
-                    log::info!("BLE: disconnected");
-                }
-                Err(_) => Timer::after_millis(500).await,
-            }
-        }
-    })
+    join(
+        host_task(runner),
+        device_serve(name.as_str(), &mut peripheral, &server, fs),
+    )
     .await;
+}
+
+/// Advertise connectable device-info + serve GATT for the app, forever.
+async fn device_serve<'values, 'server, C: Controller>(
+    name: &'values str,
+    peripheral: &mut Peripheral<'values, C, DefaultPacketPool>,
+    server: &'server Server<'values>,
+    fs: &'static SharedFs,
+) {
+    loop {
+        match advertise(name, peripheral, server).await {
+            Ok(conn) => {
+                log::info!("BLE: connected");
+                gatt_events(server, &conn, fs).await;
+                log::info!("BLE: disconnected");
+            }
+            Err(_) => Timer::after_millis(500).await,
+        }
+    }
 }
 
 /// Build the sync-beacon advertising data (docs/sync-beacon.md, byte-exact with the
@@ -311,23 +355,9 @@ fn wrap_err(target: f32, local: f32, n: f32) -> f32 {
     e
 }
 
-/// Scan for the leader's beacon and run the PI phase-locked loop (port of
-/// PiSyncTest/follower.py). Publishes the locked frame via `state::set_follower_frame`.
-async fn run_follower<C: ScanController, P: PacketPool>(
-    central: Central<'_, C, P>,
-    runner: &mut Runner<'_, C, P>,
-    group: u8,
-) {
-    let handler = BeaconHandler { group };
-    let mut scanner = Scanner::new(central);
-    let _ = join(runner.run_with_handler(&handler), async {
-        let mut config = ScanConfig::default();
-        config.active = false; // passive — the beacon is non-connectable
-        config.interval = Duration::from_millis(30);
-        config.window = Duration::from_millis(30);
-        config.filter_duplicates = FilterDuplicates::Disabled;
-        let _session = scanner.scan(&config).await;
-
+/// The PI phase-locked loop (port of PiSyncTest/follower.py). Consumes beacons from
+/// `BEACON_SIG` and publishes the locked frame via `state::set_follower_frame`.
+async fn pll_loop() {
         const KP: f32 = 0.25; // phase gain (P)
         const KI: f32 = 0.03; // rate gain (I)
         const R_MIN: f32 = 1.0;
@@ -452,8 +482,6 @@ async fn run_follower<C: ScanController, P: PacketPool>(
             }
             Timer::after_millis(15).await;
         }
-    })
-    .await;
 }
 
 /// Advertise: service UUID in the advert (for filtering), name in the scan response.
