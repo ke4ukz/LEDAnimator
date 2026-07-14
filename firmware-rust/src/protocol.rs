@@ -5,7 +5,7 @@
 //! Setters mutate the shared `state::CONTROL`; filesystem verbs use the shared fs.
 
 use crate::fs::{make_path, SharedFs};
-use crate::state::{Mode, CONTROL};
+use crate::state::{notify_state_change, Mode, CONTROL};
 use core::fmt::Write;
 use core::sync::atomic::{AtomicU32, Ordering};
 use embassy_time::Instant;
@@ -183,22 +183,7 @@ pub async fn dispatch(line: &str, fs: &SharedFs, sink: &mut impl LineSink, conn:
         "VERSION" => reply(sink, format_args!("VERSION {}", FW_VERSION)).await,
         "PLATFORM" => reply(sink, format_args!("PLATFORM {}", PLATFORM)).await,
 
-        "INFO" => {
-            let c = CONTROL.lock().await;
-            let mut r = Reply::new();
-            let _ = write!(
-                r,
-                "INFO {} {} {} {} {} {} {}",
-                c.mode.as_str(),
-                c.bright,
-                c.speed,
-                c.solid[0],
-                c.solid[1],
-                c.solid[2],
-                c.file.as_str()
-            );
-            sink.send(&r).await;
-        }
+        "INFO" => send_info(sink).await,
 
         "BRIGHT" => match arg.parse::<i32>() {
             Ok(n) => {
@@ -207,6 +192,7 @@ pub async fn dispatch(line: &str, fs: &SharedFs, sink: &mut impl LineSink, conn:
                 let mut b: String<4> = String::new();
                 let _ = write!(b, "{}", pct);
                 write_cfg(fs, b"bright.txt\0", b.as_bytes()).await;
+                notify_state_change();
                 reply(sink, format_args!("OK BRIGHT {}", pct)).await;
             }
             Err(_) => sink.send("ERR args").await,
@@ -216,6 +202,7 @@ pub async fn dispatch(line: &str, fs: &SharedFs, sink: &mut impl LineSink, conn:
             Ok(n) => {
                 let sp = n.clamp(10, 400) as u16;
                 CONTROL.lock().await.speed = sp;
+                notify_state_change();
                 reply(sink, format_args!("OK SPEED {}", sp)).await;
             }
             Err(_) => sink.send("ERR args").await,
@@ -235,6 +222,7 @@ pub async fn dispatch(line: &str, fs: &SharedFs, sink: &mut impl LineSink, conn:
                         c.mode = Mode::Solid;
                     }
                     persist_state(fs, Mode::Solid, solid).await;
+                    notify_state_change();
                     sink.send("OK SOLID").await;
                 }
                 _ => sink.send("ERR args").await,
@@ -248,6 +236,7 @@ pub async fn dispatch(line: &str, fs: &SharedFs, sink: &mut impl LineSink, conn:
                 c.mode = Mode::Off;
             }
             persist_state(fs, Mode::Off, [0, 0, 0]).await;
+            notify_state_change();
             sink.send("OK OFF").await;
         }
 
@@ -259,6 +248,7 @@ pub async fn dispatch(line: &str, fs: &SharedFs, sink: &mut impl LineSink, conn:
                 c.solid
             };
             persist_state(fs, Mode::Play, solid).await;
+            notify_state_change();
             sink.send("OK PLAY").await;
         }
 
@@ -317,6 +307,7 @@ pub async fn dispatch(line: &str, fs: &SharedFs, sink: &mut impl LineSink, conn:
                     c.mode = Mode::Play;
                     c.reload = true;
                 }
+                notify_state_change();
                 reply(sink, format_args!("OK SELECT {}", arg)).await;
             } else {
                 sink.send("ERR no-file").await;
@@ -471,6 +462,25 @@ pub async fn dispatch(line: &str, fs: &SharedFs, sink: &mut impl LineSink, conn:
 
         _ => sink.send("ERR unknown").await,
     }
+}
+
+/// Build + send the one-line `INFO` state snapshot. Used both by the `INFO` command and
+/// by the live push a connection makes when [`notify_state_change`] fires elsewhere.
+pub async fn send_info(sink: &mut impl LineSink) {
+    let c = CONTROL.lock().await;
+    let mut r = Reply::new();
+    let _ = write!(
+        r,
+        "INFO {} {} {} {} {} {} {}",
+        c.mode.as_str(),
+        c.bright,
+        c.speed,
+        c.solid[0],
+        c.solid[1],
+        c.solid[2],
+        c.file.as_str()
+    );
+    sink.send(&r).await;
 }
 
 /// Stream the `.leda` pattern files: `LISTLEN <n>`, one `FILE <name>` each, `ENDLIST`.

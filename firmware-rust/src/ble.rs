@@ -9,6 +9,7 @@ use crate::protocol::{self, LineSink};
 use crate::state::CONTROL;
 use cyw43::bluetooth::BtDriver;
 use embassy_futures::join::join;
+use embassy_futures::select::{select, Either};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::signal::Signal;
 use bt_hci::cmd::le::{
@@ -534,8 +535,28 @@ async fn gatt_events<P: PacketPool>(
     let rx_handle = server.nus.rx.handle;
     let tx = &server.nus.tx;
     let mut conn_state = protocol::ConnState::new(); // per-connection auth state
+    // Push a fresh INFO to this BLE client when another transport changes state, so a
+    // phone on Bluetooth stays in sync with the macOS app on Wi-Fi (see `state_watch`).
+    let mut watch = crate::state::state_watch_receiver();
     loop {
-        match conn.next().await {
+        let event = {
+            let next = conn.next();
+            let changed = async {
+                match watch {
+                    Some(ref mut w) => w.changed().await,
+                    None => core::future::pending().await,
+                }
+            };
+            match select(next, changed).await {
+                Either::First(ev) => ev,
+                Either::Second(_) => {
+                    let mut sink = BleSink { tx, conn };
+                    protocol::send_info(&mut sink).await;
+                    continue;
+                }
+            }
+        };
+        match event {
             GattConnectionEvent::Disconnected { .. } => break,
             GattConnectionEvent::Gatt { event } => {
                 // Capture a command written to RX before accepting the transaction.

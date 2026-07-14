@@ -9,6 +9,7 @@ use core::fmt::Write as _;
 use core::sync::atomic::{AtomicU32, Ordering};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::mutex::Mutex;
+use embassy_sync::watch::{Receiver, Watch};
 
 /// The 3-byte device id (last 3 bytes of the Wi-Fi MAC), packed in the low 24 bits.
 /// It ties the BLE advert (manufacturer data) to the Wi-Fi hostname suffix so the
@@ -212,6 +213,31 @@ impl Control {
 
 /// The one shared control state. Seeded from config at boot (see `main`).
 pub static CONTROL: Mutex<CriticalSectionRawMutex, Control> = Mutex::new(Control::new());
+
+/// Bumped whenever an observable control value (mode/bright/speed/solid/file) changes,
+/// so every connected client can be pushed a fresh `INFO` and the apps stay in sync
+/// even when a *different* app made the change. The MicroPython firmware broadcast the
+/// state line to all transports the same way. Sized for the connections that watch it:
+/// 3 concurrent TCP control clients + the BLE control link, with margin.
+pub static STATE_WATCH: Watch<CriticalSectionRawMutex, u32, 6> = Watch::new();
+
+/// Number type carried by [`STATE_WATCH`]; the value is a rolling change counter (its
+/// content is irrelevant — any send wakes the receivers).
+pub type StateWatchRx = Receiver<'static, CriticalSectionRawMutex, u32, 6>;
+
+/// Signal that observable state changed. Call after a successful setter (`BRIGHT`,
+/// `SPEED`, `SOLID`, `OFF`, `PLAY`, `SELECT`, `PROGRAM`) so watchers push a fresh INFO.
+pub fn notify_state_change() {
+    STATE_WATCH.sender().send_modify(|v| {
+        *v = Some(v.map_or(0, |x| x.wrapping_add(1)));
+    });
+}
+
+/// A receiver a connection task awaits to learn state changed elsewhere. `None` once all
+/// watcher slots are taken (that connection then just won't get live pushes — no harm).
+pub fn state_watch_receiver() -> Option<StateWatchRx> {
+    STATE_WATCH.receiver()
+}
 
 /// A snapshot the player reads without holding the lock across a render.
 #[derive(Clone, Copy)]

@@ -349,10 +349,29 @@ async fn serve(sock: &mut TcpSocket<'_>, fs: &'static SharedFs) {
     let mut line: heapless::String<200> = heapless::String::new();
     let mut conn_state = ConnState::new(); // per-connection auth state
     let mut buf = [0u8; 128];
+    // Watch for state changes made by *other* clients (the macOS app moved a slider
+    // while iOS is connected) so we can push a fresh INFO and keep every app in sync.
+    let mut watch = crate::state::state_watch_receiver();
     loop {
-        let n = match sock.read(&mut buf).await {
-            Ok(0) | Err(_) => return,
-            Ok(n) => n,
+        // Race a read against a state-change signal. On a change, push INFO; otherwise
+        // process the bytes read. `changed()` is only armed if we got a watcher slot.
+        let n = {
+            let read = sock.read(&mut buf);
+            let changed = async {
+                match watch {
+                    Some(ref mut w) => w.changed().await,
+                    None => core::future::pending().await,
+                }
+            };
+            match select(read, changed).await {
+                Either::First(Ok(0)) | Either::First(Err(_)) => return,
+                Either::First(Ok(n)) => n,
+                Either::Second(_) => {
+                    let mut sink = TcpSink { sock: &mut *sock };
+                    protocol::send_info(&mut sink).await;
+                    continue;
+                }
+            }
         };
         let mut i = 0;
         while i < n {
