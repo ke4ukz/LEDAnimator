@@ -158,7 +158,7 @@ async fn run<C: ScanController>(controller: C, fs: &'static SharedFs) {
             let _session = scanner.scan(&config).await;
             join(
                 pll_loop(),
-                device_serve(name.as_str(), &mut peripheral, &server, fs),
+                device_serve(&mut peripheral, &server, fs),
             )
             .await;
         })
@@ -190,25 +190,28 @@ async fn run<C: ScanController>(controller: C, fs: &'static SharedFs) {
 
     join(
         host_task(runner),
-        device_serve(name.as_str(), &mut peripheral, &server, fs),
+        device_serve(&mut peripheral, &server, fs),
     )
     .await;
 }
 
 /// Advertise connectable device-info + serve GATT for the app, forever.
 async fn device_serve<'values, 'server, C: Controller>(
-    name: &'values str,
     peripheral: &mut Peripheral<'values, C, DefaultPacketPool>,
     server: &'server Server<'values>,
     fs: &'static SharedFs,
 ) {
+    // A watcher so the advert can restart with the live name the moment it's renamed.
+    let mut watch = crate::state::state_watch_receiver();
     loop {
-        match advertise(name, peripheral, server).await {
-            Ok(conn) => {
+        match advertise(peripheral, server, watch.as_mut()).await {
+            Ok(Some(conn)) => {
                 log::info!("BLE: connected");
                 gatt_events(server, &conn, fs).await;
                 log::info!("BLE: disconnected");
             }
+            // Name changed while advertising — loop to re-advertise with it.
+            Ok(None) => log::info!("BLE: name changed, re-advertising"),
             Err(_) => Timer::after_millis(500).await,
         }
     }
@@ -489,10 +492,10 @@ async fn pll_loop() {
 /// Lifetimes split (`'values` = stack/adv data, `'server` = the server borrow) so
 /// the server isn't forced to live as long as the stack (drop-order).
 async fn advertise<'values, 'server, C: Controller>(
-    name: &'values str,
     peripheral: &mut Peripheral<'values, C, DefaultPacketPool>,
     server: &'server Server<'values>,
-) -> Result<GattConnection<'values, 'server, DefaultPacketPool>, BleHostError<C::Error>> {
+    watch: Option<&mut crate::state::StateWatchRx>,
+) -> Result<Option<GattConnection<'values, 'server, DefaultPacketPool>>, BleHostError<C::Error>> {
     // Manufacturer data: company 0xFFFF + the 3-byte device id (the app matches this
     // to the Wi-Fi hostname suffix to dedup one device across BLE + Wi-Fi).
     let dev_id = crate::state::device_id_bytes();
@@ -508,9 +511,13 @@ async fn advertise<'values, 'server, C: Controller>(
         ],
         &mut adv[..],
     )?;
+    // Scan-response carries the *live* device name (the app reads this local name), so a
+    // rename shows over BLE without a reboot. trouble copies the data into the HCI
+    // command here, so the local buffers needn't outlive this call.
+    let name = crate::state::display_name().await;
     let mut scan = [0u8; 31];
     let scan_len = AdStructure::encode_slice(
-        &[AdStructure::CompleteLocalName(name.as_bytes())],
+        &[AdStructure::CompleteLocalName(name.as_str().as_bytes())],
         &mut scan[..],
     )?;
     let advertiser = peripheral
@@ -522,8 +529,26 @@ async fn advertise<'values, 'server, C: Controller>(
             },
         )
         .await?;
-    let conn = advertiser.accept().await?.with_attribute_server(server)?;
-    Ok(conn)
+    // Wait for a connection — but bail out (Ok(None)) if the name changes, so the caller
+    // re-advertises with it. The rename future only *resolves* on an actual name change,
+    // so unrelated state pushes (a brightness drag) don't tear down the advert.
+    match watch {
+        Some(rx) => {
+            let renamed = async {
+                loop {
+                    rx.changed().await;
+                    if crate::state::display_name().await.as_str() != name.as_str() {
+                        return;
+                    }
+                }
+            };
+            match select(advertiser.accept(), renamed).await {
+                Either::First(res) => Ok(Some(res?.with_attribute_server(server)?)),
+                Either::Second(_) => Ok(None),
+            }
+        }
+        None => Ok(Some(advertiser.accept().await?.with_attribute_server(server)?)),
+    }
 }
 
 /// Handle GATT events for one connection: RX writes → dispatch → TX notify.

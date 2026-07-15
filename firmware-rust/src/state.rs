@@ -217,13 +217,14 @@ pub static CONTROL: Mutex<CriticalSectionRawMutex, Control> = Mutex::new(Control
 /// Bumped whenever an observable control value (mode/bright/speed/solid/file) changes,
 /// so every connected client can be pushed a fresh `INFO` and the apps stay in sync
 /// even when a *different* app made the change. The MicroPython firmware broadcast the
-/// state line to all transports the same way. Sized for the connections that watch it:
-/// 3 concurrent TCP control clients + the BLE control link, with margin.
-pub static STATE_WATCH: Watch<CriticalSectionRawMutex, u32, 6> = Watch::new();
+/// state line to all transports the same way. The BLE advert also watches it to restart
+/// with the live name on a rename. Sized for the watchers: 3 TCP control clients + the
+/// BLE control link + the BLE advert loop, with margin.
+pub static STATE_WATCH: Watch<CriticalSectionRawMutex, u32, 8> = Watch::new();
 
 /// Number type carried by [`STATE_WATCH`]; the value is a rolling change counter (its
 /// content is irrelevant — any send wakes the receivers).
-pub type StateWatchRx = Receiver<'static, CriticalSectionRawMutex, u32, 6>;
+pub type StateWatchRx = Receiver<'static, CriticalSectionRawMutex, u32, 8>;
 
 /// Signal that observable state changed. Call after a successful setter (`BRIGHT`,
 /// `SPEED`, `SOLID`, `OFF`, `PLAY`, `SELECT`, `PROGRAM`) so watchers push a fresh INFO.
@@ -237,6 +238,15 @@ pub fn notify_state_change() {
 /// watcher slots are taken (that connection then just won't get live pushes — no harm).
 pub fn state_watch_receiver() -> Option<StateWatchRx> {
     STATE_WATCH.receiver()
+}
+
+/// The current device name for adverts/GAP — the configured name, or a default until one
+/// is set. Copied out so the caller doesn't hold the `CONTROL` lock.
+pub async fn display_name() -> FixedStr<32> {
+    let c = CONTROL.lock().await;
+    let mut s = FixedStr::new();
+    s.set(if c.name.is_empty() { "LED Animator" } else { c.name.as_str() });
+    s
 }
 
 /// A snapshot the player reads without holding the lock across a render.

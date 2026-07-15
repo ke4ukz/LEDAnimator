@@ -28,8 +28,6 @@ struct DeviceInfoView: View {
     @State private var showRemovePin = false
     /// Confirms a manual device restart.
     @State private var showRestart = false
-    /// Offers a restart after a rename so the Bluetooth advert name catches up.
-    @State private var showNameReboot = false
 
     /// Bare list on macOS (inspector); wrapped in a NavigationStack with a Done
     /// button on iOS (sheet).
@@ -220,12 +218,6 @@ struct DeviceInfoView: View {
         } message: {
             Text("The controller reboots and reconnects in a few seconds. Your patterns and settings are kept.")
         }
-        .alert("Restart for Bluetooth name?", isPresented: $showNameReboot) {
-            Button("Restart Now") { session.rebootDevice() }
-            Button("Later", role: .cancel) { }
-        } message: {
-            Text("The new name is in effect everywhere except the device's Bluetooth name, which only refreshes when it restarts. Restart now? It's back in a few seconds.")
-        }
         .onAppear { session.requestMoreInfo() }
         .task {
             // Power drifts slowly; re-poll while the panel is open (the initial
@@ -309,10 +301,8 @@ struct DeviceInfoView: View {
         let trimmed = editingName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, trimmed != session.connectedName else { return }
         session.rename(trimmed)
-        // The Wi-Fi name + on-screen title update live, but the BLE advert name only
-        // refreshes on boot — offer a restart. A short beat lets the rename alert finish
-        // dismissing before this one presents (SwiftUI drops back-to-back alerts).
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { showNameReboot = true }
+        // The device applies the name live across Wi-Fi discovery, the BLE advert, and
+        // every connected client — no restart needed.
     }
 
     /// Apply a new PIN: keep digits only and require 4–8 of them (the firmware
