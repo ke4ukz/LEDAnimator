@@ -37,6 +37,8 @@ export async function buildRp2040CombinedUf2(
   name?: string,
   build?: string,
   meta?: LedaMeta,
+  /** Pre-encoded pattern bytes (e.g. RGB565/indexed); defaults to RGB888. */
+  pattern?: Uint8Array,
 ): Promise<Uint8Array> {
   const enc = new TextEncoder()
   const settings = rp2040SettingsFiles(pin, brightness, name ?? 'LED Animator', patternFile)
@@ -47,7 +49,7 @@ export async function buildRp2040CombinedUf2(
   const files = [
     { name: 'main.py', data: enc.encode(RP2040_LOADER_PY) },
     { name: 'leda.mpy', data: firmwareMpyBytes() },
-    { name: patternFile, data: encodeRaster(raster, meta) },
+    { name: patternFile, data: pattern ?? encodeRaster(raster, meta) },
     ...Object.entries(settings).map(([n, v]) => ({ name: n, data: enc.encode(v) })),
   ]
 

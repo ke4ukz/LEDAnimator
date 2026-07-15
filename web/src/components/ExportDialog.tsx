@@ -3,7 +3,8 @@ import { useStore } from '../store'
 import { InfoDot } from './InfoDot'
 import { partitionByDevice } from '../bake'
 import { DEVICES, checkLimits } from '../export/devices'
-import { encodeRaster, estimateBytes, ROLE, LOSS, STARTUP, type LedaMeta } from '../export/format'
+import { encodeRasterAs, estimateBytesFor, PIXEL_FORMAT, ROLE, LOSS, STARTUP, type LedaMeta } from '../export/format'
+import { buildIndexed, type IndexedResult } from '../export/palette'
 import { RP2040_LOADER_PY, rp2040Readme, rp2040SettingsFiles } from '../export/rp2040'
 import { firmwareMpyBytes } from '../export/firmwareMpy.generated'
 import { serializeProjectFile } from '../export/projectFile'
@@ -11,6 +12,7 @@ import { downloadBytes, zipProject } from '../export/download'
 import { commit } from 'virtual:build-info'
 
 type ExportFormat = 'uf2' | 'zip' | 'leda'
+type ColorFormat = 'rgb888' | 'rgb565' | 'indexed'
 
 const fmtBytes = (n: number) => (n < 1024 * 1024 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1024 / 1024).toFixed(2)} MB`)
 
@@ -54,9 +56,28 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
     const saved = localStorage.getItem('leda.export.format')
     return saved === 'uf2' || saved === 'zip' || saved === 'leda' ? saved : 'uf2'
   })
+  const [colorFormat, setColorFormat] = useState<ColorFormat>(() => {
+    const saved = localStorage.getItem('leda.export.color')
+    return saved === 'rgb888' || saved === 'rgb565' || saved === 'indexed' ? saved : 'rgb888'
+  })
   useEffect(() => { localStorage.setItem('leda.export.device', deviceId) }, [deviceId])
   useEffect(() => { localStorage.setItem('leda.export.format', format) }, [format])
+  useEffect(() => { localStorage.setItem('leda.export.color', colorFormat) }, [colorFormat])
   const [building, setBuilding] = useState(false)
+
+  const formatByte = PIXEL_FORMAT[colorFormat]
+  // Indexed color: quantize each device's slice to its own palette (per-device, so a
+  // device only carries the colors it shows). Built only when indexed is picked, and
+  // memoized — median-cut over a whole raster isn't free. `exact` is false when a
+  // slice had > 256 colors and had to be approximated.
+  const indexedByDevice = useMemo(() => {
+    if (colorFormat !== 'indexed') return null
+    const m = new Map<number, IndexedResult>()
+    for (const { device, raster } of devices) m.set(device, buildIndexed(raster.data))
+    return m
+  }, [devices, colorFormat])
+  const quantized = indexedByDevice ? [...indexedByDevice.values()].some((r) => !r.exact) : false
+  const maxDistinct = indexedByDevice ? Math.max(...[...indexedByDevice.values()].map((r) => r.distinct)) : 0
 
   const multi = devices.length > 1
   const deviceIds = devices.map((d) => d.device)
@@ -102,7 +123,7 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
   const hasRp2040 = platform.targets.includes('rp2040-micropython')
 
   const perDevice = devices.map(({ device, raster }) => {
-    const bytes = estimateBytes(raster)
+    const bytes = estimateBytesFor(raster, formatByte, indexedByDevice?.get(device)?.count ?? 256)
     return { device, bytes, warnings: checkLimits(platform, raster, bytes) }
   })
   const bytesByDevice = new Map(perDevice.map((d) => [d.device, d.bytes]))
@@ -139,13 +160,18 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
     ].join('\n')
   }
 
+  // Encode one device's slice in the chosen color format (reusing its prebuilt
+  // indexed palette when indexed is selected).
+  const encodeFor = (device: number, r: typeof raster) =>
+    encodeRasterAs(r, formatByte, metaFor(device), indexedByDevice?.get(device))
+
   const exportLeda = () => {
     if (!multi) {
-      downloadBytes(ledaName(devices[0].device), encodeRaster(devices[0].raster, metaFor(devices[0].device)), 'application/octet-stream')
+      downloadBytes(ledaName(devices[0].device), encodeFor(devices[0].device, devices[0].raster), 'application/octet-stream')
       return
     }
     const files: Record<string, string | Uint8Array> = {}
-    for (const { device, raster } of devices) files[ledaName(device)] = encodeRaster(raster, metaFor(device))
+    for (const { device, raster } of devices) files[ledaName(device)] = encodeFor(device, raster)
     files['manifest.txt'] = buildManifest(ledaName, 'File', 'file')
     downloadBytes(`${progBase}.zip`, zipProject(files), 'application/zip')
   }
@@ -161,7 +187,7 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
       // matches the bundled MicroPython (armv6m / v1.28); see firmwareMpy.generated.
       files[`${dir}main.py`] = RP2040_LOADER_PY
       files[`${dir}leda.mpy`] = firmwareMpyBytes()
-      files[`${dir}${pf}`] = encodeRaster(raster, metaFor(device))
+      files[`${dir}${pf}`] = encodeFor(device, raster)
       for (const [n, v] of Object.entries(rp2040SettingsFiles(s.pin, Number(s.brightness.toFixed(2)), s.name, pf))) {
         files[`${dir}${n}`] = v
       }
@@ -181,7 +207,7 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
       const { buildRp2040CombinedUf2 } = await import('../export/combinedUf2')
       const buildOne = (device: number, r: typeof raster) => {
         const s = settingsFor(device)
-        return buildRp2040CombinedUf2(r, s.pin, Number(s.brightness.toFixed(2)), ledaName(device), s.name, FW_BUILD, metaFor(device))
+        return buildRp2040CombinedUf2(r, s.pin, Number(s.brightness.toFixed(2)), ledaName(device), s.name, FW_BUILD, metaFor(device), encodeFor(device, r))
       }
       if (!multi) {
         const uf2 = await buildOne(devices[0].device, devices[0].raster)
@@ -202,6 +228,19 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
   }
 
   const download = () => {
+    // Indexed color that couldn't stay lossless: let the user stop and adjust, or
+    // proceed with the best-effort approximation (their call — no palette editor).
+    if (
+      quantized &&
+      !window.confirm(
+        `This pattern uses ${maxDistinct.toLocaleString()} colors — more than a 256-color palette holds, ` +
+          `so indexed color will approximate it (some banding is likely).\n\n` +
+          `OK — go ahead and get as close as it can.\n` +
+          `Cancel — stop so I can adjust the pattern (or pick RGB565 / RGB888).`,
+      )
+    ) {
+      return
+    }
     if (format === 'uf2') return void exportUf2()
     if (format === 'zip') return exportZip()
     return exportLeda()
@@ -267,6 +306,29 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
                 <option value="leda">Pattern data (.leda)</option>
               </select>
             </label>
+
+            <label className="field-row">
+              <span title="How each LED's color is stored. RGB888 is exact (3 bytes/LED). RGB565 halves the size with a slight color-depth loss. Indexed color is smallest for patterns with few distinct colors — it builds a palette automatically (and approximates if a slice needs more than 256 colors).">
+                Color format
+              </span>
+              <select value={colorFormat} onChange={(e) => setColorFormat(e.target.value as ColorFormat)}>
+                <option value="rgb888">RGB888 — exact (3 B/LED)</option>
+                <option value="rgb565">RGB565 — smaller (2 B/LED)</option>
+                <option value="indexed">Indexed — palette (1 B/LED)</option>
+              </select>
+            </label>
+
+            {quantized && (
+              <div className="warn-box">
+                <strong>Indexed color will approximate this pattern.</strong>
+                <span className="muted">
+                  {' '}
+                  {multi ? 'A device slice has' : 'It has'} {maxDistinct.toLocaleString()} distinct colors, more than a
+                  256-color palette holds. Export gets as close as it can (expect some banding), or switch to RGB565 /
+                  RGB888 to keep it exact.
+                </span>
+              </div>
+            )}
 
             {multi && (
               <fieldset className="device-block">

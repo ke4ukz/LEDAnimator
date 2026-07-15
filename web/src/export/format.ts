@@ -169,6 +169,7 @@ function encodeIndexed(raster: Raster, idx: IndexedResult, meta: LedaMeta): Uint
 export function encodeLeaderOnly(numFrames: number, fps: number, group = 0, device = 0): Uint8Array {
   const out = new Uint8Array(HEADER_SIZE)
   const dv = new DataView(out.buffer)
-  writeHeader(dv, out, 0, numFrames, fps, { role: ROLE.leaderOnly, group, device })
+  // No pixel data, so the pixel format is moot — record RGB888.
+  writeHeader(dv, out, PIXEL_FORMAT.rgb888, 0, numFrames, fps, { role: ROLE.leaderOnly, group, device })
   return out
 }
