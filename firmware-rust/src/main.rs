@@ -322,8 +322,7 @@ async fn main(spawner: Spawner) {
                         Timer::after_millis(33).await;
                     } else {
                         let f = ff.min(pat.header.num_frames - 1);
-                        if let Some(rgb) = pat.frame(f) {
-                            leda::fill_grb(rgb, &mut buf[..n], bright255);
+                        if pat.render(f, &mut buf[..n], bright255) {
                             ws.show(&buf[..n]).await;
                         }
                         // The PLL advances the phase; just refresh (~60 Hz) to track it.
@@ -341,8 +340,7 @@ async fn main(spawner: Spawner) {
             },
             state::Mode::Play => match &pattern {
                 Some(pat) if pat.header.num_frames > 0 && pat.header.num_leds > 0 => {
-                    if let Some(rgb) = pat.frame(frame) {
-                        leda::fill_grb(rgb, &mut buf[..n], bright255);
+                    if pat.render(frame, &mut buf[..n], bright255) {
                         ws.show(&buf[..n]).await;
                     }
                     // Publish the position for the sync beacon (leader) — this frame
