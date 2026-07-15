@@ -378,6 +378,16 @@ pub async fn dispatch(line: &str, fs: &SharedFs, sink: &mut impl LineSink, conn:
             embassy_rp::rom_data::reset_to_usb_boot(0, 0);
         }
 
+        "REBOOT" => {
+            // Warm restart — re-runs boot, so it reloads config and re-advertises the
+            // current name over BLE (the one thing a live rename can't refresh). Ack
+            // first with a short beat so the client sees OK before the link drops, then
+            // request a full system reset (SYSRESETREQ reboots the RP2040 from flash).
+            sink.send("OK REBOOT").await;
+            embassy_time::Timer::after(embassy_time::Duration::from_millis(250)).await;
+            cortex_m::peripheral::SCB::sys_reset();
+        }
+
         // --- Wi-Fi provisioning: stash SSID/pass, then WIFICONNECT writes
         // networks.txt + nudges the manager to join (no reboot). ---
         "WIFISSID" => {

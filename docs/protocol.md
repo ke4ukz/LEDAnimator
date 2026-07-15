@@ -101,6 +101,7 @@ argument usually *queries* the value.
 
 | Command | Meaning |
 |---|---|
+| `REBOOT` | **Warm-restart** the device: it acks `OK REBOOT`, waits a beat so the client sees the ack, then resets and re-runs boot. Config (name, brightness, selected pattern, Wi‑Fi, PIN) is reloaded from flash, so nothing is lost. The main use is refreshing the **BLE advert name** after a rename — a live rename updates the Wi‑Fi discovery name and every connected client, but the Bluetooth advert name is only re-read at boot. The connection drops during the reset; the device reappears (and can be reconnected) once it rejoins the network, ~5–10 s later. Auth-gated. |
 | `BOOTSEL` | Reboot into the RP2040 **USB bootloader** (the `RPI-RP2` mass-storage drive) so a new firmware UF2 can be dropped on — no BOOTSEL button or `picotool` needed. The connection **drops immediately** (the chip resets), so there's no reply; the client then watches for the `RPI-RP2` drive to mount and copies the `.uf2`. Auth-gated like any non-`INFO` command. |
 
 The intended flow (a Mac-side "update firmware" gesture, or by hand): send

@@ -38,6 +38,7 @@ enum LEDCommand {
     case free
     case power                 // live power status (USB present + VSYS mV)
     case setPin(Int)           // re-point the strip's data GP pin (0–29)
+    case reboot                // warm-restart the device (re-advertises the BLE name)
     // Multi-device sync
     case program(Int)          // group jukebox: play program n (a leader switches the whole group)
     case teardown              // leader-only: gracefully end the group
@@ -73,6 +74,7 @@ enum LEDCommand {
         case .free: return "FREE"
         case .power: return "POWER"
         case .setPin(let n): return "PIN \(n)"
+        case .reboot: return "REBOOT"
         case .program(let n): return "PROGRAM \(n)"
         case .teardown: return "TEARDOWN"
         case .setLoss(let s): return "LOSS \(s)"

@@ -294,6 +294,12 @@ final class DeviceSession {
         send(.setName(String(trimmed.prefix(26))))
     }
 
+    /// Warm-restart the device. The board acks "OK REBOOT" then resets, so the link
+    /// drops within a second — fire-and-forget, and let the transport surface the
+    /// disconnect. The device reappears in the list (and can be reconnected) once it
+    /// finishes booting and rejoins Wi-Fi, ~5–10 s later.
+    func rebootDevice() { send(.reboot, expectResponse: false) }
+
     // MARK: Wi-Fi provisioning
 
     /// Ask the device for its current Wi-Fi state (reply arrives as "WIFI …").
