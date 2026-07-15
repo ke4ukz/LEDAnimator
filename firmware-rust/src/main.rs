@@ -36,6 +36,18 @@ bind_interrupts!(struct Irqs {
     USBCTRL_IRQ => UsbInterruptHandler<USB>;
 });
 
+/// The GPIO the LED strip's data line is wired to. **Fixed at build time**, not
+/// read from config: LED 0 is the boot diagnostic (stage colors / error codes) and
+/// runs *before* the filesystem — which is where any pin setting would live — is
+/// mounted, so the pin must be known up front (see `docs/led0-status.md`). This is
+/// the one place the number lives; it drives the `PIN` report over the wire.
+///
+/// To rebuild for a different pin, change this number **and** the two typed pin
+/// peripherals that must match it (embassy pins are types, not values, so they
+/// can't read this constant): `p.PIN_<n>` on the `ws` line in `main` below, and the
+/// same in the panic handler (`panic.rs`, which bit-bangs LED 0 on a crash).
+pub const DATA_PIN_GP: u8 = 0;
+
 // 1000 = the MicroPython STATUS_BLANK_LEDS ceiling (boot-clear / status writes).
 const MAX_LEDS: usize = 1000;
 // Strip span used by SOLID/OFF when no pattern is loaded (so those still light a
@@ -61,7 +73,8 @@ async fn main(spawner: Spawner) {
     log::info!("LED Animator (Rust) booting");
 
     let Pio { mut common, sm0, .. } = Pio::new(p.PIO1, Irqs);
-    // Data pin GP0 (fixed — no `datapin.txt`; see docs/led0-status.md rationale).
+    // LED strip data pin — must be GP`DATA_PIN_GP` (GP0). Keep this peripheral in
+    // sync with the constant + the panic handler if the build pin ever changes.
     let mut ws: Ws2812<PIO1, 0> = Ws2812::new(&mut common, sm0, p.DMA_CH2, Irqs, p.PIN_0);
     let buf = FRAME_BUF.init([0u32; MAX_LEDS]);
 

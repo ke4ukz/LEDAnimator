@@ -47,7 +47,8 @@ fn ws_word(out: &mut Output<'_>, grb: u32) {
 #[panic_handler]
 fn panic(_info: &PanicInfo) -> ! {
     cortex_m::interrupt::disable();
-    // We're crashing — steal the peripherals to reclaim the data pin (GP0).
+    // We're crashing — steal the peripherals to reclaim the data pin. Must be the
+    // LED data pin (GP`crate::DATA_PIN_GP`, GP0); keep this in sync with `main`.
     let p = unsafe { embassy_rp::Peripherals::steal() };
     let mut out = Output::new(p.PIN_0, Level::Low);
     let red = grb_word(255, 0, 0);

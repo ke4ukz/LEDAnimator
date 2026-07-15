@@ -269,7 +269,7 @@ pub async fn dispatch(line: &str, fs: &SharedFs, sink: &mut impl LineSink, conn:
             .await;
             reply(sink, format_args!("HOSTNAME leda-{}", crate::state::device_id_hex().as_str())).await;
             reply(sink, format_args!("PLATFORM {}", PLATFORM)).await;
-            sink.send("PIN 0").await; // data pin fixed at GP0
+            reply(sink, format_args!("PIN {}", crate::DATA_PIN_GP)).await; // fixed at build (GP0)
             {
                 let c = CONTROL.lock().await;
                 reply(sink, format_args!("ROLE {}", role_name(c.role))).await;
