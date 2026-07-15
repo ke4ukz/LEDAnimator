@@ -13,6 +13,11 @@ export function downloadBytes(name: string, data: Uint8Array, mime = 'applicatio
   URL.revokeObjectURL(url)
 }
 
+/** Trigger a browser download of a text string (UTF-8). */
+export function downloadText(name: string, text: string, mime = 'text/plain') {
+  downloadBytes(name, new TextEncoder().encode(text), mime)
+}
+
 /** Zip a set of files (text strings or bytes) into a single archive. */
 export function zipProject(files: Record<string, string | Uint8Array>): Uint8Array {
   const entries: Record<string, Uint8Array> = {}

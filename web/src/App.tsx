@@ -15,6 +15,8 @@ import { SaveConfirmDialog } from './components/SaveConfirmDialog'
 import { KebabMenu } from './components/KebabMenu'
 import { readProjectFromFile } from './export/projectFile'
 import { deleteProjectFromLibrary } from './export/library'
+import { buildBackup, parseBackup, restoreProjects } from './export/backup'
+import { downloadText } from './export/download'
 import { useStore } from './store'
 import { usePlayer } from './usePlayer'
 import './App.css'
@@ -50,6 +52,7 @@ export default function App() {
   const focusGradient = useStore((s) => s.focusGradient)
   const toggleFocusGradient = useStore((s) => s.toggleFocusGradient)
   const fileRef = useRef<HTMLInputElement>(null)
+  const restoreRef = useRef<HTMLInputElement>(null)
 
   // Confirm before throwing away unsaved edits (no undo).
   const confirmDiscard = useCallback(() => {
@@ -101,6 +104,34 @@ export default function App() {
     const file = e.target.files?.[0]
     e.target.value = ''
     importFile(file)
+  }
+
+  // Back up the whole library (every saved project) as one JSON file. Unsaved
+  // edits to the current project aren't included — only what's been Saved.
+  const onBackup = async () => {
+    const { json, count } = await buildBackup()
+    if (count === 0) {
+      window.alert('No saved projects to back up yet. Save a project first.')
+      return
+    }
+    const date = new Date().toISOString().slice(0, 10)
+    downloadText(`led-animator-backup-${date}.json`, json, 'application/json')
+  }
+
+  // Restore a backup file: load every project into the library as a new copy,
+  // renaming name clashes to “-2”, “-3”, … Leaves the open project alone.
+  const onRestore = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file) return
+    file
+      .text()
+      .then(async (text) => {
+        const n = await restoreProjects(parseBackup(text))
+        window.alert(`Restored ${n} project${n === 1 ? '' : 's'} into your library.`)
+        setProjectsOpen(true) // show them
+      })
+      .catch((err: unknown) => window.alert(`Could not restore: ${(err as Error).message}`))
   }
 
   // ⌘S / Ctrl-S saves the current project to the library.
@@ -189,6 +220,8 @@ export default function App() {
             { label: 'Save As', onClick: onSaveAs },
             { label: 'Import', onClick: () => fileRef.current?.click() },
             { label: 'Export', onClick: () => setExportOpen(true) },
+            { label: 'Back Up All', onClick: onBackup },
+            { label: 'Restore', onClick: () => restoreRef.current?.click() },
             { label: 'Delete', onClick: onDelete, danger: true },
             { label: 'About', onClick: () => setAboutOpen(true) },
           ]}
@@ -199,6 +232,13 @@ export default function App() {
           accept=".json,.zip,application/json,application/zip"
           style={{ display: 'none' }}
           onChange={onImport}
+        />
+        <input
+          ref={restoreRef}
+          type="file"
+          accept=".json,application/json"
+          style={{ display: 'none' }}
+          onChange={onRestore}
         />
       </header>
 
