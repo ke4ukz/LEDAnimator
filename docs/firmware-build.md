@@ -1,8 +1,46 @@
 # Building the device firmware
 
-How the MicroPython player that runs on the Pico is authored, tested, and shipped.
-For the *protocol* it speaks see [`protocol.md`](protocol.md); for the on-disk
-pattern format see [`file-format.md`](file-format.md).
+How the player that runs on the Pico is authored, tested, and shipped. For the
+*protocol* it speaks see [`protocol.md`](protocol.md); for the on-disk pattern
+format see [`file-format.md`](file-format.md).
+
+> **Two firmwares.** The **Rust** firmware ([`firmware-rust/`](../firmware-rust))
+> is the go-forward: it has full feature parity and more. The **MicroPython**
+> player (the rest of this doc) is **dormant** — kept as a fallback, not actively
+> developed. New work goes into the Rust firmware.
+
+## Shipping a Rust firmware build to the website
+
+Firmware development in `firmware-rust/` is **decoupled** from what the site
+ships. The website bundles a **pinned** firmware build; updating it is a
+deliberate, separate step you run only when a build is validated and you want it
+live — never automatically.
+
+```bash
+cd firmware-rust && cargo build --release      # then make the .uf2 (elf2uf2-rs)
+# …flash + validate on hardware…
+cd ../web && npm run promote-firmware           # roll THIS build to the site
+```
+
+`promote-firmware` ([`web/scripts/promote-firmware.mjs`](../web/scripts/promote-firmware.mjs)):
+
+- copies `firmware-rust/led-animator.uf2` → `web/src/assets/led-animator-rp2040.uf2`
+  (a stable name, so the export's `?url` import never churns);
+- regenerates
+  [`web/src/export/firmwareRelease.generated.ts`](../web/src/export/firmwareRelease.generated.ts)
+  with the **version** (read from `FW_VERSION` in the firmware source, so the
+  site advertises exactly what the device reports), the **flash/littlefs layout**
+  (read from `firmware-rust/src/fs.rs`, so it can't drift), the source **commit**,
+  size, and promotion date;
+- warns if `firmware-rust` has **uncommitted changes** (the UF2 might not match
+  the recorded commit).
+
+Review the diff, then commit the UF2 + the generated metadata to ship it. Bump
+`FW_VERSION` in the firmware *before* promoting when you want a new version string
+on the wire and on the site. (Pass a path to override the source UF2:
+`npm run promote-firmware -- path/to.uf2`.)
+
+## MicroPython player (dormant)
 
 ## Where the firmware lives
 
