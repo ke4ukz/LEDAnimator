@@ -129,6 +129,10 @@ class S:
     reload = True
     uploading = False        # a TCP client is streaming a pattern file -> pause playback
     n = 0                    # LED count of the loaded pattern
+    fmt = 0                  # pixel format: 0 RGB888 / 1 RGB565 / 2 indexed
+    bpp = 3                  # raster bytes per LED (3 / 2 / 1 by format)
+    data_start = HEADER_SIZE # file offset where frame data begins (past any palette)
+    pal = None               # indexed palette bytes (count*3), else None
     name = DEVICE_NAME       # advertised BLE name (overridable at runtime)
     device_id = b""          # last 3 bytes of the Wi-Fi MAC (= hostname suffix),
                              # advertised so the app correlates BLE <-> Wi-Fi
@@ -261,6 +265,42 @@ def _fill_grb(src: ptr8, dst: ptr32, n: int, bright: int):
 
 
 @micropython.viper
+def _fill_grb_565(src: ptr8, dst: ptr32, n: int, bright: int):
+    # RGB565 (2 bytes/LED, little-endian 5-6-5) -> GRB words. Bit-replicate the low
+    # bits so full 5/6-bit values expand back to 255 (not 248/252).
+    i = 0
+    while i < n:
+        j = i * 2
+        v = int(src[j]) | (int(src[j + 1]) << 8)
+        r5 = (v >> 11) & 0x1f
+        g6 = (v >> 5) & 0x3f
+        b5 = v & 0x1f
+        r = (((r5 << 3) | (r5 >> 2)) * bright) >> 8
+        g = (((g6 << 2) | (g6 >> 4)) * bright) >> 8
+        b = (((b5 << 3) | (b5 >> 2)) * bright) >> 8
+        dst[i] = (g << 24) | (r << 16) | (b << 8)
+        i += 1
+
+
+@micropython.viper
+def _fill_grb_idx(src: ptr8, dst: ptr32, n: int, bright: int, pal: ptr8, pal_n: int):
+    # Indexed (1 byte/LED) -> GRB words via the palette (RGB triples). An index past
+    # the palette renders black.
+    i = 0
+    while i < n:
+        ix = int(src[i])
+        if ix < pal_n:
+            k = ix * 3
+            r = (int(pal[k]) * bright) >> 8
+            g = (int(pal[k + 1]) * bright) >> 8
+            b = (int(pal[k + 2]) * bright) >> 8
+            dst[i] = (g << 24) | (r << 16) | (b << 8)
+        else:
+            dst[i] = 0
+        i += 1
+
+
+@micropython.viper
 def _fill_word(dst: ptr32, n: int, word: int):
     i = 0
     while i < n:
@@ -287,14 +327,22 @@ def _show_grb(frame, n):
     # status overlay is set (e.g. a follower free-running while its leader is
     # lost), paint it on LED 0 over the animation.
     global _back, _front
-    if len(frame) < n * 3:
+    bpp = S.bpp
+    if len(frame) < n * bpp:
         # Short read (truncated file / bad seek): don't let the viper fill read
         # past the buffer (that would fault). Clamp to whole LEDs present.
-        n = len(frame) // 3
+        n = len(frame) // bpp
         if n <= 0:
             return
     _ensure_bufs(n)
-    _fill_grb(frame, _back, n, _bri())
+    fmt = S.fmt
+    if fmt == 1:
+        _fill_grb_565(frame, _back, n, _bri())
+    elif fmt == 2:
+        pal = S.pal
+        _fill_grb_idx(frame, _back, n, _bri(), pal, len(pal) // 3)
+    else:
+        _fill_grb(frame, _back, n, _bri())
     if _status_overlay is not None:
         _back[0] = _status_word(_status_overlay)
     _dma_kick(_back, n)
@@ -2126,7 +2174,7 @@ def _follower_loop(f, nf, fps, fb):
                 S.fol_phase = (S.fol_phase + dt * S.fol_R) % nf
                 frame = int(S.fol_phase) % nf
                 S.frame = frame
-                f.seek(HEADER_SIZE + frame * fb)
+                f.seek(S.data_start + frame * fb)
                 _show_grb(f.read(fb), S.n)
                 _tick()
                 slack = period_us - time.ticks_diff(time.ticks_us(), t0)
@@ -2160,7 +2208,7 @@ def _follower_loop(f, nf, fps, fb):
             _set_overlay("searching" if (lost and S.loss_policy == 0) else None)
             frame = int(S.fol_phase) % nf
             S.frame = frame
-            f.seek(HEADER_SIZE + frame * fb)
+            f.seek(S.data_start + frame * fb)
             _show_grb(f.read(fb), S.n)
         _tick()
         slack = period_us - time.ticks_diff(time.ticks_us(), t0)
@@ -2321,8 +2369,9 @@ def main():
                 S.file = None
                 continue
             h = f.read(HEADER_SIZE)
-            if len(h) < HEADER_SIZE or h[0:4] != b"LEDA":
-                # Not a valid pattern - drop it and go idle.
+            if len(h) < HEADER_SIZE or h[0:4] != b"LEDA" or h[5] > 2:
+                # Not a valid pattern (bad magic or a pixel format we can't decode) -
+                # drop it and go idle.
                 f.close()
                 f = None
                 S.file = None
@@ -2330,6 +2379,18 @@ def main():
             S.n = h[6] | (h[7] << 8)
             frames = h[8] | (h[9] << 8) | (h[10] << 16) | (h[11] << 24)
             fps = h[12] | (h[13] << 8)
+            # Pixel format (offset 5): sets the per-LED stride + where frame data
+            # begins. Indexed carries a palette block (u16 count + count*3) first.
+            S.fmt = h[5]
+            S.bpp = 2 if S.fmt == 1 else (1 if S.fmt == 2 else 3)
+            if S.fmt == 2:
+                pc = f.read(2)
+                pn = pc[0] | (pc[1] << 8)
+                S.pal = f.read(pn * 3)
+                S.data_start = HEADER_SIZE + 2 + pn * 3
+            else:
+                S.pal = None
+                S.data_start = HEADER_SIZE
             _apply_role_header(h)   # role / group / device-id live in the header
             S.program = _program_from_name(S.file)   # program # = the "NN-" filename prefix
             base_delay = 1.0 / fps if fps else 0.03
@@ -2364,10 +2425,10 @@ def main():
             else:
                 # Phase-lock to the group leader and play our own slice (runs until a
                 # reload / mode change / program switch / teardown).
-                _follower_loop(f, frames, fps, S.n * 3)
+                _follower_loop(f, frames, fps, S.n * S.bpp)
             continue
-        fb = S.n * 3
-        f.seek(HEADER_SIZE)
+        fb = S.n * S.bpp
+        f.seek(S.data_start)
         for i in range(frames):
             if S.reload or S.mode != "play" or S.uploading:
                 break
