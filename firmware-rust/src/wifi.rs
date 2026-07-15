@@ -47,6 +47,9 @@ pub static SCAN_RESULTS: AsyncMutex<CriticalSectionRawMutex, heapless::Vec<ScanE
 
 async fn set_state(s: &str) {
     STATE.lock().await.set(s);
+    // Wi-Fi coming/going is a config change worth pushing to connected clients (e.g. a
+    // BLE-connected phone watching the device join) — see `state::notify_state_change`.
+    crate::state::notify_state_change();
 }
 
 /// The `WIFISTATUS` reply line.
@@ -106,7 +109,7 @@ pub async fn manager_task(
                             } else {
                                 let _ = write!(line, "connected");
                             }
-                            STATE.lock().await.set(line.as_str());
+                            set_state(line.as_str()).await;
                             log::info!("wifi: {}", line.as_str());
                         }
                         Err(_) => {
@@ -368,7 +371,7 @@ async fn serve(sock: &mut TcpSocket<'_>, fs: &'static SharedFs) {
                 Either::First(Ok(n)) => n,
                 Either::Second(_) => {
                     let mut sink = TcpSink { sock: &mut *sock };
-                    protocol::send_info(&mut sink).await;
+                    protocol::send_snapshot(fs, &mut sink).await;
                     continue;
                 }
             }

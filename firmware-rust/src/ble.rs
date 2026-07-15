@@ -551,7 +551,7 @@ async fn gatt_events<P: PacketPool>(
                 Either::First(ev) => ev,
                 Either::Second(_) => {
                     let mut sink = BleSink { tx, conn };
-                    protocol::send_info(&mut sink).await;
+                    protocol::send_snapshot(fs, &mut sink).await;
                     continue;
                 }
             }

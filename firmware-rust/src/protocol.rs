@@ -363,7 +363,10 @@ pub async fn dispatch(line: &str, fs: &SharedFs, sink: &mut impl LineSink, conn:
                 } else {
                     write_cfg(fs, b"devicename.txt\0", trimmed.as_bytes()).await;
                     CONTROL.lock().await.name.set(trimmed);
-                    // NB: the live BLE advert name updates on next reboot.
+                    // Push the new name to every connected client. (The Wi-Fi discovery
+                    // reply reads the live name too; the BLE advert name updates on next
+                    // reboot.)
+                    notify_state_change();
                     reply(sink, format_args!("OK NAME {}", trimmed)).await;
                 }
             }
@@ -464,8 +467,29 @@ pub async fn dispatch(line: &str, fs: &SharedFs, sink: &mut impl LineSink, conn:
     }
 }
 
+/// Push the *complete* current picture to one client: the `INFO` state line plus the
+/// identity/config the apps display (name, sync role/group, Wi-Fi status). Sent to every
+/// connected client whenever anything changes ([`notify_state_change`]), so no app ever
+/// shows stale info — a name edit, a Wi-Fi join, or a mode flip on one client refreshes
+/// them all. Keeping it a full refresh (rather than "just the field that changed") means
+/// a coalesced signal can never drop an update.
+pub async fn send_snapshot(fs: &SharedFs, sink: &mut impl LineSink) {
+    send_info(sink).await;
+    {
+        let c = CONTROL.lock().await;
+        if !c.name.is_empty() {
+            reply(sink, format_args!("NAME {}", c.name.as_str())).await;
+        }
+        reply(sink, format_args!("ROLE {}", role_name(c.role))).await;
+        reply(sink, format_args!("GROUP {}", c.group)).await;
+    }
+    let _ = fs; // reserved (auth/free are static enough not to push)
+    let s = crate::wifi::status_line().await;
+    sink.send(&s).await;
+}
+
 /// Build + send the one-line `INFO` state snapshot. Used both by the `INFO` command and
-/// by the live push a connection makes when [`notify_state_change`] fires elsewhere.
+/// as the first line of [`send_snapshot`].
 pub async fn send_info(sink: &mut impl LineSink) {
     let c = CONTROL.lock().await;
     let mut r = Reply::new();

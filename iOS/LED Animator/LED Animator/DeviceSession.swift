@@ -398,6 +398,11 @@ final class DeviceSession {
             bluetoothMac = String(reply.dropFirst("BTMAC ".count))
         } else if reply.hasPrefix("HOSTNAME ") {
             hostname = String(reply.dropFirst("HOSTNAME ".count))
+        } else if reply.hasPrefix("NAME ") {
+            // A bare "NAME <x>" — the device pushed a rename (another client changed
+            // it, or a no-arg NAME query) — so the title updates live. The device list
+            // picks the new name up separately via discovery.
+            connectedName = String(reply.dropFirst("NAME ".count))
         } else if reply.hasPrefix("PIN ") {
             dataPin = Int(reply.dropFirst("PIN ".count))
         } else if reply.hasPrefix("ROLE ") {
