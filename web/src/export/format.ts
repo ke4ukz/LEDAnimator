@@ -7,7 +7,7 @@ import { buildIndexed, type IndexedResult } from './palette'
 //   off size field
 //   0   4    magic 'LEDA'
 //   4   1    version (1)
-//   5   1    pixel format (0 = RGB888)
+//   5   1    pixel format (0 = RGB888, 1 = RGB565, 2 = indexed + palette block)
 //   6   2    numLeds   (uint16 LE)
 //   8   4    numFrames (uint32 LE)
 //   12  2    fps       (uint16 LE)

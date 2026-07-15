@@ -49,10 +49,12 @@ A snapshot of what works today and what's next. Updated July 2026.
   multi-device validation** (2+ Pico W) — checklist in
   [`hardware-test-plan.md`](hardware-test-plan.md) — plus dedicated-leader export,
   the recovery ritual, and the iOS/macOS app catch-up.
-- **Color data format** — indexed color (per-program perceptual palette +
-  dithering) and/or RGB565/444 to shrink exports; frame-rate as the cheapest
-  lever. Splitting across devices divides file size by device count. (Discussion
-  captured in the notes below.)
+- **Color data format** — **RGB565 and indexed color are built** (export "Color
+  format" picker; both decoded by the Rust and MicroPython players). Indexed
+  builds a per-device palette automatically (lossless ≤256 colors, else median-cut
+  with an approximate-or-stop prompt — no palette editor). Still open: optional
+  **dithering** for indexed to soften banding, and RGB444. Frame-rate and the
+  per-device split remain the other size levers.
 - **More companions** — Windows/Android; a standalone watch remote.
 - **More export targets** — ATmega328 (Arduino) and Raspberry Pi are profiled in
   the exporter but their export paths aren't built.

@@ -31,7 +31,7 @@ followed by the pixel data.
 |---:|---:|---|---|
 | 0 | 4 | **magic** | ASCII `LEDA` (`0x4C 0x45 0x44 0x41`) |
 | 4 | 1 | **version** | `1` |
-| 5 | 1 | **pixel format** | `0` = RGB888 (only format defined today) |
+| 5 | 1 | **pixel format** | `0` = RGB888 · `1` = RGB565 · `2` = indexed (see [Pixel formats](#pixel-formats)) |
 | 6 | 2 | **numLeds** | `uint16` — LEDs per frame |
 | 8 | 4 | **numFrames** | `uint32` — frames in the loop |
 | 12 | 2 | **fps** | `uint16` — frames per second |
@@ -52,9 +52,11 @@ A **leader-only** file (role `2`) is a header **with no pixel data** (`numLeds`
 `0`, no body): the device runs the master clock + beacon from `numFrames`/`fps`
 and drives no strip, so a group has a reference even where no strip is wired.
 
-### Pixel data (starts at offset 16)
+### Pixel data (starts at offset 20)
 
-Frame-major, RGB888, 3 bytes per LED:
+Frame-major, one pixel per LED per frame. The **pixel format** byte picks the
+per-pixel encoding (see [Pixel formats](#pixel-formats)); the default RGB888 is
+3 bytes per LED:
 
 ```
 for frame in 0 .. numFrames-1:
@@ -62,8 +64,8 @@ for frame in 0 .. numFrames-1:
         R, G, B            # one byte each, 0-255
 ```
 
-- **Body size** = `numFrames × numLeds × 3` bytes.
-- **Total file size** = `20 + numFrames × numLeds × 3`.
+- **Body size** = `numFrames × numLeds × 3` bytes (RGB888).
+- **Total file size** = `20 + numFrames × numLeds × 3` (RGB888).
 - **LED order** is the physical **chain order** (wiring order). LEDs marked
   *unassigned* in the editor are dropped before encoding (they aren't wired), so
   index `l` here is the l-th wired LED, not the l-th LED in the 3D scene.
@@ -91,6 +93,39 @@ for frame in 0 .. numFrames-1:
 
 Total = `20 + 120 × 60 × 3` = **21,620 bytes**.
 
+## Pixel formats
+
+The **pixel format** byte (offset 5) selects how each LED's color is stored. The
+header shape is identical for all of them; only the per-pixel size and (for
+indexed) an added palette block differ. The editor picks the format at export
+time — the color you authored is the same; this is purely a size/precision trade.
+
+| Value | Name | Per-LED | Notes |
+|---:|---|---:|---|
+| 0 | **RGB888** | 3 B | `R, G, B`, 0-255 each. Exact. Default. |
+| 1 | **RGB565** | 2 B | `uint16` LE, `RRRRRGGG GGGBBBBB` (5-6-5). ~⅓ smaller; slight color-depth loss. |
+| 2 | **Indexed** | 1 B | One palette **index** per LED; colors live in a palette block (below). Smallest when a pattern uses few distinct colors. |
+
+**RGB565** packs `(r>>3)<<11 | (g>>2)<<5 | (b>>3)`. A reader expands each channel
+back to 8 bits by **bit-replicating** the high bits (e.g. `r8 = (r5<<3)|(r5>>2)`)
+so full values stay 255, not 248/252.
+
+**Indexed** inserts a **palette block** between the header and the pixel data:
+
+| Offset | Size | Field |
+|---:|---:|---|
+| 20 | 2 | **palette count** `N` (`uint16` LE, 1-256) |
+| 22 | `N × 3` | palette entries, RGB888 |
+| `22 + N×3` | … | index bytes — one `uint8` per LED per frame, frame-major |
+
+- **Body size** = `numFrames × numLeds × 1` index bytes.
+- **Total file size** = `20 + 2 + N×3 + numFrames × numLeds`.
+- The palette is **per file**, so a multi-device export gives each device a palette
+  built from only the colors *its* slice shows.
+- The editor builds the palette automatically: **lossless** when a file has ≤ 256
+  distinct colors, otherwise **median-cut quantized** to 256 (the export UI warns
+  and lets the user proceed with the approximation or stop and adjust).
+
 ## How each side uses it
 
 - **Editor** bakes the project to a raster and calls `encodeRaster()` to write
@@ -110,14 +145,15 @@ Total = `20 + 120 × 60 × 3` = **21,620 bytes**.
 h = f.read(20)
 assert h[0:4] == b"LEDA"
 version = h[4]
-fmt     = h[5]                                   # 0 = RGB888
+fmt     = h[5]                                   # 0 RGB888 / 1 RGB565 / 2 indexed
 num_leds   = h[6]  | (h[7]  << 8)
 num_frames = h[8]  | (h[9]  << 8) | (h[10] << 16) | (h[11] << 24)
 fps        = h[12] | (h[13] << 8)
 role       = h[14]                               # 0 standalone / 1 leader / 2 leader-only / 3 follower
 group_id   = h[15]
 device_id  = h[16]
-# frame N pixels: seek(20 + N * num_leds * 3), read(num_leds * 3)
+# RGB888: frame N pixels at seek(20 + N * num_leds * 3), read(num_leds * 3)
+# (RGB565: ×2 not ×3; indexed: skip the palette block first, then ×1)
 ```
 
 ## Versioning & forward compatibility
@@ -128,12 +164,10 @@ device_id  = h[16]
 - The **`version`** byte covers structural changes; the **`pixel format`** byte
   covers pixel encoding; byte 17 holds **sync flags** and the two **reserved**
   bytes (18–19) are for future flags/fields.
-- **Planned formats** (see [`STATUS.md`](STATUS.md)) will use the pixel-format
-  byte: e.g. RGB565 (2 B/pixel) or **indexed color** (1 B index + a palette
-  section). Those add a new `pixel format` value — and, for indexed, a palette
-  block between the header and the pixel data — while keeping the same magic +
-  header shape. When that lands, document the new format value and any added
-  sections here and bump this file's examples.
+- A reader that doesn't recognize the **`pixel format`** value must refuse the
+  file (the firmware treats an unknown format like a bad magic) rather than
+  misread the body. Formats `0`–`2` are defined above; new ones take the next
+  value (and document any added section here).
 
 ## Related
 
