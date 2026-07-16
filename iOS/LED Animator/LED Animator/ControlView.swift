@@ -121,13 +121,14 @@ struct ControlView: View {
                         .foregroundStyle(.secondary)
                 }
             } footer: {
-                if session.brightness <= 50 {
-                    Label(
-                        "Low brightness can make color fades step instead of blending smoothly.",
-                        systemImage: "exclamationmark.triangle"
-                    )
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                // ~40-85% is the sweet spot: below, dark colors step; above, bright
+                // colors and whites wash out (color accuracy drops). Outside that band
+                // we hint why — it's a soft trade-off, fine to ignore for simple or
+                // solid-color patterns, or when raw light output matters more.
+                if session.brightness < 40 {
+                    brightnessNote("Below ~40%, color fades can step instead of blending smoothly.")
+                } else if session.brightness > 85 {
+                    brightnessNote("Above ~85%, bright colors and whites can wash out — color accuracy drops.")
                 }
             }
 
@@ -418,6 +419,13 @@ struct ControlView: View {
     #endif
 
     /// A tappable slider end-cap icon that nudges the value by a 5% step.
+    /// A subtle caption used for the brightness sweet-spot hints (low + high).
+    private func brightnessNote(_ text: String) -> some View {
+        Label(text, systemImage: "exclamationmark.triangle")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+    }
+
     private func bumpButton(_ systemName: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: systemName)
