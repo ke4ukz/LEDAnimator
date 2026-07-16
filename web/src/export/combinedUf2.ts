@@ -1,54 +1,53 @@
-import firmwareUrl from '../assets/RPI_PICO_W-v1.28.0.uf2?url'
+import firmwareUrl from '../assets/led-animator-rp2040.uf2?url'
 import type { Raster } from '../types'
 import { encodeRaster, type LedaMeta } from './format'
-import { RP2040_LOADER_PY, rp2040SettingsFiles } from './rp2040'
-import { firmwareMpyBytes } from './firmwareMpy.generated'
 import { buildLittleFsImage } from './littlefs'
 import { assembleCombinedUf2 } from './uf2'
+import { FIRMWARE_RELEASES } from './firmwareRelease.generated'
 
-// Pinned MicroPython firmware + its VERIFIED filesystem layout. To bump the
-// firmware: replace the asset, run `os.statvfs('/')` on a board flashed with it,
-// and update blockCount here (fsBase is derived; the assembler asserts the
-// firmware fits below it). See led-animator-roadmap memory.
-export const PICO_W_FIRMWARE = {
-  board: 'Raspberry Pi Pico W',
-  version: 'v1.28.0',
-  blockSize: 4096,
-  blockCount: 212, // os.statvfs → 848 KB filesystem
-  fsBase: 0x1012c000, // flash_end (0x10200000) − blockCount*blockSize
-}
+// The pinned Rust firmware + its filesystem layout, from the promoted release
+// metadata (read straight from firmware-rust/src/fs.rs — see promote-firmware, so
+// it can't drift). The FS holds the pattern + config; the firmware IS the player
+// (no main.py / leda.mpy). Bump the firmware with `npm run promote-firmware`.
+const REL = FIRMWARE_RELEASES.rp2040
+const FS = REL.combinedUf2! // rp2040 is a uf2 target, so this is always present
 
 /** Conservative usable capacity for a single pattern (reserve for FS metadata). */
 export function usableFsBytes(): number {
-  const { blockCount, blockSize } = PICO_W_FIRMWARE
-  return (blockCount - 12) * blockSize
+  return (FS.blockCount - 12) * FS.blockSize
+}
+
+/** Bytes the filesystem region can hold (the size shown against the pattern size). */
+export function fsCapacityBytes(): number {
+  return FS.blockCount * FS.blockSize
+}
+
+/** Config files the Rust firmware reads at boot. GP0 is fixed, so no datapin.txt. */
+function settingsFiles(brightness: number, name: string, patternFile: string): Record<string, string> {
+  return {
+    'bright.txt': String(Math.round(brightness * 100)),
+    'devicename.txt': name,
+    'selected.txt': patternFile,
+  }
 }
 
 /**
- * Build a one-drag combined UF2 = pinned MicroPython firmware + a LittleFS image
- * holding main.py + the pattern file. Drag onto RPI-RP2 → blank board plays the
- * animation on boot.
+ * Build a one-drag combined UF2 = the pinned **Rust firmware** + a LittleFS image
+ * holding the pattern + its config. Drag onto RPI-RP2 → a blank Pico W plays the
+ * animation on boot. (The firmware is the player; no MicroPython.)
  */
 export async function buildRp2040CombinedUf2(
   raster: Raster,
-  pin: number,
   brightness: number,
   patternFile: string,
   name?: string,
-  build?: string,
   meta?: LedaMeta,
   /** Pre-encoded pattern bytes (e.g. RGB565/indexed); defaults to RGB888. */
   pattern?: Uint8Array,
 ): Promise<Uint8Array> {
   const enc = new TextEncoder()
-  const settings = rp2040SettingsFiles(pin, brightness, name ?? 'LED Animator', patternFile)
-  // Ship the precompiled player (leda.mpy) + a tiny loader main.py, not the raw
-  // source — the board skips the ~3s boot-time compile. The .mpy matches the
-  // bundled MicroPython (arch + version); `build` is baked into the blob at gen time.
-  void build
+  const settings = settingsFiles(brightness, name ?? 'LED Animator', patternFile)
   const files = [
-    { name: 'main.py', data: enc.encode(RP2040_LOADER_PY) },
-    { name: 'leda.mpy', data: firmwareMpyBytes() },
     { name: patternFile, data: pattern ?? encodeRaster(raster, meta) },
     ...Object.entries(settings).map(([n, v]) => ({ name: n, data: enc.encode(v) })),
   ]
@@ -62,7 +61,7 @@ export async function buildRp2040CombinedUf2(
     )
   }
 
-  const fsImage = await buildLittleFsImage(files, PICO_W_FIRMWARE.blockCount, PICO_W_FIRMWARE.blockSize)
+  const fsImage = await buildLittleFsImage(files, FS.blockCount, FS.blockSize)
   const firmware = new Uint8Array(await (await fetch(firmwareUrl)).arrayBuffer())
-  return assembleCombinedUf2(firmware, fsImage, PICO_W_FIRMWARE.fsBase)
+  return assembleCombinedUf2(firmware, fsImage, FS.fsBase)
 }

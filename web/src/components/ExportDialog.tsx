@@ -5,13 +5,10 @@ import { partitionByDevice } from '../bake'
 import { DEVICES, checkLimits } from '../export/devices'
 import { encodeRasterAs, estimateBytesFor, rgb565Error, PIXEL_FORMAT, ROLE, LOSS, STARTUP, type LedaMeta } from '../export/format'
 import { buildIndexed, countDistinctColors, type IndexedResult } from '../export/palette'
-import { RP2040_LOADER_PY, rp2040Readme, rp2040SettingsFiles } from '../export/rp2040'
-import { firmwareMpyBytes } from '../export/firmwareMpy.generated'
-import { serializeProjectFile } from '../export/projectFile'
 import { downloadBytes, zipProject } from '../export/download'
-import { commit } from 'virtual:build-info'
+import { FIRMWARE_RELEASES } from '../export/firmwareRelease.generated'
 
-type ExportFormat = 'uf2' | 'zip' | 'leda'
+type ExportFormat = 'uf2' | 'leda'
 type ColorFormat = 'rgb888' | 'rgb565' | 'indexed'
 
 const fmtBytes = (n: number) => (n < 1024 * 1024 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1024 / 1024).toFixed(2)} MB`)
@@ -21,13 +18,9 @@ const sanitizeName = (name: string) => name.trim().replace(/[^A-Za-z0-9 _-]/g, '
 /** Zero-padded program-number filename prefix, e.g. 7 → "07-". */
 const progPrefix = (program: number) => `${String(program).padStart(2, '0')}-`
 
-// Firmware build identifier baked into main.py (no real release yet) — the app
-// build's commit, so a device reports which build produced its firmware.
-const FW_BUILD = `dev+${commit}`
-
-// Pico W (MicroPython v1.28.0) LittleFS: 212 blocks × 4096 B — shown as the
-// filesystem capacity next to the data size on the UF2 target.
-const PICO_W_FS_BYTES = 212 * 4096
+// The pinned Rust firmware's LittleFS capacity (from the release metadata) — shown
+// as the filesystem size next to the pattern's data size on the UF2 target.
+const RP2040_FS_BYTES = (FIRMWARE_RELEASES.rp2040.combinedUf2?.blockCount ?? 0) * (FIRMWARE_RELEASES.rp2040.combinedUf2?.blockSize ?? 0)
 
 /** Export modal: pick a target, set the program number + per-device settings,
  *  download one bundle per format (per-device slices from `partitionByDevice`). */
@@ -36,7 +29,6 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
   const leds = useStore((s) => s.leds)
   // One export stream per device id (unassigned LEDs dropped, chain order kept).
   const devices = useMemo(() => partitionByDevice(raster, leds), [raster, leds])
-  const getProjectFile = useStore((s) => s.getProjectFile)
   const projectName = useStore((s) => s.projectName)
   const program = useStore((s) => s.program)
   const setProgram = useStore((s) => s.setProgram)
@@ -54,7 +46,7 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
   })
   const [format, setFormat] = useState<ExportFormat>(() => {
     const saved = localStorage.getItem('leda.export.format')
-    return saved === 'uf2' || saved === 'zip' || saved === 'leda' ? saved : 'uf2'
+    return saved === 'uf2' || saved === 'leda' ? saved : 'uf2'
   })
   const [colorFormat, setColorFormat] = useState<ColorFormat>(() => {
     const saved = localStorage.getItem('leda.export.color')
@@ -114,20 +106,20 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
   // "Set all devices at once" only applies when there's more than one device.
   const uniform = multi && deviceDefaults.uniform
 
-  // Per-device firmware settings. Pin/brightness come from the shared defaults
-  // when uniform, else per device; the name is always per device.
+  // Per-device firmware settings. Brightness comes from the shared default when
+  // uniform, else per device; the name is always per device. (The data pin is fixed
+  // at GP0 in the firmware, so it isn't a setting.)
   const defaultName = (projectName.trim() || 'LED Animator').slice(0, 26)
   const settingsFor = (device: number) => {
     const s = deviceSettings[device] ?? {}
     return {
       name: (s.name ?? '').trim() || defaultName,
-      pin: uniform ? deviceDefaults.pin : s.pin ?? 0,
       brightness: uniform ? deviceDefaults.brightness : s.brightness ?? 1,
     }
   }
 
-  // Name/pin/brightness are baked as device settings — they don't apply to a raw .leda.
-  const needsSettings = format === 'uf2' || format === 'zip'
+  // Name/brightness are baked into the UF2's filesystem — they don't apply to a raw .leda.
+  const needsSettings = format === 'uf2'
 
   const platform = DEVICES.find((d) => d.id === deviceId)!
   const hasRp2040 = platform.targets.includes('rp2040-micropython')
@@ -186,38 +178,14 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
     downloadBytes(`${progBase}.zip`, zipProject(files), 'application/zip')
   }
 
-  const exportZip = () => {
-    const files: Record<string, string | Uint8Array> = {}
-    files['project.json'] = serializeProjectFile(getProjectFile())
-    for (const { device, raster } of devices) {
-      const s = settingsFor(device)
-      const pf = ledaName(device)
-      const dir = multi ? `device-${device}/` : '' // one folder per board when split
-      // Precompiled player + tiny loader (skips the on-device compile). The .mpy
-      // matches the bundled MicroPython (armv6m / v1.28); see firmwareMpy.generated.
-      files[`${dir}main.py`] = RP2040_LOADER_PY
-      files[`${dir}leda.mpy`] = firmwareMpyBytes()
-      files[`${dir}${pf}`] = encodeFor(device, raster)
-      for (const [n, v] of Object.entries(rp2040SettingsFiles(s.pin, Number(s.brightness.toFixed(2)), s.name, pf))) {
-        files[`${dir}${n}`] = v
-      }
-      files[`${dir}README.txt`] = rp2040Readme(s.pin, pf)
-    }
-    if (multi) files['manifest.txt'] = buildManifest((d) => `device-${d}/`, 'Folder', 'folder')
-    // "-rp2040" (not "-picow"): these are files for any RP2040 already running
-    // MicroPython — a plain Pico plays fine; only BLE/Wi-Fi need the W. The UF2
-    // is "-picow" because it bundles Pico W firmware. Intentional, not a typo.
-    downloadBytes(multi ? `${progBase}-rp2040.zip` : 'led-animation-rp2040.zip', zipProject(files), 'application/zip')
-  }
-
   const exportUf2 = async () => {
     setBuilding(true)
     try {
-      // Lazy-load: pulls in the littlefs wasm + firmware only when used.
+      // Lazy-load: pulls in the littlefs wasm + the firmware asset only when used.
       const { buildRp2040CombinedUf2 } = await import('../export/combinedUf2')
       const buildOne = (device: number, r: typeof raster) => {
         const s = settingsFor(device)
-        return buildRp2040CombinedUf2(r, s.pin, Number(s.brightness.toFixed(2)), ledaName(device), s.name, FW_BUILD, metaFor(device), encodeFor(device, r))
+        return buildRp2040CombinedUf2(r, Number(s.brightness.toFixed(2)), ledaName(device), s.name, metaFor(device), encodeFor(device, r))
       }
       if (!multi) {
         const uf2 = await buildOne(devices[0].device, devices[0].raster)
@@ -227,8 +195,7 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
       const files: Record<string, string | Uint8Array> = {}
       for (const { device, raster } of devices) files[`${progBase}-dev${device}.uf2`] = await buildOne(device, raster)
       files['manifest.txt'] = buildManifest((d) => `${progBase}-dev${d}.uf2`, 'File', 'file')
-      // "-picow": the combined UF2 bakes in Pico W firmware + needs the W's radio,
-      // so it's Pico-W-only (unlike the "-rp2040" MicroPython zip above).
+      // "-picow": the combined UF2 bakes in the Pico W firmware + needs the W's radio.
       downloadBytes(`${progBase}-picow.zip`, zipProject(files), 'application/zip')
     } catch (e) {
       window.alert(`Could not build the UF2: ${(e as Error).message}`)
@@ -252,16 +219,13 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
       return
     }
     if (format === 'uf2') return void exportUf2()
-    if (format === 'zip') return exportZip()
     return exportLeda()
   }
   const downloadLabel = building
     ? 'Building UF2…'
     : format === 'uf2'
       ? multi ? `Download ${devices.length} UF2s (.zip)` : 'Download UF2'
-      : format === 'zip'
-        ? multi ? `Download ${devices.length} devices (.zip)` : 'Download .zip'
-        : multi ? `Download ${devices.length} slices (.zip)` : `Download ${ledaName(devices[0].device)}`
+      : multi ? `Download ${devices.length} slices (.zip)` : `Download ${ledaName(devices[0].device)}`
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -295,7 +259,7 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
           <Stat label="Loop" value={`${duration.toFixed(2)} s`} />
           <Stat
             label={multi ? 'Largest slice' : 'Data size'}
-            value={hasRp2040 ? `${fmtBytes(maxBytes)} / ${fmtBytes(PICO_W_FS_BYTES)}` : fmtBytes(maxBytes)}
+            value={hasRp2040 ? `${fmtBytes(maxBytes)} / ${fmtBytes(RP2040_FS_BYTES)}` : fmtBytes(maxBytes)}
           />
         </div>
 
@@ -313,7 +277,6 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
               <span>Format</span>
               <select value={format} onChange={(e) => setFormat(e.target.value as ExportFormat)}>
                 <option value="uf2">One-drag UF2 (blank Pico W)</option>
-                <option value="zip">MicroPython files (.zip)</option>
                 <option value="leda">Pattern data (.leda)</option>
               </select>
             </label>
@@ -426,16 +389,6 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
                   <fieldset className="device-block">
                     <legend>All devices</legend>
                     <label className="field-row">
-                      <span>Data pin (GP)</span>
-                      <input
-                        type="number"
-                        min={0}
-                        max={29}
-                        value={deviceDefaults.pin}
-                        onChange={(e) => setDeviceDefaults({ pin: Number(e.target.value) })}
-                      />
-                    </label>
-                    <label className="field-row">
                       <span>Brightness</span>
                       <input
                         type="range"
@@ -469,30 +422,18 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
                         />
                       </label>
                       {!uniform && (
-                        <>
-                          <label className="field-row">
-                            <span>Data pin (GP)</span>
-                            <input
-                              type="number"
-                              min={0}
-                              max={29}
-                              value={s.pin}
-                              onChange={(e) => setDeviceSettings(device, { pin: Number(e.target.value) })}
-                            />
-                          </label>
-                          <label className="field-row">
-                            <span>Brightness</span>
-                            <input
-                              type="range"
-                              min={0}
-                              max={1}
-                              step={0.05}
-                              value={s.brightness}
-                              onChange={(e) => setDeviceSettings(device, { brightness: Number(e.target.value) })}
-                            />
-                            <span className="muted">{Math.round(s.brightness * 100)}%</span>
-                          </label>
-                        </>
+                        <label className="field-row">
+                          <span>Brightness</span>
+                          <input
+                            type="range"
+                            min={0}
+                            max={1}
+                            step={0.05}
+                            value={s.brightness}
+                            onChange={(e) => setDeviceSettings(device, { brightness: Number(e.target.value) })}
+                          />
+                          <span className="muted">{Math.round(s.brightness * 100)}%</span>
+                        </label>
                       )}
                     </fieldset>
                   )
@@ -527,10 +468,10 @@ function formatInfo(format: ExportFormat, multi: boolean): ReactNode {
     return (
       <>
         Drop it onto the RPI-RP2 drive of a blank Pico W — nothing to install first. A single gapless
-        firmware image (~4&nbsp;MB) with MicroPython <strong>v1.28.0</strong> plus a filesystem holding
-        the player, your pattern, and the device settings (pin / brightness / name). If the strip stays
-        dark after flashing, flash the same file with <code>picotool load led-animation-picow.uf2</code>{' '}
-        instead.
+        firmware image (~4&nbsp;MB) with the <strong>LED Animator firmware</strong> plus a filesystem
+        holding your pattern, brightness, and device name. The strip's data line goes to <strong>GP0</strong>.
+        If the strip stays dark after flashing, flash the same file with{' '}
+        <code>picotool load led-animation-picow.uf2</code> instead.
         {multi && multiNote('.uf2')}
         <p className="hint-link">
           To enter bootloader mode, hold <strong>BOOTSEL</strong> while plugging in —{' '}
@@ -546,22 +487,10 @@ function formatInfo(format: ExportFormat, multi: boolean): ReactNode {
       </>
     )
   }
-  if (format === 'zip') {
-    return (
-      <>
-        For a Pico that already runs MicroPython. Contains <code>main.py</code>, your pattern (named after
-        the project), the settings files (<code>datapin.txt</code>, <code>bright.txt</code>,{' '}
-        <code>devicename.txt</code>, <code>selected.txt</code>), <code>project.json</code>, and a README.
-        Copy them to the board with <code>mpremote</code> or Thonny — it doesn't touch the firmware.
-        {multi && multiNote('device-N/ folder')}
-      </>
-    )
-  }
   return (
     <>
-      Just the raw pattern file, named after your project (prefixed with the program number). Drop it next
-      to an existing <code>main.py</code> on a Pico that already runs MicroPython, then <code>SELECT</code>{' '}
-      it. Copy it over with <code>mpremote</code> or Thonny.
+      Just the raw pattern file, named after your project (prefixed with the program number). Upload it to a
+      device already running LED Animator from the companion app, then it becomes selectable.
       {multi && multiNote('.leda')}
     </>
   )
