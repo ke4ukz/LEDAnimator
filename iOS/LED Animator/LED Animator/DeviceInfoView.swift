@@ -7,6 +7,9 @@
 //
 
 import SwiftUI
+#if canImport(AppKit)
+import AppKit
+#endif
 
 /// Read-mostly device details (platform, firmware, LEDs, power, network) plus
 /// the two writable knobs: rename and the strip's data GP pin. iOS presents it
@@ -213,16 +216,26 @@ struct DeviceInfoView: View {
             }
 
             Section {
-                Button("Restart Device") { showRestart = true }
-                    // Hidden advanced action (long-press / right-click): drop into the
-                    // USB bootloader for a firmware update.
-                    .contextMenu {
-                        Button("Enter Bootloader…", systemImage: "arrow.down.circle") { showBootsel = true }
+                Button("Restart Device") {
+                    // Hidden power-user gesture: ⌘⇧-click restarts into the USB
+                    // bootloader (firmware update) instead of a normal restart.
+                    #if os(macOS)
+                    if NSEvent.modifierFlags.contains([.command, .shift]) {
+                        showBootsel = true
+                        return
                     }
+                    #endif
+                    showRestart = true
+                }
+                // Same via long-press / right-click, so it's discoverable off macOS.
+                .contextMenu {
+                    Button("Enter Bootloader…", systemImage: "arrow.down.circle") { showBootsel = true }
+                }
             } header: {
                 Text("Maintenance")
             } footer: {
-                Text("Restarts the controller. Your patterns and settings are kept — it reconnects in a few seconds.")
+                Text("Patterns and settings are kept; it reconnects in a few seconds.")
+                    .frame(maxWidth: .infinity, alignment: .leading)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
