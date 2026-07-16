@@ -152,6 +152,28 @@ function encode565(raster: Raster, meta: LedaMeta): Uint8Array {
   return out
 }
 
+/** How much RGB565 would shift *this* raster's colors: mean + worst per-channel
+ *  error (0-255) after round-tripping every channel through 5-6-5. Lets the export
+ *  UI show the real fidelity cost, not just the theoretical bit depth. */
+export function rgb565Error(data: Uint8Array): { avg: number; max: number } {
+  let sum = 0
+  let max = 0
+  let n = 0
+  for (let i = 0; i + 2 < data.length; i += 3) {
+    for (let c = 0; c < 3; c++) {
+      const v = data[i + c]
+      // Round-trip: quantize (R/B 5-bit, G 6-bit) then bit-replicate back to 8.
+      const q = c === 1 ? v >> 2 : v >> 3
+      const rt = c === 1 ? (q << 2) | (q >> 4) : (q << 3) | (q >> 2)
+      const e = v > rt ? v - rt : rt - v
+      sum += e
+      if (e > max) max = e
+      n++
+    }
+  }
+  return { avg: n ? sum / n : 0, max }
+}
+
 /** Indexed: header + palette block (uint16 count + count×RGB888) + index bytes. */
 function encodeIndexed(raster: Raster, idx: IndexedResult, meta: LedaMeta): Uint8Array {
   const out = new Uint8Array(HEADER_SIZE + PALETTE_HEADER + idx.palette.length + idx.indices.length)

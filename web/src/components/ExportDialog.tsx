@@ -3,8 +3,8 @@ import { useStore } from '../store'
 import { InfoDot } from './InfoDot'
 import { partitionByDevice } from '../bake'
 import { DEVICES, checkLimits } from '../export/devices'
-import { encodeRasterAs, estimateBytesFor, PIXEL_FORMAT, ROLE, LOSS, STARTUP, type LedaMeta } from '../export/format'
-import { buildIndexed, type IndexedResult } from '../export/palette'
+import { encodeRasterAs, estimateBytesFor, rgb565Error, PIXEL_FORMAT, ROLE, LOSS, STARTUP, type LedaMeta } from '../export/format'
+import { buildIndexed, countDistinctColors, type IndexedResult } from '../export/palette'
 import { RP2040_LOADER_PY, rp2040Readme, rp2040SettingsFiles } from '../export/rp2040'
 import { firmwareMpyBytes } from '../export/firmwareMpy.generated'
 import { serializeProjectFile } from '../export/projectFile'
@@ -78,6 +78,16 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
   }, [devices, colorFormat])
   const quantized = indexedByDevice ? [...indexedByDevice.values()].some((r) => !r.exact) : false
   const maxDistinct = indexedByDevice ? Math.max(...[...indexedByDevice.values()].map((r) => r.distinct)) : 0
+
+  // Distinct colors across the whole animation (capped so a huge raster can't
+  // stall the dialog) + the measured RGB565 shift, for the color trade-off readout.
+  const DISTINCT_CAP = 200_000
+  const distinctColors = useMemo(() => countDistinctColors(raster.data, DISTINCT_CAP), [raster])
+  const rgb565Err = useMemo(
+    () => (colorFormat === 'rgb565' ? rgb565Error(raster.data) : null),
+    [raster, colorFormat],
+  )
+  const distinctLabel = distinctColors > DISTINCT_CAP ? `${(DISTINCT_CAP / 1000) | 0}k+` : distinctColors.toLocaleString()
 
   const multi = devices.length > 1
   const deviceIds = devices.map((d) => d.device)
@@ -279,6 +289,7 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
           <Stat label="Pattern file" value={multi ? `${progBase}-dev*.leda` : ledaName(devices[0].device)} wide />
           <Stat label="Devices" value={String(devices.length)} />
           <Stat label="LEDs" value={String(totalLeds)} />
+          <Stat label="Colors" value={distinctLabel} />
           <Stat label="Frames" value={String(raster.numFrames)} />
           <Stat label="Rate" value={`${raster.fps} fps`} />
           <Stat label="Loop" value={`${duration.toFixed(2)} s`} />
@@ -317,6 +328,25 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
                 <option value="indexed">Indexed — palette (1 B/LED)</option>
               </select>
             </label>
+
+            <p className="muted color-note">
+              {colorFormat === 'rgb888' &&
+                `Every one of this pattern's ${distinctLabel} colors is kept exactly — no loss.`}
+              {colorFormat === 'rgb565' &&
+                rgb565Err &&
+                `65k-color depth: channels shift ~${rgb565Err.avg.toFixed(1)} avg, ${rgb565Err.max} max (of 255). ` +
+                  (rgb565Err.max <= 2
+                    ? 'Effectively invisible here.'
+                    : rgb565Err.max <= 6
+                      ? 'Subtle — mostly on smooth fades.'
+                      : 'Watch smooth gradients for slight banding.')}
+              {colorFormat === 'indexed' &&
+                !quantized &&
+                `Lossless: a ${maxDistinct.toLocaleString()}-color palette${multi ? ' per device' : ''} covers this pattern exactly.`}
+              {colorFormat === 'indexed' &&
+                quantized &&
+                `This pattern's ${distinctLabel} colors exceed a 256-color palette (see below).`}
+            </p>
 
             {quantized && (
               <div className="warn-box">
