@@ -83,8 +83,9 @@ pub async fn ble_task(bt_device: BtDriver<'static>, fs: &'static SharedFs) {
 }
 
 async fn run<C: ScanController>(controller: C, fs: &'static SharedFs) {
-    // A fixed random address for now (a real device would use its BT MAC).
-    let address: Address = Address::random([0xff, 0x8f, 0x1a, 0x05, 0xe4, 0xff]);
+    // Static random address derived from the Wi-Fi MAC — unique per device (see
+    // state::ble_address); reported over the wire as BTMAC.
+    let address: Address = Address::random(crate::state::ble_address());
     let mut resources: HostResources<C, DefaultPacketPool, CONNECTIONS_MAX, L2CAP_CHANNELS_MAX> =
         HostResources::new();
     let stack = trouble_host::new(controller, &mut resources)

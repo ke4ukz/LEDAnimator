@@ -61,6 +61,16 @@ pub fn mac_bytes() -> [u8; 6] {
     ]
 }
 
+/// The device's BLE **static random address**, derived from the Wi-Fi MAC so it's
+/// unique per device (the earlier hardcoded address was shared by every unit). The
+/// two most-significant bits are forced to `1`, as a static random address requires.
+/// Reported over the wire as `BTMAC` and set on the BLE stack at start.
+pub fn ble_address() -> [u8; 6] {
+    let mut a = mac_bytes();
+    a[5] |= 0xc0;
+    a
+}
+
 /// The device id as 3 raw bytes (for the BLE manufacturer data payload).
 pub fn device_id_bytes() -> [u8; 3] {
     let v = DEVICE_ID.load(Ordering::Relaxed);

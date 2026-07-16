@@ -333,6 +333,15 @@ pub async fn dispatch(line: &str, fs: &SharedFs, sink: &mut impl LineSink, conn:
                 ),
             )
             .await;
+            let bt = crate::state::ble_address();
+            reply(
+                sink,
+                format_args!(
+                    "BTMAC {:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}",
+                    bt[0], bt[1], bt[2], bt[3], bt[4], bt[5]
+                ),
+            )
+            .await;
             reply(sink, format_args!("HOSTNAME leda-{}", crate::state::device_id_hex().as_str())).await;
             reply(sink, format_args!("PLATFORM {}", PLATFORM)).await;
             reply(sink, format_args!("PIN {}", crate::DATA_PIN_GP)).await; // fixed at build (GP0)
