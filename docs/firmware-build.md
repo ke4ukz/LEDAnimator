@@ -52,11 +52,17 @@ npm run promote-firmware rp2350      # once that firmware build exists
 ```
 
 Adding a target is a `TARGETS` entry in the promote script — its firmware root,
-UF2 path, and **UF2 family id** (RP2040 `0xe48bff56`; RP2350 differs by
-ARM/RISC-V + secure/non-secure). The RP2350 firmware itself is a separate build
-(its own `embassy-rp` chip feature, `memory.x`, littlefs base/size, and likely
-secure-boot signing); the promotion step just pins whatever UF2 that build
-produces. The web export selects the pinned release for the chosen target.
+built artifact, and **format**. Not every target is a UF2: `format` is one of
+`uf2` (RP2040/RP2350, spliced with a littlefs image), `hex` (ATmega), `img` (Pi
+disk image), `bin` (ESP32), … The asset lands as `led-animator-<target>.<format>`,
+and the release records that `format` + `file`. The UF2-only bits (family +
+littlefs base/size) live in an **optional `combinedUf2`** block that non-UF2
+formats simply omit.
+
+The RP2350 firmware itself is a separate build (its own `embassy-rp` chip feature,
+`memory.x`, littlefs base/size, UF2 family, and likely secure-boot signing); the
+promotion step just pins whatever artifact that build produces. The web export
+selects the pinned release for the chosen target and handles it per `format`.
 
 ## MicroPython player (dormant)
 
