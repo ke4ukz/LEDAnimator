@@ -41,6 +41,7 @@ final class DeviceSession {
     var speed = 100        // 10–400 percent, seeded from INFO
     var mode = "play"      // "play", "solid", or "off" — seeded/echoed by the device
     var solid = RGB(r: 255, g: 255, b: 255)   // last solid color the device reported (INFO)
+    var whiteBalance = RGB(r: 255, g: 255, b: 255)   // canonical-white gains (WHITEBAL)
     // MOREINFO details for the Info tab (nil until that batch streams in).
     var firmwareVersion: String?
     var platform: String?
@@ -285,6 +286,18 @@ final class DeviceSession {
         send(.play)
     }
 
+    /// Read the device's current white-balance gains (reply arrives as "WHITEBAL …").
+    func requestWhiteBalance() { send(.queryWhiteBalance) }
+
+    /// Set the canonical-white gains (0–255 each). Like the sliders: updates the UI
+    /// at once and rate-limits the writes so dragging the calibration pad doesn't
+    /// flood the link. The device persists each value, so the last one sticks.
+    func setWhiteBalance(r: Int, g: Int, b: Int) {
+        let cr = max(0, min(255, r)), cg = max(0, min(255, g)), cb = max(0, min(255, b))
+        whiteBalance = RGB(r: cr, g: cg, b: cb)
+        throttle("whitebal") { [weak self] in self?.send(.whiteBalance(cr, cg, cb), expectResponse: false) }
+    }
+
     /// Rename the device; the board persists it and re-advertises under the name.
     /// Restricted to printable ASCII (the name rides the protocol + BLE advert).
     func rename(_ name: String) {
@@ -411,6 +424,14 @@ final class DeviceSession {
             connectedName = String(reply.dropFirst("NAME ".count))
         } else if reply.hasPrefix("PIN ") {
             dataPin = Int(reply.dropFirst("PIN ".count))
+        } else if reply.hasPrefix("WHITEBAL ") || reply.hasPrefix("OK WHITEBAL ") {
+            // Current white-balance gains — from a query, the setter's OK echo, or a
+            // pushed snapshot. Keeps the calibration pad in sync across clients.
+            let body = reply.hasPrefix("OK ") ? String(reply.dropFirst(3)) : reply
+            let p = body.dropFirst("WHITEBAL ".count).split(separator: " ")
+            if p.count >= 3, let r = Int(p[0]), let g = Int(p[1]), let b = Int(p[2]) {
+                whiteBalance = RGB(r: r, g: g, b: b)
+            }
         } else if reply.hasPrefix("ROLE ") {
             role = String(reply.dropFirst("ROLE ".count))
         } else if reply.hasPrefix("GROUP ") {

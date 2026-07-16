@@ -81,6 +81,7 @@ argument usually *queries* the value.
 | `SOLID <r> <g> <b>` | Show a solid color (each channel 0–255). |
 | `OFF` | Blank the strip. |
 | `PLAY` | Resume the selected pattern. |
+| `WHITEBAL <r> <g> <b>` | Set the per-channel **white-balance** gains 0–255 (the "canonical white"); applied at render to every color, so a value < 255 attenuates that channel. No-arg **queries** (reply `WHITEBAL <r> <g> <b>`). Persisted; broadcast to all clients. The app calibrates it live by showing solid white and dragging a warm/tint pad. |
 
 ### Patterns
 

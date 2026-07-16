@@ -39,6 +39,8 @@ enum LEDCommand {
     case power                 // live power status (USB present + VSYS mV)
     case setPin(Int)           // re-point the strip's data GP pin (0–29)
     case reboot                // warm-restart the device (re-advertises the BLE name)
+    case whiteBalance(Int, Int, Int) // WHITEBAL r g b — set the canonical-white gains
+    case queryWhiteBalance     // WHITEBAL — read the current white-balance gains
     // Multi-device sync
     case program(Int)          // group jukebox: play program n (a leader switches the whole group)
     case teardown              // leader-only: gracefully end the group
@@ -75,6 +77,8 @@ enum LEDCommand {
         case .power: return "POWER"
         case .setPin(let n): return "PIN \(n)"
         case .reboot: return "REBOOT"
+        case .whiteBalance(let r, let g, let b): return "WHITEBAL \(r) \(g) \(b)"
+        case .queryWhiteBalance: return "WHITEBAL"
         case .program(let n): return "PROGRAM \(n)"
         case .teardown: return "TEARDOWN"
         case .setLoss(let s): return "LOSS \(s)"

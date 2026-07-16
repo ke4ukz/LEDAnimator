@@ -28,6 +28,8 @@ struct DeviceInfoView: View {
     @State private var showRemovePin = false
     /// Confirms a manual device restart.
     @State private var showRestart = false
+    /// Presents the white-balance calibration pad.
+    @State private var showWhiteBalance = false
 
     /// Bare list on macOS (inspector); wrapped in a NavigationStack with a Done
     /// button on iOS (sheet).
@@ -94,6 +96,15 @@ struct DeviceInfoView: View {
                 Text("Output")
             } footer: {
                 Text("The GP pin your LED strip's data line is wired to. Changing it takes effect immediately and is saved on the device.")
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Section {
+                Button("Calibrate White…") { showWhiteBalance = true }
+            } header: {
+                Text("Color")
+            } footer: {
+                Text("Tune the strip's white point so colors look like what you designed. Adjust it against the actual LEDs; it's saved on the device.")
                     .fixedSize(horizontal: false, vertical: true)
             }
 
@@ -217,6 +228,9 @@ struct DeviceInfoView: View {
             Button("Cancel", role: .cancel) { }
         } message: {
             Text("The controller reboots and reconnects in a few seconds. Your patterns and settings are kept.")
+        }
+        .sheet(isPresented: $showWhiteBalance) {
+            WhiteBalanceView(session: session)
         }
         .onAppear { session.requestMoreInfo() }
         .task {
