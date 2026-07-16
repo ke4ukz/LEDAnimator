@@ -22,19 +22,28 @@ const here = dirname(fileURLToPath(import.meta.url))
 const webRoot = resolve(here, '..')
 const repoRoot = resolve(webRoot, '..')
 
-// Per-target build config. Add an entry when a new target's firmware build exists
-// (its own crate/features, flash layout source, and UF2 family). Only `rp2040`
-// ships today; the rest are placeholders showing the shape.
+// Per-target build config. Add an entry when a new target's firmware build exists.
+// `format` is the artifact type the target ships — NOT every target is a UF2:
+//   'uf2' (RP2040/RP2350, spliced with a littlefs image) · 'hex' (ATmega) ·
+//   'img' (Pi disk image) · 'bin' (ESP32) · …
+// `combinedUf2` is present ONLY for the UF2 + littlefs model (family + FS layout,
+// read from the firmware source). Other formats omit it and add their own fields.
+// Only `rp2040` ships today; the commented entries show the shape.
 const TARGETS = {
   rp2040: {
     board: 'Raspberry Pi Pico W (RP2040)',
+    format: 'uf2',
     fwRoot: resolve(repoRoot, 'firmware-rust'),
-    uf2: 'led-animator.uf2', // relative to fwRoot
+    artifact: 'led-animator.uf2', // built file, relative to fwRoot
     versionSource: 'src/protocol.rs', // FW_VERSION lives here
-    fsSource: 'src/fs.rs', // FS_BLOCK_SIZE / FS_BLOCK_COUNT / FS_OFFSET
-    uf2Family: 0xe48bff56, // RP2040 UF2 family id
+    combinedUf2: {
+      family: 0xe48bff56, // RP2040 UF2 family id
+      fsSource: 'src/fs.rs', // FS_BLOCK_SIZE / FS_BLOCK_COUNT / FS_OFFSET
+    },
   },
-  // rp2350: { board: 'Raspberry Pi Pico 2 W (RP2350)', fwRoot: …, uf2Family: 0xe48bff59, … },
+  // rp2350:    { board: 'Pico 2 W (RP2350)', format: 'uf2', combinedUf2: { family: 0xe48bff59, … }, … },
+  // atmega328: { board: 'Arduino Uno/Nano', format: 'hex', fwRoot: …, artifact: 'led-animator.hex' },
+  // pi:        { board: 'Raspberry Pi', format: 'img', … },
 }
 
 const jsonPath = resolve(webRoot, 'src/export/firmwareReleases.generated.json')
@@ -50,9 +59,9 @@ const uf2Override = process.argv.find((a, i) => i >= 3 && !a.startsWith('-'))
 const cfg = TARGETS[target]
 if (!cfg) fail(`unknown target "${target}". Known: ${Object.keys(TARGETS).join(', ')}`)
 
-const uf2Src = uf2Override ? resolve(uf2Override) : resolve(cfg.fwRoot, cfg.uf2)
-if (!existsSync(uf2Src)) {
-  fail(`no firmware UF2 at ${uf2Src}\n  build it first (cargo build --release + elf2uf2-rs), or pass a path.`)
+const artifactSrc = uf2Override ? resolve(uf2Override) : resolve(cfg.fwRoot, cfg.artifact)
+if (!existsSync(artifactSrc)) {
+  fail(`no firmware artifact at ${artifactSrc}\n  build it first, or pass a path.`)
 }
 
 /** Pull a value out of a firmware source file by regex (single source of truth). */
@@ -63,10 +72,19 @@ function grab(file, re, label) {
 }
 
 const version = grab(cfg.versionSource, /FW_VERSION:\s*&str\s*=\s*"([^"]+)"/, 'FW_VERSION')
-const blockSize = Number(grab(cfg.fsSource, /FS_BLOCK_SIZE:\s*usize\s*=\s*(\d+)/, 'FS_BLOCK_SIZE'))
-const blockCount = Number(grab(cfg.fsSource, /FS_BLOCK_COUNT:\s*usize\s*=\s*(\d+)/, 'FS_BLOCK_COUNT'))
-const fsOffsetHex = grab(cfg.fsSource, /FS_OFFSET:\s*u32\s*=\s*0x([0-9a-fA-F_]+)/, 'FS_OFFSET').replace(/_/g, '')
-const fsBase = 0x10000000 + parseInt(fsOffsetHex, 16)
+
+// Combined-UF2 (family + littlefs splice params) only for the UF2 + FS model.
+let combinedUf2
+if (cfg.combinedUf2) {
+  const fsSrc = cfg.combinedUf2.fsSource
+  const fsOffsetHex = grab(fsSrc, /FS_OFFSET:\s*u32\s*=\s*0x([0-9a-fA-F_]+)/, 'FS_OFFSET').replace(/_/g, '')
+  combinedUf2 = {
+    family: cfg.combinedUf2.family,
+    blockSize: Number(grab(fsSrc, /FS_BLOCK_SIZE:\s*usize\s*=\s*(\d+)/, 'FS_BLOCK_SIZE')),
+    blockCount: Number(grab(fsSrc, /FS_BLOCK_COUNT:\s*usize\s*=\s*(\d+)/, 'FS_BLOCK_COUNT')),
+    fsBase: 0x10000000 + parseInt(fsOffsetHex, 16),
+  }
+}
 
 // Provenance: the firmware commit + whether that tree is clean.
 let commit = 'unknown'
@@ -78,25 +96,25 @@ try {
   /* not a git checkout */
 }
 
-const bytes = statSync(uf2Src).size
+const bytes = statSync(artifactSrc).size
 const builtAt = new Date().toISOString().slice(0, 10)
+const file = `led-animator-${target}.${cfg.format}` // asset name, extension = format
 
-// Copy the UF2 into the (target-named) asset slot.
-copyFileSync(uf2Src, resolve(webRoot, `src/assets/led-animator-${target}.uf2`))
+// Copy the artifact into the (target-named, correctly-extensioned) asset slot.
+copyFileSync(artifactSrc, resolve(webRoot, 'src/assets', file))
 
 // Merge this target into the release map (preserving the other targets).
 const releases = existsSync(jsonPath) ? JSON.parse(readFileSync(jsonPath, 'utf8')) : {}
 releases[target] = {
   target,
   board: cfg.board,
+  format: cfg.format,
+  file,
   version,
   commit,
   builtAt,
   bytes,
-  uf2Family: cfg.uf2Family,
-  blockSize,
-  blockCount,
-  fsBase,
+  ...(combinedUf2 ? { combinedUf2 } : {}),
 }
 writeFileSync(jsonPath, JSON.stringify(releases, null, 2) + '\n')
 
@@ -105,17 +123,19 @@ const entries = Object.keys(releases)
   .sort()
   .map((k) => {
     const r = releases[k]
+    const cu = r.combinedUf2
+      ? `
+    combinedUf2: { family: 0x${r.combinedUf2.family.toString(16)}, blockSize: ${r.combinedUf2.blockSize}, blockCount: ${r.combinedUf2.blockCount}, fsBase: 0x${r.combinedUf2.fsBase.toString(16)} },`
+      : ''
     return `  ${JSON.stringify(k)}: {
     target: ${JSON.stringify(r.target)},
     board: ${JSON.stringify(r.board)},
+    format: ${JSON.stringify(r.format)},
+    file: ${JSON.stringify(r.file)},
     version: ${JSON.stringify(r.version)},
     commit: ${JSON.stringify(r.commit)},
     builtAt: ${JSON.stringify(r.builtAt)},
-    bytes: ${r.bytes},
-    uf2Family: 0x${r.uf2Family.toString(16)},
-    blockSize: ${r.blockSize},
-    blockCount: ${r.blockCount},
-    fsBase: 0x${r.fsBase.toString(16)},
+    bytes: ${r.bytes},${cu}
   },`
   })
   .join('\n')
@@ -125,27 +145,39 @@ writeFileSync(
   `// GENERATED by scripts/promote-firmware.mjs — do NOT edit by hand.
 // Pinned firmware builds the website ships, keyed by target platform. Bump a
 // target with \`npm run promote-firmware <target>\` when a build is ready — never
-// automatically. Each target's UF2 is src/assets/led-animator-<target>.uf2.
+// automatically. Each target's artifact is src/assets/<file> (extension varies by
+// format: uf2 / hex / img / bin …).
+
+/** Combined-UF2 build params — present only for the UF2 + spliced-littlefs model
+ *  (RP2040 / RP2350). Other artifact formats omit this. */
+export interface CombinedUf2 {
+  /** UF2 family id for the assembler. */
+  family: number
+  /** littlefs block size / count + flash base the FS image is spliced into. */
+  blockSize: number
+  blockCount: number
+  fsBase: number
+}
 
 export interface FirmwareRelease {
   /** Target platform id (matches the export DEVICES list). */
   target: string
   /** Human board name. */
   board: string
+  /** Artifact type the target ships: 'uf2' | 'hex' | 'img' | 'bin' | … */
+  format: string
+  /** Asset filename in src/assets/ (extension matches \`format\`). */
+  file: string
   /** What the device reports over VERSION — the site advertises the same string. */
   version: string
   /** Firmware source commit this build was promoted from. */
   commit: string
   /** Date promoted to the site (UTC, YYYY-MM-DD). */
   builtAt: string
-  /** UF2 size in bytes. */
+  /** Artifact size in bytes. */
   bytes: number
-  /** UF2 family id for the combined-image assembler. */
-  uf2Family: number
-  /** littlefs block size / count + flash base the FS image is spliced into. */
-  blockSize: number
-  blockCount: number
-  fsBase: number
+  /** UF2 + littlefs params (UF2-family targets only). */
+  combinedUf2?: CombinedUf2
 }
 
 export const FIRMWARE_RELEASES: Record<string, FirmwareRelease> = {
@@ -157,8 +189,12 @@ ${entries}
 const kb = (n) => `${(n / 1024).toFixed(0)} KB`
 console.log(`promoted "${target}" firmware to the website:`)
 console.log(`  version   ${version}   (commit ${commit}${dirty ? ', TREE DIRTY' : ''})`)
-console.log(`  uf2       ${kb(bytes)}  ->  src/assets/led-animator-${target}.uf2`)
-console.log(`  fs        ${blockCount} × ${blockSize} B @ 0x${fsBase.toString(16)}  (family 0x${cfg.uf2Family.toString(16)})`)
+console.log(`  artifact  ${cfg.format.toUpperCase()}, ${kb(bytes)}  ->  src/assets/${file}`)
+if (combinedUf2) {
+  console.log(
+    `  fs        ${combinedUf2.blockCount} × ${combinedUf2.blockSize} B @ 0x${combinedUf2.fsBase.toString(16)}  (family 0x${combinedUf2.family.toString(16)})`,
+  )
+}
 console.log(`  meta      src/export/firmwareRelease.generated.ts  (+ .json store)`)
-if (dirty) console.log(`\n  WARNING: ${target} firmware tree is dirty — this UF2 may not match commit ${commit}.`)
-console.log('\nReview the diff, then commit the UF2 + generated files to ship it.')
+if (dirty) console.log(`\n  WARNING: ${target} firmware tree is dirty — this artifact may not match commit ${commit}.`)
+console.log('\nReview the diff, then commit the artifact + generated files to ship it.')

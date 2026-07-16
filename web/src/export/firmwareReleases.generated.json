@@ -2,13 +2,17 @@
   "rp2040": {
     "target": "rp2040",
     "board": "Raspberry Pi Pico W (RP2040)",
+    "format": "uf2",
+    "file": "led-animator-rp2040.uf2",
     "version": "rust-0.1",
-    "commit": "433bbbf",
+    "commit": "53df36d",
     "builtAt": "2026-07-16",
     "bytes": 985600,
-    "uf2Family": 3834380118,
-    "blockSize": 4096,
-    "blockCount": 212,
-    "fsBase": 269664256
+    "combinedUf2": {
+      "family": 3834380118,
+      "blockSize": 4096,
+      "blockCount": 212,
+      "fsBase": 269664256
+    }
   }
 }
