@@ -76,6 +76,9 @@ struct WiFiView: View {
                 Text("Leave the password blank for an open network. Credentials are saved on the device and re-joined on boot.")
                     .fixedSize(horizontal: false, vertical: true)
             }
+            // Lock the join form + scan while a connect is in flight, so a second
+            // tap can't stack another attempt on top of the in-progress one.
+            .disabled(connecting)
 
             Section("Nearby networks") {
                 if session.isScanningWifi {
@@ -105,6 +108,7 @@ struct WiFiView: View {
                     .buttonStyle(.plain)
                 }
             }
+            .disabled(connecting)
 
             if session.wifiState == "connected" || session.wifiState == "connecting" {
                 Section {
@@ -116,6 +120,9 @@ struct WiFiView: View {
         }
         .onAppear { session.requestWifiStatus() }
     }
+
+    /// A join is in flight — lock the form + scan until it resolves or is forgotten.
+    private var connecting: Bool { session.wifiState == "connecting" }
 
     /// Send the entered credentials for the device to join and persist.
     private func connect() {
