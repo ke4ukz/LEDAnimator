@@ -267,6 +267,45 @@ pub async fn dispatch(line: &str, fs: &SharedFs, sink: &mut impl LineSink, conn:
             }
         }
 
+        // Render-stage feature toggles "<gamma> <white> <dither>" (each 0/1), for
+        // A/B'ing the perceptual steps on the same pattern. No arg = query. Persisted +
+        // broadcast. (Dither engages a high-refresh sub-loop; default off.)
+        "RENDER" => {
+            let bit = |m: u8| if crate::state::render_flags() & m != 0 { 1 } else { 0 };
+            if arg.is_empty() {
+                reply(
+                    sink,
+                    format_args!(
+                        "RENDER {} {} {}",
+                        bit(crate::state::FX_GAMMA),
+                        bit(crate::state::FX_WHITE),
+                        bit(crate::state::FX_DITHER)
+                    ),
+                )
+                .await;
+            } else {
+                let mut it = arg.split_whitespace();
+                let on = |t: Option<&str>| t == Some("1");
+                let (g, w, d) = (on(it.next()), on(it.next()), on(it.next()));
+                let mut flags = 0u8;
+                if g {
+                    flags |= crate::state::FX_GAMMA;
+                }
+                if w {
+                    flags |= crate::state::FX_WHITE;
+                }
+                if d {
+                    flags |= crate::state::FX_DITHER;
+                }
+                crate::state::set_render_flags(flags);
+                let mut b: String<8> = String::new();
+                let _ = write!(b, "{} {} {}", g as u8, w as u8, d as u8);
+                write_cfg(fs, b"render.txt\0", b.as_bytes()).await;
+                notify_state_change();
+                reply(sink, format_args!("OK RENDER {} {} {}", g as u8, w as u8, d as u8)).await;
+            }
+        }
+
         "PLAY" => {
             let solid = {
                 let mut c = CONTROL.lock().await;
@@ -522,6 +561,17 @@ pub async fn send_snapshot(fs: &SharedFs, sink: &mut impl LineSink) {
         let w = c.white;
         reply(sink, format_args!("WHITEBAL {} {} {}", w[0], w[1], w[2])).await;
     }
+    let bit = |m: u8| if crate::state::render_flags() & m != 0 { 1 } else { 0 };
+    reply(
+        sink,
+        format_args!(
+            "RENDER {} {} {}",
+            bit(crate::state::FX_GAMMA),
+            bit(crate::state::FX_WHITE),
+            bit(crate::state::FX_DITHER)
+        ),
+    )
+    .await;
     let _ = fs; // reserved (auth/free are static enough not to push)
     let s = crate::wifi::status_line().await;
     sink.send(&s).await;

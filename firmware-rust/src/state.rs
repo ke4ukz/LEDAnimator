@@ -6,10 +6,29 @@
 //! `S.file`/`S.name`/`S.reload` runtime state (see `web/src/export/rp2040.ts`).
 
 use core::fmt::Write as _;
-use core::sync::atomic::{AtomicU32, Ordering};
+use core::sync::atomic::{AtomicU32, AtomicU8, Ordering};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::mutex::Mutex;
 use embassy_sync::watch::{Receiver, Watch};
+
+/// Render-stage feature flags, read per pixel by `leda::grb_pixel` + the player's
+/// dither loop. Toggleable live (the `RENDER` command) so the perceptual steps can
+/// be A/B'd on the same pattern; persisted in `render.txt`. Default gamma + white
+/// on, dither OFF (opt-in: dither engages a high-refresh sub-loop).
+pub const FX_GAMMA: u8 = 0b001;
+pub const FX_WHITE: u8 = 0b010;
+pub const FX_DITHER: u8 = 0b100;
+static RENDER_FLAGS: AtomicU8 = AtomicU8::new(FX_GAMMA | FX_WHITE);
+
+pub fn set_render_flags(f: u8) {
+    RENDER_FLAGS.store(f & 0b111, Ordering::Relaxed);
+}
+pub fn render_flags() -> u8 {
+    RENDER_FLAGS.load(Ordering::Relaxed)
+}
+pub fn dither_on() -> bool {
+    render_flags() & FX_DITHER != 0
+}
 
 /// The 3-byte device id (last 3 bytes of the Wi-Fi MAC), packed in the low 24 bits.
 /// It ties the BLE advert (manufacturer data) to the Wi-Fi hostname suffix so the

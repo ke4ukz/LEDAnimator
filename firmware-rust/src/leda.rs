@@ -100,12 +100,13 @@ impl<'a> Pattern<'a> {
     /// Decode frame `i` into GRB<<8 words, applying master brightness `bright`
     /// (0..=255) + the white-balance gains `white`. Returns `false` (leaving `out`
     /// untouched) if the frame is missing.
-    pub fn render(&self, i: u32, out: &mut [u32], bright: u8, white: [u8; 3]) -> bool {
+    /// `sub` is the dither sub-frame phase (ignored unless dithering is on).
+    pub fn render(&self, i: u32, out: &mut [u32], bright: u8, white: [u8; 3], sub: u8) -> bool {
         let Some(px) = self.frame(i) else { return false };
         match self.header.format {
-            FMT_RGB565 => fill_565(px, out, bright, white),
-            FMT_INDEXED => fill_indexed(px, self.palette, out, bright, white),
-            _ => fill_888(px, out, bright, white),
+            FMT_RGB565 => fill_565(px, out, bright, white, sub),
+            FMT_INDEXED => fill_indexed(px, self.palette, out, bright, white, sub),
+            _ => fill_888(px, out, bright, white, sub),
         }
         true
     }
@@ -137,34 +138,91 @@ const GAMMA_LUT: [u8; 256] = [
     223, 225, 227, 229, 231, 234, 236, 238, 240, 242, 244, 246, 248, 251, 253, 255,
 ];
 
+/// Dither sub-levels: GAMMA_HI is scaled by this, giving 2 extra bits of dark-end
+/// resolution that temporal dithering averages back into the 8-bit PWM.
+const DITHER_D: u32 = 4;
+
+/// Gamma 2.2 at `DITHER_D`× resolution (author value → PWM duty × 4), for temporal
+/// dithering. Regenerate with the same formula as GAMMA_LUT × DITHER_D.
+#[rustfmt::skip]
+const GAMMA_HI: [u16; 256] = [
+       0,    0,    0,    0,    0,    0,    0,    0,    1,    1,    1,    1,    1,    1,    2,    2,
+       2,    3,    3,    3,    4,    4,    5,    5,    6,    6,    7,    7,    8,    9,    9,   10,
+      11,   11,   12,   13,   14,   15,   15,   16,   17,   18,   19,   20,   21,   22,   24,   25,
+      26,   27,   28,   30,   31,   32,   34,   35,   36,   38,   39,   41,   42,   44,   45,   47,
+      49,   50,   52,   54,   56,   58,   59,   61,   63,   65,   67,   69,   71,   73,   75,   77,
+      80,   82,   84,   86,   89,   91,   93,   96,   98,  101,  103,  106,  108,  111,  114,  116,
+     119,  122,  124,  127,  130,  133,  136,  139,  142,  145,  148,  151,  154,  157,  160,  164,
+     167,  170,  174,  177,  180,  184,  187,  191,  194,  198,  201,  205,  209,  213,  216,  220,
+     224,  228,  232,  236,  240,  244,  248,  252,  256,  260,  264,  268,  273,  277,  281,  286,
+     290,  295,  299,  304,  308,  313,  317,  322,  327,  332,  336,  341,  346,  351,  356,  361,
+     366,  371,  376,  381,  386,  391,  397,  402,  407,  413,  418,  423,  429,  434,  440,  446,
+     451,  457,  463,  468,  474,  480,  486,  492,  498,  503,  509,  516,  522,  528,  534,  540,
+     546,  553,  559,  565,  572,  578,  585,  591,  598,  604,  611,  618,  624,  631,  638,  645,
+     652,  658,  665,  672,  679,  687,  694,  701,  708,  715,  722,  730,  737,  745,  752,  759,
+     767,  774,  782,  790,  797,  805,  813,  821,  828,  836,  844,  852,  860,  868,  876,  884,
+     893,  901,  909,  917,  926,  934,  942,  951,  959,  968,  977,  985,  994, 1002, 1011, 1020,
+];
+
 /// The single place a color becomes a driven GRB word. Per channel: dim in author
-/// space, **gamma**-correct to PWM duty (perceptual → linear), then apply the
-/// **white-balance** gain as the final per-channel scale. White balance stays the
-/// outermost multiply, so a calibration set under the old linear path still holds.
-/// Every render path — all three pixel formats *and* the solid fill — funnels
-/// through this, so gamma + calibration apply uniformly. (Dithering lands here next
-/// to reclaim the dark-end codes gamma leaves coarse.)
-pub fn grb_pixel(r: u8, g: u8, b: u8, bright: u8, white: [u8; 3]) -> u32 {
-    let ch = |c: u8, w: u8| {
+/// space, **gamma**-correct to PWM duty, then apply the **white-balance** gain as the
+/// final per-channel scale (so a calibration set under the old linear path still
+/// holds). Each of gamma / white / dither can be toggled live via the render flags
+/// (for A/B'ing). With dither on, gamma runs at hi-res and `dither` (a per-LED,
+/// per-sub-frame phase) temporally averages it back to 8-bit — reclaiming the
+/// dark-end codes plain gamma leaves coarse. Every render path funnels through this.
+pub fn grb_pixel(r: u8, g: u8, b: u8, bright: u8, white: [u8; 3], dither: u8) -> u32 {
+    let flags = crate::state::render_flags();
+    let gamma = flags & crate::state::FX_GAMMA != 0;
+    let wb = flags & crate::state::FX_WHITE != 0;
+    let dith = flags & crate::state::FX_DITHER != 0;
+    let ch = |c: u8, w: u8, doff: u8| -> u8 {
         let dim = (c as u32 * bright as u32 / 255) as usize; // brightness, author space
-        let lit = GAMMA_LUT[dim] as u32; // gamma → PWM duty
-        ((lit * w as u32) / 255) as u8 // white-balance final scale
+        if !gamma {
+            let v = dim as u32; // linear (gamma off)
+            return (if wb { v * w as u32 / 255 } else { v }) as u8;
+        }
+        if dith {
+            let mut hi = GAMMA_HI[dim] as u32; // hi-res gamma
+            if wb {
+                hi = hi * w as u32 / 255;
+            }
+            ((hi + (doff as u32 % DITHER_D)) / DITHER_D) as u8 // temporal dither → 8-bit
+        } else {
+            let mut v = GAMMA_LUT[dim] as u32; // 8-bit gamma
+            if wb {
+                v = v * w as u32 / 255;
+            }
+            v as u8
+        }
     };
-    grb_word(ch(r, white[0]), ch(g, white[1]), ch(b, white[2]))
+    // Offset each channel's dither phase so R/G/B don't step in lockstep.
+    grb_word(
+        ch(r, white[0], dither),
+        ch(g, white[1], dither.wrapping_add(1)),
+        ch(b, white[2], dither.wrapping_add(2)),
+    )
+}
+
+/// Per-LED dither phase: the sub-frame phase offset by the LED index so neighbors
+/// don't dither in lockstep.
+#[inline]
+fn dphase(sub: u8, i: usize) -> u8 {
+    sub.wrapping_add(i as u8)
 }
 
 /// RGB888 (3 B/LED) → GRB<<8 words. Writes `out[0..num_leds]`.
-fn fill_888(frame_rgb: &[u8], out: &mut [u32], bright: u8, white: [u8; 3]) {
+fn fill_888(frame_rgb: &[u8], out: &mut [u32], bright: u8, white: [u8; 3], sub: u8) {
     for (i, px) in frame_rgb.chunks_exact(3).enumerate() {
         if i >= out.len() {
             break;
         }
-        out[i] = grb_pixel(px[0], px[1], px[2], bright, white);
+        out[i] = grb_pixel(px[0], px[1], px[2], bright, white, dphase(sub, i));
     }
 }
 
 /// RGB565 (2 B/LED, u16 LE) → GRB<<8 words, expanding 5/6/5 back to 8 bits.
-fn fill_565(frame: &[u8], out: &mut [u32], bright: u8, white: [u8; 3]) {
+fn fill_565(frame: &[u8], out: &mut [u32], bright: u8, white: [u8; 3], sub: u8) {
     for (i, px) in frame.chunks_exact(2).enumerate() {
         if i >= out.len() {
             break;
@@ -177,13 +235,13 @@ fn fill_565(frame: &[u8], out: &mut [u32], bright: u8, white: [u8; 3]) {
         let r = ((r5 << 3) | (r5 >> 2)) as u8;
         let g = ((g6 << 2) | (g6 >> 4)) as u8;
         let b = ((b5 << 3) | (b5 >> 2)) as u8;
-        out[i] = grb_pixel(r, g, b, bright, white);
+        out[i] = grb_pixel(r, g, b, bright, white, dphase(sub, i));
     }
 }
 
 /// Indexed (1 B/LED) → GRB<<8 words via the palette (RGB triples). Out-of-range
 /// indices render black.
-fn fill_indexed(frame: &[u8], palette: &[u8], out: &mut [u32], bright: u8, white: [u8; 3]) {
+fn fill_indexed(frame: &[u8], palette: &[u8], out: &mut [u32], bright: u8, white: [u8; 3], sub: u8) {
     for (i, &ix) in frame.iter().enumerate() {
         if i >= out.len() {
             break;
@@ -193,6 +251,6 @@ fn fill_indexed(frame: &[u8], palette: &[u8], out: &mut [u32], bright: u8, white
             Some(c) => (c[0], c[1], c[2]),
             None => (0, 0, 0),
         };
-        out[i] = grb_pixel(r, g, b, bright, white);
+        out[i] = grb_pixel(r, g, b, bright, white, dphase(sub, i));
     }
 }

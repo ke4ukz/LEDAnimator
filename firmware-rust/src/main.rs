@@ -53,6 +53,9 @@ const MAX_LEDS: usize = 1000;
 // Strip span used by SOLID/OFF when no pattern is loaded (so those still light a
 // reasonable length on a device with no selected pattern to source a LED count).
 const DEFAULT_LEDS: usize = 60;
+// While dithering, re-show the current frame at ~133 Hz (advancing the dither phase)
+// so the temporal averaging sits above the flicker-fusion threshold.
+const DITHER_SUB_US: u64 = 7_500;
 // Kept off the task future (would blow the executor arena); lives in .bss.
 static FRAME_BUF: StaticCell<[u32; MAX_LEDS]> = StaticCell::new();
 
@@ -191,6 +194,10 @@ async fn main(spawner: Spawner) {
         let g = fs.lock().await;
         read_cfg_line(&g, b"whitebal.txt\0")
     };
+    let rf = {
+        let g = fs.lock().await;
+        read_cfg_line(&g, b"render.txt\0")
+    };
     // Sync role/group from the pattern header + program from the NN- filename prefix,
     // set BEFORE the control channels start so the BLE task picks leader vs device
     // advertising correctly.
@@ -240,6 +247,22 @@ async fn main(spawner: Spawner) {
                 };
             }
         }
+    }
+    // Render feature flags ("<gamma> <white> <dither>", each 0/1). Left at the default
+    // (gamma + white on, dither off) when unset.
+    if let Some(s) = rf {
+        let mut it = s.split_whitespace();
+        let mut flags = 0u8;
+        if it.next() == Some("1") {
+            flags |= state::FX_GAMMA;
+        }
+        if it.next() == Some("1") {
+            flags |= state::FX_WHITE;
+        }
+        if it.next() == Some("1") {
+            flags |= state::FX_DITHER;
+        }
+        state::set_render_flags(flags);
     }
 
     // Start the BLE control channel (owns the CYW43 BT HCI + the shared fs for
@@ -329,12 +352,33 @@ async fn main(spawner: Spawner) {
             }
             state::Mode::Solid => {
                 let [r, g, b] = snap.solid;
-                let word = leda::grb_pixel(r, g, b, bright255, white);
-                for w in buf[..n].iter_mut() {
-                    *w = word;
+                if state::dither_on() {
+                    // Re-show at high refresh, advancing the dither phase, for ~50 ms.
+                    let start = embassy_time::Instant::now();
+                    let mut sub = 0u8;
+                    loop {
+                        for (i, w) in buf[..n].iter_mut().enumerate() {
+                            *w = leda::grb_pixel(r, g, b, bright255, white, sub.wrapping_add(i as u8));
+                        }
+                        ws.show(&buf[..n]).await;
+                        sub = sub.wrapping_add(1);
+                        let el = start.elapsed().as_micros();
+                        if el + DITHER_SUB_US >= 50_000 {
+                            if 50_000 > el {
+                                Timer::after_micros(50_000 - el).await;
+                            }
+                            break;
+                        }
+                        Timer::after_micros(DITHER_SUB_US).await;
+                    }
+                } else {
+                    let word = leda::grb_pixel(r, g, b, bright255, white, 0);
+                    for w in buf[..n].iter_mut() {
+                        *w = word;
+                    }
+                    ws.show(&buf[..n]).await;
+                    Timer::after_millis(50).await;
                 }
-                ws.show(&buf[..n]).await;
-                Timer::after_millis(50).await;
             }
             state::Mode::Play if snap.role.is_follower() => match &pattern {
                 // Follower: the displayed frame comes from the phase-lock loop.
@@ -350,7 +394,7 @@ async fn main(spawner: Spawner) {
                         Timer::after_millis(33).await;
                     } else {
                         let f = ff.min(pat.header.num_frames - 1);
-                        if pat.render(f, &mut buf[..n], bright255, white) {
+                        if pat.render(f, &mut buf[..n], bright255, white, 0) {
                             ws.show(&buf[..n]).await;
                         }
                         // The PLL advances the phase; just refresh (~60 Hz) to track it.
@@ -368,19 +412,41 @@ async fn main(spawner: Spawner) {
             },
             state::Mode::Play => match &pattern {
                 Some(pat) if pat.header.num_frames > 0 && pat.header.num_leds > 0 => {
-                    if pat.render(frame, &mut buf[..n], bright255, white) {
-                        ws.show(&buf[..n]).await;
-                    }
-                    // Publish the position for the sync beacon (leader) — this frame
-                    // and the clock (ms) at which we showed it.
+                    // Speed-scaled frame period: speed% of the authored fps.
+                    let eff = ((pat.header.fps.max(1) as u32) * snap.speed.max(1) as u32 / 100).max(1);
+                    let period_us = (1_000_000 / eff) as u64;
+                    // Publish the position for the sync beacon (leader) at the moment
+                    // the frame first displays.
                     state::set_position(frame, embassy_time::Instant::now().as_millis() as u32);
+                    if state::dither_on() {
+                        // Re-show the same frame at high refresh, advancing the dither
+                        // phase, until it's time for the next frame.
+                        let start = embassy_time::Instant::now();
+                        let mut sub = 0u8;
+                        loop {
+                            if pat.render(frame, &mut buf[..n], bright255, white, sub) {
+                                ws.show(&buf[..n]).await;
+                            }
+                            sub = sub.wrapping_add(1);
+                            let el = start.elapsed().as_micros();
+                            if el + DITHER_SUB_US >= period_us {
+                                if period_us > el {
+                                    Timer::after_micros(period_us - el).await;
+                                }
+                                break;
+                            }
+                            Timer::after_micros(DITHER_SUB_US).await;
+                        }
+                    } else {
+                        if pat.render(frame, &mut buf[..n], bright255, white, 0) {
+                            ws.show(&buf[..n]).await;
+                        }
+                        Timer::after_micros(period_us).await;
+                    }
                     frame += 1;
                     if frame >= pat.header.num_frames {
                         frame = 0;
                     }
-                    // Speed-scaled frame period: speed% of the authored fps.
-                    let eff = ((pat.header.fps.max(1) as u32) * snap.speed.max(1) as u32 / 100).max(1);
-                    Timer::after_micros((1_000_000 / eff) as u64).await;
                 }
                 // Nothing playable: LED 0 red "nofile" pulse, rest dark.
                 _ => {
