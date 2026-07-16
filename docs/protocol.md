@@ -82,6 +82,7 @@ argument usually *queries* the value.
 | `OFF` | Blank the strip. |
 | `PLAY` | Resume the selected pattern. |
 | `WHITEBAL <r> <g> <b>` | Set the per-channel **white-balance** gains 0–255 (the "canonical white"); applied at render to every color, so a value < 255 attenuates that channel. No-arg **queries** (reply `WHITEBAL <r> <g> <b>`). Persisted; broadcast to all clients. The app calibrates it live by showing solid white and dragging a warm/tint pad. |
+| `RENDER <g> <w> <d>` | Toggle the render-stage steps — **gamma**, **white balance**, **dither** — each `0`/`1`, for A/B'ing the perceptual result on the same pattern. No-arg **queries** (reply `RENDER <g> <w> <d>`). Persisted; broadcast. Default gamma+white on, dither off (dither engages a high-refresh sub-loop). |
 
 ### Patterns
 

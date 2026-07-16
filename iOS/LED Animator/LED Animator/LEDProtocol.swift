@@ -41,6 +41,8 @@ enum LEDCommand {
     case reboot                // warm-restart the device (re-advertises the BLE name)
     case whiteBalance(Int, Int, Int) // WHITEBAL r g b — set the canonical-white gains
     case queryWhiteBalance     // WHITEBAL — read the current white-balance gains
+    case renderFlags(Bool, Bool, Bool) // RENDER g w d — toggle gamma / white / dither
+    case queryRenderFlags      // RENDER — read the render-stage toggles
     // Multi-device sync
     case program(Int)          // group jukebox: play program n (a leader switches the whole group)
     case teardown              // leader-only: gracefully end the group
@@ -79,6 +81,8 @@ enum LEDCommand {
         case .reboot: return "REBOOT"
         case .whiteBalance(let r, let g, let b): return "WHITEBAL \(r) \(g) \(b)"
         case .queryWhiteBalance: return "WHITEBAL"
+        case .renderFlags(let g, let w, let d): return "RENDER \(g ? 1 : 0) \(w ? 1 : 0) \(d ? 1 : 0)"
+        case .queryRenderFlags: return "RENDER"
         case .program(let n): return "PROGRAM \(n)"
         case .teardown: return "TEARDOWN"
         case .setLoss(let s): return "LOSS \(s)"

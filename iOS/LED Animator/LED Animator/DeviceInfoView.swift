@@ -109,6 +109,26 @@ struct DeviceInfoView: View {
             }
 
             Section {
+                Toggle("Gamma correction", isOn: Binding(
+                    get: { session.gammaOn },
+                    set: { session.setRenderFlags(gamma: $0, white: session.whiteBalanceOn, dither: session.ditherOn) }
+                ))
+                Toggle("Apply white balance", isOn: Binding(
+                    get: { session.whiteBalanceOn },
+                    set: { session.setRenderFlags(gamma: session.gammaOn, white: $0, dither: session.ditherOn) }
+                ))
+                Toggle("Dithering", isOn: Binding(
+                    get: { session.ditherOn },
+                    set: { session.setRenderFlags(gamma: session.gammaOn, white: session.whiteBalanceOn, dither: $0) }
+                ))
+            } header: {
+                Text("Rendering")
+            } footer: {
+                Text("Flip these to compare on the strip. Gamma evens out fades and dark colors; white balance applies your calibration; dithering smooths dark shades (refreshes the strip faster while on).")
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Section {
                 if session.pinIsSet {
                     LabeledContent("PIN protection", value: "On")
                     Button("Remove PIN", role: .destructive) { showRemovePin = true }
@@ -232,7 +252,7 @@ struct DeviceInfoView: View {
         .sheet(isPresented: $showWhiteBalance) {
             WhiteBalanceView(session: session)
         }
-        .onAppear { session.requestMoreInfo() }
+        .onAppear { session.requestMoreInfo(); session.requestRenderFlags() }
         .task {
             // Power drifts slowly; re-poll while the panel is open (the initial
             // value arrives in the MOREINFO batch).

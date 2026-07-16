@@ -42,6 +42,9 @@ final class DeviceSession {
     var mode = "play"      // "play", "solid", or "off" — seeded/echoed by the device
     var solid = RGB(r: 255, g: 255, b: 255)   // last solid color the device reported (INFO)
     var whiteBalance = RGB(r: 255, g: 255, b: 255)   // canonical-white gains (WHITEBAL)
+    var gammaOn = true            // render toggles (RENDER) — for A/B comparison
+    var whiteBalanceOn = true
+    var ditherOn = false
     // MOREINFO details for the Info tab (nil until that batch streams in).
     var firmwareVersion: String?
     var platform: String?
@@ -298,6 +301,17 @@ final class DeviceSession {
         throttle("whitebal") { [weak self] in self?.send(.whiteBalance(cr, cg, cb), expectResponse: false) }
     }
 
+    /// Read the render-stage toggles (reply arrives as "RENDER g w d").
+    func requestRenderFlags() { send(.queryRenderFlags) }
+
+    /// Toggle gamma / white-balance / dithering at render (persisted on the device).
+    func setRenderFlags(gamma: Bool, white: Bool, dither: Bool) {
+        gammaOn = gamma
+        whiteBalanceOn = white
+        ditherOn = dither
+        send(.renderFlags(gamma, white, dither))
+    }
+
     /// Rename the device; the board persists it and re-advertises under the name.
     /// Restricted to printable ASCII (the name rides the protocol + BLE advert).
     func rename(_ name: String) {
@@ -431,6 +445,13 @@ final class DeviceSession {
             let p = body.dropFirst("WHITEBAL ".count).split(separator: " ")
             if p.count >= 3, let r = Int(p[0]), let g = Int(p[1]), let b = Int(p[2]) {
                 whiteBalance = RGB(r: r, g: g, b: b)
+            }
+        } else if reply.hasPrefix("RENDER ") || reply.hasPrefix("OK RENDER ") {
+            // Render toggles "g w d" — query, setter echo, or pushed snapshot.
+            let body = reply.hasPrefix("OK ") ? String(reply.dropFirst(3)) : reply
+            let p = body.dropFirst("RENDER ".count).split(separator: " ")
+            if p.count >= 3 {
+                gammaOn = p[0] == "1"; whiteBalanceOn = p[1] == "1"; ditherOn = p[2] == "1"
             }
         } else if reply.hasPrefix("ROLE ") {
             role = String(reply.dropFirst("ROLE ".count))
