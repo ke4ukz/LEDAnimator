@@ -39,6 +39,7 @@ enum LEDCommand {
     case power                 // live power status (USB present + VSYS mV)
     case setPin(Int)           // re-point the strip's data GP pin (0–29)
     case reboot                // warm-restart the device (re-advertises the BLE name)
+    case bootsel               // reboot into the RPI-RP2 USB bootloader (firmware update)
     case whiteBalance(Int, Int, Int) // WHITEBAL r g b — set the canonical-white gains
     case queryWhiteBalance     // WHITEBAL — read the current white-balance gains
     case renderFlags(Bool, Bool, Bool) // RENDER g w d — toggle gamma / white / dither
@@ -79,6 +80,7 @@ enum LEDCommand {
         case .power: return "POWER"
         case .setPin(let n): return "PIN \(n)"
         case .reboot: return "REBOOT"
+        case .bootsel: return "BOOTSEL"
         case .whiteBalance(let r, let g, let b): return "WHITEBAL \(r) \(g) \(b)"
         case .queryWhiteBalance: return "WHITEBAL"
         case .renderFlags(let g, let w, let d): return "RENDER \(g ? 1 : 0) \(w ? 1 : 0) \(d ? 1 : 0)"

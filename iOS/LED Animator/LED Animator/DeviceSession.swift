@@ -327,6 +327,11 @@ final class DeviceSession {
     /// finishes booting and rejoins Wi-Fi, ~5–10 s later.
     func rebootDevice() { send(.reboot, expectResponse: false) }
 
+    /// Reboot the device into the RPI-RP2 USB bootloader for a firmware update — it
+    /// appears as the RPI-RP2 drive; drop a `.uf2` on it (or use picotool). The chip
+    /// resets, so the connection drops and the device won't respond until reflashed.
+    func enterBootloader() { send(.bootsel, expectResponse: false) }
+
     // MARK: Wi-Fi provisioning
 
     /// Ask the device for its current Wi-Fi state (reply arrives as "WIFI …").

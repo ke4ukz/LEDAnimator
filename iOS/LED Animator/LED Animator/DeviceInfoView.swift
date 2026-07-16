@@ -28,6 +28,8 @@ struct DeviceInfoView: View {
     @State private var showRemovePin = false
     /// Confirms a manual device restart.
     @State private var showRestart = false
+    /// Confirms entering the USB bootloader (hidden behind a long-press / right-click).
+    @State private var showBootsel = false
     /// Presents the white-balance calibration pad.
     @State private var showWhiteBalance = false
 
@@ -212,6 +214,11 @@ struct DeviceInfoView: View {
 
             Section {
                 Button("Restart Device") { showRestart = true }
+                    // Hidden advanced action (long-press / right-click): drop into the
+                    // USB bootloader for a firmware update.
+                    .contextMenu {
+                        Button("Enter Bootloader…", systemImage: "arrow.down.circle") { showBootsel = true }
+                    }
             } header: {
                 Text("Maintenance")
             } footer: {
@@ -248,6 +255,12 @@ struct DeviceInfoView: View {
             Button("Cancel", role: .cancel) { }
         } message: {
             Text("The controller reboots and reconnects in a few seconds. Your patterns and settings are kept.")
+        }
+        .alert("Enter Bootloader?", isPresented: $showBootsel) {
+            Button("Enter Bootloader", role: .destructive) { session.enterBootloader() }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("For updating firmware. The device reboots into the RPI-RP2 USB drive — drag a .uf2 onto it to flash. It won't respond to the app until then; plug it into a computer first.")
         }
         .sheet(isPresented: $showWhiteBalance) {
             WhiteBalanceView(session: session)
