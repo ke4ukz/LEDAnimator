@@ -234,9 +234,10 @@ struct DeviceInfoView: View {
             } header: {
                 Text("Maintenance")
             } footer: {
-                Text("Patterns and settings are kept; it reconnects in a few seconds.")
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .fixedSize(horizontal: false, vertical: true)
+                // Kept short so it never needs to wrap — a Button-only section's
+                // footer truncates to one line on the macOS inspector. The full
+                // detail ("reconnects in a few seconds") is in the confirm dialog.
+                Text("Patterns and settings are kept.")
             }
         }
         .alert("Rename Device", isPresented: $showRename) {
