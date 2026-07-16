@@ -111,12 +111,45 @@ impl<'a> Pattern<'a> {
     }
 }
 
-/// The single place a color becomes a driven GRB word: per-channel white-balance
-/// gain + master brightness (both linear `channel * gain / 255`). Gamma / dithering
-/// will land here too. Every render path — all three pixel formats *and* the solid
-/// fill — funnels through this, so calibration applies uniformly.
+/// Gamma-correction LUT (author value → PWM duty), gamma **2.2** — the inverse of
+/// the sRGB display encoding, so the strip's perceived response roughly matches the
+/// monitor the colors were designed on (mid 128 → 56 duty, not a near-white 128).
+/// Precomputed (the firmware has no `powf`); regenerate for a different gamma with:
+/// `[round(255*(i/255)**GAMMA) for i in range(256)]`. A higher gamma (2.5-2.8)
+/// gives deeper darks but needs dithering to avoid low-end banding.
+#[rustfmt::skip]
+const GAMMA_LUT: [u8; 256] = [
+      0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   1,
+      1,   1,   1,   1,   1,   1,   1,   1,   1,   2,   2,   2,   2,   2,   2,   2,
+      3,   3,   3,   3,   3,   4,   4,   4,   4,   5,   5,   5,   5,   6,   6,   6,
+      6,   7,   7,   7,   8,   8,   8,   9,   9,   9,  10,  10,  11,  11,  11,  12,
+     12,  13,  13,  13,  14,  14,  15,  15,  16,  16,  17,  17,  18,  18,  19,  19,
+     20,  20,  21,  22,  22,  23,  23,  24,  25,  25,  26,  26,  27,  28,  28,  29,
+     30,  30,  31,  32,  33,  33,  34,  35,  35,  36,  37,  38,  39,  39,  40,  41,
+     42,  43,  43,  44,  45,  46,  47,  48,  49,  49,  50,  51,  52,  53,  54,  55,
+     56,  57,  58,  59,  60,  61,  62,  63,  64,  65,  66,  67,  68,  69,  70,  71,
+     73,  74,  75,  76,  77,  78,  79,  81,  82,  83,  84,  85,  87,  88,  89,  90,
+     91,  93,  94,  95,  97,  98,  99, 100, 102, 103, 105, 106, 107, 109, 110, 111,
+    113, 114, 116, 117, 119, 120, 121, 123, 124, 126, 127, 129, 130, 132, 133, 135,
+    137, 138, 140, 141, 143, 145, 146, 148, 149, 151, 153, 154, 156, 158, 159, 161,
+    163, 165, 166, 168, 170, 172, 173, 175, 177, 179, 181, 182, 184, 186, 188, 190,
+    192, 194, 196, 197, 199, 201, 203, 205, 207, 209, 211, 213, 215, 217, 219, 221,
+    223, 225, 227, 229, 231, 234, 236, 238, 240, 242, 244, 246, 248, 251, 253, 255,
+];
+
+/// The single place a color becomes a driven GRB word. Per channel: dim in author
+/// space, **gamma**-correct to PWM duty (perceptual → linear), then apply the
+/// **white-balance** gain as the final per-channel scale. White balance stays the
+/// outermost multiply, so a calibration set under the old linear path still holds.
+/// Every render path — all three pixel formats *and* the solid fill — funnels
+/// through this, so gamma + calibration apply uniformly. (Dithering lands here next
+/// to reclaim the dark-end codes gamma leaves coarse.)
 pub fn grb_pixel(r: u8, g: u8, b: u8, bright: u8, white: [u8; 3]) -> u32 {
-    let ch = |c: u8, w: u8| ((c as u32 * bright as u32 * w as u32) / (255 * 255)) as u8;
+    let ch = |c: u8, w: u8| {
+        let dim = (c as u32 * bright as u32 / 255) as usize; // brightness, author space
+        let lit = GAMMA_LUT[dim] as u32; // gamma → PWM duty
+        ((lit * w as u32) / 255) as u8 // white-balance final scale
+    };
     grb_word(ch(r, white[0]), ch(g, white[1]), ch(b, white[2]))
 }
 
