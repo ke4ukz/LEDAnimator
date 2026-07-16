@@ -187,6 +187,10 @@ async fn main(spawner: Spawner) {
         let g = fs.lock().await;
         read_cfg_line(&g, b"state.txt\0")
     };
+    let wb = {
+        let g = fs.lock().await;
+        read_cfg_line(&g, b"whitebal.txt\0")
+    };
     // Sync role/group from the pattern header + program from the NN- filename prefix,
     // set BEFORE the control channels start so the BLE task picks leader vs device
     // advertising correctly.
@@ -209,6 +213,17 @@ async fn main(spawner: Spawner) {
         c.role = role;
         c.group = group;
         c.program = program_of(c.file.as_str());
+        // White-balance calibration ("<r> <g> <b>" gains); neutral if unset/short.
+        if let Some(s) = wb {
+            let mut it = s.split_whitespace();
+            let mut g = [255u8; 3];
+            for slot in g.iter_mut() {
+                if let Some(v) = it.next().and_then(|x| x.parse().ok()) {
+                    *slot = v;
+                }
+            }
+            c.white = g;
+        }
         // Restore last mode + solid color ("<mode> <r> <g> <b>") so play/solid/off
         // survives a reboot (matches the MicroPython state.txt behavior).
         if let Some(s) = st {
@@ -302,6 +317,7 @@ async fn main(spawner: Spawner) {
 
         // Brightness percent (0..=100) → 0..=255 for the render path.
         let bright255 = (snap.bright as u16 * 255 / 100) as u8;
+        let white = snap.white; // per-channel white-balance gains
 
         match snap.mode {
             state::Mode::Off => {
@@ -313,8 +329,7 @@ async fn main(spawner: Spawner) {
             }
             state::Mode::Solid => {
                 let [r, g, b] = snap.solid;
-                let scale = |c: u8| ((c as u16 * bright255 as u16) / 255) as u8;
-                let word = ws2812::grb_word(scale(r), scale(g), scale(b));
+                let word = leda::grb_pixel(r, g, b, bright255, white);
                 for w in buf[..n].iter_mut() {
                     *w = word;
                 }
@@ -335,7 +350,7 @@ async fn main(spawner: Spawner) {
                         Timer::after_millis(33).await;
                     } else {
                         let f = ff.min(pat.header.num_frames - 1);
-                        if pat.render(f, &mut buf[..n], bright255) {
+                        if pat.render(f, &mut buf[..n], bright255, white) {
                             ws.show(&buf[..n]).await;
                         }
                         // The PLL advances the phase; just refresh (~60 Hz) to track it.
@@ -353,7 +368,7 @@ async fn main(spawner: Spawner) {
             },
             state::Mode::Play => match &pattern {
                 Some(pat) if pat.header.num_frames > 0 && pat.header.num_leds > 0 => {
-                    if pat.render(frame, &mut buf[..n], bright255) {
+                    if pat.render(frame, &mut buf[..n], bright255, white) {
                         ws.show(&buf[..n]).await;
                     }
                     // Publish the position for the sync beacon (leader) — this frame

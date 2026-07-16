@@ -192,6 +192,10 @@ pub struct Control {
     pub group: u8,
     /// Program number (the selected file's `NN-` prefix) — carried in the beacon.
     pub program: u8,
+    /// White-balance per-channel gains 0..=255 (the "canonical white" calibration).
+    /// Applied at render as `channel * gain / 255`, so `[255,255,255]` is neutral.
+    /// Corrects the WS2812's non-neutral white; persisted in `whitebal.txt`.
+    pub white: [u8; 3],
 }
 
 impl Control {
@@ -207,6 +211,7 @@ impl Control {
             role: Role::Standalone,
             group: 0,
             program: 0,
+            white: [255, 255, 255],
         }
     }
 }
@@ -258,6 +263,7 @@ pub struct Snapshot {
     pub solid: [u8; 3],
     pub reload: bool,
     pub role: Role,
+    pub white: [u8; 3],
 }
 
 /// Copy out the current state (clearing `reload`, since the caller acts on it).
@@ -270,6 +276,7 @@ pub async fn take_snapshot() -> Snapshot {
         solid: c.solid,
         reload: c.reload,
         role: c.role,
+        white: c.white,
     };
     c.reload = false;
     snap

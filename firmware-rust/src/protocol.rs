@@ -240,6 +240,33 @@ pub async fn dispatch(line: &str, fs: &SharedFs, sink: &mut impl LineSink, conn:
             sink.send("OK OFF").await;
         }
 
+        // White-balance calibration: the per-channel "canonical white" gains. No
+        // arg = query. The app shows solid white and drags these live (broadcast so
+        // any client stays in sync); persisted so the calibration survives a reboot.
+        "WHITEBAL" => {
+            if arg.is_empty() {
+                let w = CONTROL.lock().await.white;
+                reply(sink, format_args!("WHITEBAL {} {} {}", w[0], w[1], w[2])).await;
+            } else {
+                let mut it = arg.split_whitespace();
+                let r = it.next().and_then(|s| s.parse::<u16>().ok());
+                let g = it.next().and_then(|s| s.parse::<u16>().ok());
+                let b = it.next().and_then(|s| s.parse::<u16>().ok());
+                match (r, g, b) {
+                    (Some(r), Some(g), Some(b)) => {
+                        let w = [(r & 255) as u8, (g & 255) as u8, (b & 255) as u8];
+                        CONTROL.lock().await.white = w;
+                        let mut buf: String<16> = String::new();
+                        let _ = write!(buf, "{} {} {}", w[0], w[1], w[2]);
+                        write_cfg(fs, b"whitebal.txt\0", buf.as_bytes()).await;
+                        notify_state_change();
+                        reply(sink, format_args!("OK WHITEBAL {} {} {}", w[0], w[1], w[2])).await;
+                    }
+                    _ => sink.send("ERR args").await,
+                }
+            }
+        }
+
         "PLAY" => {
             let solid = {
                 let mut c = CONTROL.lock().await;
@@ -492,6 +519,8 @@ pub async fn send_snapshot(fs: &SharedFs, sink: &mut impl LineSink) {
         }
         reply(sink, format_args!("ROLE {}", role_name(c.role))).await;
         reply(sink, format_args!("GROUP {}", c.group)).await;
+        let w = c.white;
+        reply(sink, format_args!("WHITEBAL {} {} {}", w[0], w[1], w[2])).await;
     }
     let _ = fs; // reserved (auth/free are static enough not to push)
     let s = crate::wifi::status_line().await;

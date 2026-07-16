@@ -97,37 +97,41 @@ impl<'a> Pattern<'a> {
         self.data.get(start..start + fb)
     }
 
-    /// Decode frame `i` into GRB<<8 words, scaling by master brightness `bright`
-    /// (0..=255). Returns `false` (leaving `out` untouched) if the frame is missing.
-    pub fn render(&self, i: u32, out: &mut [u32], bright: u8) -> bool {
+    /// Decode frame `i` into GRB<<8 words, applying master brightness `bright`
+    /// (0..=255) + the white-balance gains `white`. Returns `false` (leaving `out`
+    /// untouched) if the frame is missing.
+    pub fn render(&self, i: u32, out: &mut [u32], bright: u8, white: [u8; 3]) -> bool {
         let Some(px) = self.frame(i) else { return false };
         match self.header.format {
-            FMT_RGB565 => fill_565(px, out, bright),
-            FMT_INDEXED => fill_indexed(px, self.palette, out, bright),
-            _ => fill_888(px, out, bright),
+            FMT_RGB565 => fill_565(px, out, bright, white),
+            FMT_INDEXED => fill_indexed(px, self.palette, out, bright, white),
+            _ => fill_888(px, out, bright, white),
         }
         true
     }
 }
 
-/// Scale a channel by `bright`/255 (matches the MicroPython brightness path).
-#[inline]
-fn scale(c: u8, bright: u8) -> u8 {
-    ((c as u16 * bright as u16) / 255) as u8
+/// The single place a color becomes a driven GRB word: per-channel white-balance
+/// gain + master brightness (both linear `channel * gain / 255`). Gamma / dithering
+/// will land here too. Every render path — all three pixel formats *and* the solid
+/// fill — funnels through this, so calibration applies uniformly.
+pub fn grb_pixel(r: u8, g: u8, b: u8, bright: u8, white: [u8; 3]) -> u32 {
+    let ch = |c: u8, w: u8| ((c as u32 * bright as u32 * w as u32) / (255 * 255)) as u8;
+    grb_word(ch(r, white[0]), ch(g, white[1]), ch(b, white[2]))
 }
 
 /// RGB888 (3 B/LED) → GRB<<8 words. Writes `out[0..num_leds]`.
-fn fill_888(frame_rgb: &[u8], out: &mut [u32], bright: u8) {
+fn fill_888(frame_rgb: &[u8], out: &mut [u32], bright: u8, white: [u8; 3]) {
     for (i, px) in frame_rgb.chunks_exact(3).enumerate() {
         if i >= out.len() {
             break;
         }
-        out[i] = grb_word(scale(px[0], bright), scale(px[1], bright), scale(px[2], bright));
+        out[i] = grb_pixel(px[0], px[1], px[2], bright, white);
     }
 }
 
 /// RGB565 (2 B/LED, u16 LE) → GRB<<8 words, expanding 5/6/5 back to 8 bits.
-fn fill_565(frame: &[u8], out: &mut [u32], bright: u8) {
+fn fill_565(frame: &[u8], out: &mut [u32], bright: u8, white: [u8; 3]) {
     for (i, px) in frame.chunks_exact(2).enumerate() {
         if i >= out.len() {
             break;
@@ -140,13 +144,13 @@ fn fill_565(frame: &[u8], out: &mut [u32], bright: u8) {
         let r = ((r5 << 3) | (r5 >> 2)) as u8;
         let g = ((g6 << 2) | (g6 >> 4)) as u8;
         let b = ((b5 << 3) | (b5 >> 2)) as u8;
-        out[i] = grb_word(scale(r, bright), scale(g, bright), scale(b, bright));
+        out[i] = grb_pixel(r, g, b, bright, white);
     }
 }
 
 /// Indexed (1 B/LED) → GRB<<8 words via the palette (RGB triples). Out-of-range
 /// indices render black.
-fn fill_indexed(frame: &[u8], palette: &[u8], out: &mut [u32], bright: u8) {
+fn fill_indexed(frame: &[u8], palette: &[u8], out: &mut [u32], bright: u8, white: [u8; 3]) {
     for (i, &ix) in frame.iter().enumerate() {
         if i >= out.len() {
             break;
@@ -156,6 +160,6 @@ fn fill_indexed(frame: &[u8], palette: &[u8], out: &mut [u32], bright: u8) {
             Some(c) => (c[0], c[1], c[2]),
             None => (0, 0, 0),
         };
-        out[i] = grb_word(scale(r, bright), scale(g, bright), scale(b, bright));
+        out[i] = grb_pixel(r, g, b, bright, white);
     }
 }
