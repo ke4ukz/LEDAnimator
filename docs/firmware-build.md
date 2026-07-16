@@ -19,26 +19,44 @@ live — never automatically.
 ```bash
 cd firmware-rust && cargo build --release      # then make the .uf2 (elf2uf2-rs)
 # …flash + validate on hardware…
-cd ../web && npm run promote-firmware           # roll THIS build to the site
+cd ../web && npm run promote-firmware           # roll THIS build to the site (rp2040)
 ```
 
 `promote-firmware` ([`web/scripts/promote-firmware.mjs`](../web/scripts/promote-firmware.mjs)):
 
-- copies `firmware-rust/led-animator.uf2` → `web/src/assets/led-animator-rp2040.uf2`
-  (a stable name, so the export's `?url` import never churns);
-- regenerates
+- copies the target's UF2 → `web/src/assets/led-animator-<target>.uf2` (a stable,
+  target-named slot, so the export's `?url` import never churns);
+- updates that **target's** entry in `firmwareReleases.generated.json` and
+  regenerates the typed
   [`web/src/export/firmwareRelease.generated.ts`](../web/src/export/firmwareRelease.generated.ts)
-  with the **version** (read from `FW_VERSION` in the firmware source, so the
-  site advertises exactly what the device reports), the **flash/littlefs layout**
-  (read from `firmware-rust/src/fs.rs`, so it can't drift), the source **commit**,
-  size, and promotion date;
-- warns if `firmware-rust` has **uncommitted changes** (the UF2 might not match
+  the app imports — with the **version** (read from `FW_VERSION`, so the site
+  advertises exactly what the device reports), the **flash/littlefs layout** +
+  **UF2 family** (read from the firmware source, so it can't drift), the source
+  **commit**, size, and promotion date;
+- warns if the firmware tree has **uncommitted changes** (the UF2 might not match
   the recorded commit).
 
-Review the diff, then commit the UF2 + the generated metadata to ship it. Bump
+Review the diff, then commit the UF2 + the generated files to ship it. Bump
 `FW_VERSION` in the firmware *before* promoting when you want a new version string
-on the wire and on the site. (Pass a path to override the source UF2:
-`npm run promote-firmware -- path/to.uf2`.)
+on the wire and on the site. (Override the source UF2 with a path:
+`npm run promote-firmware rp2040 -- path/to.uf2`.)
+
+### Multiple targets (RP2350 and beyond)
+
+Releases are **keyed by target platform** (`rp2040`, and later `rp2350`, …), so
+promoting one never touches the others (`firmwareReleases.generated.json` is
+merged, not overwritten):
+
+```bash
+npm run promote-firmware rp2350      # once that firmware build exists
+```
+
+Adding a target is a `TARGETS` entry in the promote script — its firmware root,
+UF2 path, and **UF2 family id** (RP2040 `0xe48bff56`; RP2350 differs by
+ARM/RISC-V + secure/non-secure). The RP2350 firmware itself is a separate build
+(its own `embassy-rp` chip feature, `memory.x`, littlefs base/size, and likely
+secure-boot signing); the promotion step just pins whatever UF2 that build
+produces. The web export selects the pinned release for the chosen target.
 
 ## MicroPython player (dormant)
 

@@ -1,0 +1,14 @@
+{
+  "rp2040": {
+    "target": "rp2040",
+    "board": "Raspberry Pi Pico W (RP2040)",
+    "version": "rust-0.1",
+    "commit": "433bbbf",
+    "builtAt": "2026-07-16",
+    "bytes": 985600,
+    "uf2Family": 3834380118,
+    "blockSize": 4096,
+    "blockCount": 212,
+    "fsBase": 269664256
+  }
+}
