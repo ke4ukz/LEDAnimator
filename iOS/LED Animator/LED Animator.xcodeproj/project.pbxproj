@@ -269,8 +269,8 @@
 				ENABLE_RESOURCE_ACCESS_USB = NO;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_CFBundleDisplayName = "LED Animator";
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.lifestyle";
 				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "LED Animator uses Bluetooth to find and control your LED devices.";
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "LED Animator uses your local network to find and control LED devices over Wi-Fi.";
@@ -309,8 +309,8 @@
 				DEVELOPMENT_TEAM = 6Q2C96TD9P;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_CFBundleDisplayName = "LED Animator";
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.lifestyle";
 				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "LED Animator uses Bluetooth to find and control your LED devices.";
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "LED Animator uses your local network to find and control LED devices over Wi-Fi.";
