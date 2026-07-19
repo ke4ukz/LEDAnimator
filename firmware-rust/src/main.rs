@@ -77,10 +77,27 @@ static mut PATTERN_BUF: [u8; PATTERN_MAX] = [0; PATTERN_MAX];
 async fn main(spawner: Spawner) {
     let p = embassy_rp::init(Default::default());
 
+    // Read the chip's unique flash id up front so each board gets a DISTINCT USB
+    // serial — a distinct /dev name and unambiguous `picotool` targeting when
+    // several boards are attached (a fixed serial collides: macOS can name only one,
+    // and picotool tracks by serial). The SAME Flash instance is handed to the
+    // filesystem below — only one may exist at a time.
+    let mut flash = embassy_rp::flash::Flash::new_blocking(p.FLASH);
+    let uid = board::unique_id(&mut flash); // per-chip (flash uid on RP2040, OTP on RP2350)
+    static USB_SERIAL: StaticCell<heapless::String<16>> = StaticCell::new();
+    let serial: &'static str = USB_SERIAL
+        .init({
+            let mut s = heapless::String::<16>::new();
+            // "LEDA-" + the low 3 bytes of the unique id (hex): short, stable, unique.
+            let _ = core::fmt::write(&mut s, format_args!("LEDA-{:06X}", (uid as u32) & 0x00FF_FFFF));
+            s
+        })
+        .as_str();
+
     // USB dev tooling first (Phase C): picotool reset interface + serial logger.
     // Reflash is now `picotool reboot -f -u` — no physical BOOTSEL button.
     let usb_driver = UsbDriver::new(p.USB, Irqs);
-    spawner.spawn(usb::usb_task(usb_driver).unwrap());
+    spawner.spawn(usb::usb_task(usb_driver, serial).unwrap());
     log::info!("LED Animator (Rust) booting");
 
     let Pio { mut common, sm0, .. } = Pio::new(p.PIO1, Irqs);
@@ -92,10 +109,11 @@ async fn main(spawner: Spawner) {
     // Boot-clear the strip (any length), like the Python `_show_solid black`.
     ws.show(&buf[..]).await;
 
-    // --- Storage bring-up (boot-stage: dim magenta while mounting the flash fs) ---
+    // --- Storage bring-up (boot-stage: dim magenta while mounting the flash fs).
+    // Reuse the `flash` created above for the unique-id read (only one instance
+    // may exist). ---
     buf[0] = status::BootStage::Storage.led0_word();
     ws.show(&buf[..]).await;
-    let flash = embassy_rp::flash::Flash::new_blocking(p.FLASH);
     static STORAGE: StaticCell<fs::FlashStorage> = StaticCell::new();
     static ALLOC: StaticCell<littlefs2::fs::Allocation<fs::FlashStorage>> = StaticCell::new();
     static FS: StaticCell<fs::SharedFs> = StaticCell::new();

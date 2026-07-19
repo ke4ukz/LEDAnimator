@@ -49,11 +49,13 @@ impl Handler for ResetHandler {
 
 /// Build the USB device (reset interface + CDC logger) and run it forever.
 #[embassy_executor::task]
-pub async fn usb_task(driver: Driver<'static, USB>) {
+pub async fn usb_task(driver: Driver<'static, USB>, serial: &'static str) {
     let mut config = Config::new(0x2e8a, 0x000a); // Raspberry Pi VID + pico-sdk stdio PID
     config.manufacturer = Some("LED Animator");
     config.product = Some("LED Animator");
-    config.serial_number = Some("LEDA-0001");
+    // Per-device serial (flash unique id, from main) so several boards get distinct
+    // /dev names + unambiguous picotool targeting.
+    config.serial_number = Some(serial);
     config.max_power = 100;
     config.max_packet_size_0 = 64;
 
