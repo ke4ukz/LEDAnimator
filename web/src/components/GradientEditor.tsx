@@ -57,11 +57,20 @@ export function GradientEditor({ place = 'panel' }: { place?: 'panel' | 'focus' 
   const updatePost = useStore((s) => s.updatePost)
   const updateTrack = useStore((s) => s.updateTrack)
   const focusGradient = useStore((s) => s.focusGradient)
+  const addTrack = useStore((s) => s.addTrack)
 
   const track = project.tracks.find((t) => t.id === selectedTrack)
   const source = project.sources.find((s) => s.id === track?.sourceId)
 
-  if (!track || !source) return <p className="placeholder">Select a track to edit its source.</p>
+  if (!track || !source) {
+    // No tracks at all → offer to add one (a New project starts empty); otherwise
+    // prompt to select a track.
+    return project.tracks.length === 0 ? (
+      <div className="placeholder">No tracks yet. <button className="btn" onClick={addTrack}>+ Add a track</button></div>
+    ) : (
+      <p className="placeholder">Select a track to edit its source.</p>
+    )
+  }
 
   const gradient: Gradient | null = source.kind === 'gradient' ? source.gradient : null
   const post = source.post ?? {}

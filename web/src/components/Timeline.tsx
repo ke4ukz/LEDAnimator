@@ -45,7 +45,7 @@ export function Timeline() {
             track={t}
             source={source}
             selected={t.id === selected}
-            canDelete={tracks.length > 1}
+            canDelete={tracks.length > 0}
             onSelect={() => selectTrack(t.id)}
             onDelete={() => deleteTrack(t.id)}
             onRename={(name) => updateTrack(t.id, { name })}

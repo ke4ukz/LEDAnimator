@@ -481,10 +481,12 @@ export const useStore = create<AppState>((set, get) => {
 
     deleteTrack: (id) => {
       const { project } = get()
-      if (project.tracks.length <= 1) return // keep at least one
       const tracks = project.tracks.filter((t) => t.id !== id)
       const removed = project.tracks.find((t) => t.id === id)
-      const fallback = tracks[0].id
+      // Reassign the removed track's LEDs to the first remaining track — or to ''
+      // (unassigned) when this was the LAST track, matching a New project, which
+      // starts with no tracks. Deleting the last track is allowed for that symmetry.
+      const fallback = tracks[0]?.id ?? ''
       // Drop the track's now-orphaned source and reassign its LEDs.
       const sources = project.sources.filter((s) => s.id !== removed?.sourceId)
       const assignments = project.assignments.map((tid) => (tid === id ? fallback : tid))

@@ -11,9 +11,18 @@ export function TrackInspector() {
   const setAutomation = useStore((s) => s.setAutomation)
   const assignments = useStore((s) => s.project.assignments)
   const leds = useStore((s) => s.leds)
+  const addTrack = useStore((s) => s.addTrack)
 
   const track = project.tracks.find((t) => t.id === selected)
-  if (!track) return <p className="placeholder">Select a track to edit it.</p>
+  if (!track) {
+    // No tracks at all → an actionable CTA instead of a dead-end "select a track"
+    // (a New project starts empty). With tracks present, prompt to pick one.
+    return project.tracks.length === 0 ? (
+      <div className="placeholder">No tracks yet. <button className="btn" onClick={addTrack}>+ Add a track</button></div>
+    ) : (
+      <p className="placeholder">Select a track to edit it.</p>
+    )
+  }
 
   // "Even" spreads one full pass across the ANIMATION-index range, not the raw
   // LED count — so grouped LEDs (shared index) count once and gaps are honored.
