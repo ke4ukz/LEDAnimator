@@ -41,7 +41,17 @@ const TARGETS = {
       fsSource: 'src/fs.rs', // FS_BLOCK_SIZE / FS_BLOCK_COUNT / FS_OFFSET
     },
   },
-  // rp2350:    { board: 'Pico 2 W (RP2350)', format: 'uf2', combinedUf2: { family: 0xe48bff59, … }, … },
+  rp2350: {
+    board: 'Raspberry Pi Pico 2 W (RP2350)',
+    format: 'uf2',
+    fwRoot: resolve(repoRoot, 'firmware-rust'),
+    artifact: 'led-animator-rp2350.uf2', // picotool uf2 convert (elf2uf2-rs is rp2040-only)
+    versionSource: 'src/protocol.rs',
+    combinedUf2: {
+      family: 0xe48bff59, // RP2350 ARM-S UF2 family id
+      fsSource: 'src/fs.rs', // same 2 MB fs geometry as rp2040 (see memory-rp2350.x)
+    },
+  },
   // atmega328: { board: 'Arduino Uno/Nano', format: 'hex', fwRoot: …, artifact: 'led-animator.hex' },
   // pi:        { board: 'Raspberry Pi', format: 'img', … },
 }

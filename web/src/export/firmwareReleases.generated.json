@@ -14,5 +14,21 @@
       "blockCount": 212,
       "fsBase": 269664256
     }
+  },
+  "rp2350": {
+    "target": "rp2350",
+    "board": "Raspberry Pi Pico 2 W (RP2350)",
+    "format": "uf2",
+    "file": "led-animator-rp2350.uf2",
+    "version": "rust-0.2",
+    "commit": "a1da5ae",
+    "builtAt": "2026-07-19",
+    "bytes": 972288,
+    "combinedUf2": {
+      "family": 3834380121,
+      "blockSize": 4096,
+      "blockCount": 212,
+      "fsBase": 269664256
+    }
   }
 }

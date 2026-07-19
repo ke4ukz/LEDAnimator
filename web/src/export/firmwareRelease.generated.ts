@@ -48,4 +48,15 @@ export const FIRMWARE_RELEASES: Record<string, FirmwareRelease> = {
     bytes: 996352,
     combinedUf2: { family: 0xe48bff56, blockSize: 4096, blockCount: 212, fsBase: 0x1012c000 },
   },
+  "rp2350": {
+    target: "rp2350",
+    board: "Raspberry Pi Pico 2 W (RP2350)",
+    format: "uf2",
+    file: "led-animator-rp2350.uf2",
+    version: "rust-0.2",
+    commit: "a1da5ae",
+    builtAt: "2026-07-19",
+    bytes: 972288,
+    combinedUf2: { family: 0xe48bff59, blockSize: 4096, blockCount: 212, fsBase: 0x1012c000 },
+  },
 }

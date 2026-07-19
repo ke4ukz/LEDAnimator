@@ -3,6 +3,7 @@ import { useStore } from '../store'
 import { InfoDot } from './InfoDot'
 import { partitionByDevice } from '../bake'
 import { DEVICES, checkLimits } from '../export/devices'
+import type { Uf2Target } from '../export/combinedUf2'
 import { encodeRasterAs, estimateBytesFor, rgb565Error, PIXEL_FORMAT, ROLE, LOSS, STARTUP, type LedaMeta } from '../export/format'
 import { buildIndexed, countDistinctColors, type IndexedResult } from '../export/palette'
 import { downloadBytes, zipProject } from '../export/download'
@@ -122,7 +123,10 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
   const needsSettings = format === 'uf2'
 
   const platform = DEVICES.find((d) => d.id === deviceId)!
-  const hasRp2040 = platform.targets.includes('rp2040-micropython')
+  // Combined-UF2 targets (firmware + baked pattern): rp2040 / rp2350. Both ship a
+  // one-drag UF2; other devices are export-planned only.
+  const uf2Target: Uf2Target | null = deviceId === 'rp2040' || deviceId === 'rp2350' ? deviceId : null
+  const hasUf2 = uf2Target !== null
 
   const perDevice = devices.map(({ device, raster }) => {
     const bytes = estimateBytesFor(raster, formatByte, indexedByDevice?.get(device)?.count ?? 256)
@@ -179,24 +183,26 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
   }
 
   const exportUf2 = async () => {
+    if (!uf2Target) return
     setBuilding(true)
     try {
       // Lazy-load: pulls in the littlefs wasm + the firmware asset only when used.
-      const { buildRp2040CombinedUf2 } = await import('../export/combinedUf2')
+      const { buildCombinedUf2 } = await import('../export/combinedUf2')
       const buildOne = (device: number, r: typeof raster) => {
         const s = settingsFor(device)
-        return buildRp2040CombinedUf2(r, Number(s.brightness.toFixed(2)), ledaName(device), s.name, metaFor(device), encodeFor(device, r))
+        return buildCombinedUf2(uf2Target, r, Number(s.brightness.toFixed(2)), ledaName(device), s.name, metaFor(device), encodeFor(device, r))
       }
+      const tag = uf2Target === 'rp2350' ? 'pico2w' : 'picow'
       if (!multi) {
         const uf2 = await buildOne(devices[0].device, devices[0].raster)
-        downloadBytes('led-animation-picow.uf2', uf2, 'application/octet-stream')
+        downloadBytes(`led-animation-${tag}.uf2`, uf2, 'application/octet-stream')
         return
       }
       const files: Record<string, string | Uint8Array> = {}
       for (const { device, raster } of devices) files[`${progBase}-dev${device}.uf2`] = await buildOne(device, raster)
       files['manifest.txt'] = buildManifest((d) => `${progBase}-dev${d}.uf2`, 'File', 'file')
-      // "-picow": the combined UF2 bakes in the Pico W firmware + needs the W's radio.
-      downloadBytes(`${progBase}-picow.zip`, zipProject(files), 'application/zip')
+      // The combined UF2 bakes in the board's firmware + needs the CYW43 radio.
+      downloadBytes(`${progBase}-${tag}.zip`, zipProject(files), 'application/zip')
     } catch (e) {
       window.alert(`Could not build the UF2: ${(e as Error).message}`)
     } finally {
@@ -259,7 +265,7 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
           <Stat label="Loop" value={`${duration.toFixed(2)} s`} />
           <Stat
             label={multi ? 'Largest slice' : 'Data size'}
-            value={hasRp2040 ? `${fmtBytes(maxBytes)} / ${fmtBytes(RP2040_FS_BYTES)}` : fmtBytes(maxBytes)}
+            value={hasUf2 ? `${fmtBytes(maxBytes)} / ${fmtBytes(RP2040_FS_BYTES)}` : fmtBytes(maxBytes)}
           />
         </div>
 
@@ -271,12 +277,12 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
           </div>
         )}
 
-        {hasRp2040 ? (
+        {hasUf2 ? (
           <>
             <label className="field-row">
               <span>Format</span>
               <select value={format} onChange={(e) => setFormat(e.target.value as ExportFormat)}>
-                <option value="uf2">One-drag UF2 (blank Pico W)</option>
+                <option value="uf2">One-drag UF2 (firmware + pattern)</option>
                 <option value="leda">Pattern data (.leda)</option>
               </select>
             </label>
@@ -445,7 +451,7 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
               <button className="btn btn-primary" disabled={building} onClick={download}>
                 {downloadLabel}
               </button>
-              <InfoDot label="Export format details">{formatInfo(format, multi)}</InfoDot>
+              <InfoDot label="Export format details">{formatInfo(format, multi, uf2Target)}</InfoDot>
             </div>
           </>
         ) : (
@@ -457,7 +463,7 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
 }
 
 /** The details popover content for the selected export format. */
-function formatInfo(format: ExportFormat, multi: boolean): ReactNode {
+function formatInfo(format: ExportFormat, multi: boolean, uf2Target: Uf2Target | null): ReactNode {
   const multiNote = (unit: string) => (
     <p className="hint-link">
       This project spans multiple devices, so the download is a <strong>.zip</strong> with one {unit} per
@@ -465,13 +471,17 @@ function formatInfo(format: ExportFormat, multi: boolean): ReactNode {
     </p>
   )
   if (format === 'uf2') {
+    // Bootloader drive + board name differ by chip (Pico W = RPI-RP2, Pico 2 W = RP2350).
+    const drive = uf2Target === 'rp2350' ? 'RP2350' : 'RPI-RP2'
+    const board = uf2Target === 'rp2350' ? 'Pico 2 W' : 'Pico W'
+    const tag = uf2Target === 'rp2350' ? 'pico2w' : 'picow'
     return (
       <>
-        Drop it onto the RPI-RP2 drive of a blank Pico W — nothing to install first. A single gapless
+        Drop it onto the {drive} drive of a blank {board} — nothing to install first. A single gapless
         firmware image (~4&nbsp;MB) with the <strong>LED Animator firmware</strong> plus a filesystem
         holding your pattern, brightness, and device name. The strip's data line goes to <strong>GP0</strong>.
         If the strip stays dark after flashing, flash the same file with{' '}
-        <code>picotool load led-animation-picow.uf2</code> instead.
+        <code>picotool load led-animation-{tag}.uf2</code> instead.
         {multi && multiNote('.uf2')}
         <p className="hint-link">
           To enter bootloader mode, hold <strong>BOOTSEL</strong> while plugging in —{' '}

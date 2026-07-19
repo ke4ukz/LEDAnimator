@@ -13,7 +13,7 @@ export interface DeviceProfile {
   maxDataBytes: number
   notes: string
   /** Export targets implemented for this device (others are planned). */
-  targets: ('rp2040-micropython')[]
+  targets: ('rp2040-rust' | 'rp2350-rust')[]
 }
 
 export const DEVICES: DeviceProfile[] = [
@@ -22,8 +22,16 @@ export const DEVICES: DeviceProfile[] = [
     name: 'RP2040 (Pico / Pico W)',
     maxLeds: 2000,
     maxDataBytes: 800_000,
-    notes: '264 KB RAM; ~848 KB MicroPython filesystem (Pico W v1.28.0). WS2812 driven via PIO.',
-    targets: ['rp2040-micropython'],
+    notes: '264 KB RAM; ~848 KB on-flash filesystem (Pico W). WS2812 driven via PIO. Rust firmware.',
+    targets: ['rp2040-rust'],
+  },
+  {
+    id: 'rp2350',
+    name: 'RP2350 (Pico 2 W)',
+    maxLeds: 2000,
+    maxDataBytes: 800_000,
+    notes: '520 KB RAM; ~848 KB on-flash filesystem (Pico 2 W). WS2812 driven via PIO. Rust firmware.',
+    targets: ['rp2350-rust'],
   },
   {
     id: 'atmega328',
