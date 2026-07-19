@@ -5,6 +5,20 @@ edition = "2021"
 resolver = "2"
 description = "LED Animator device firmware — Rust port of the MicroPython player (see ../web/src/export/rp2040.ts)"
 
+# Single source, N targets (Arduino-style board selection). Exactly ONE platform
+# feature is active per build; it selects the embassy-rp chip + memory-<t>.x (via
+# build.rs) + the board/ constants. `default = rp2350` so a bare `cargo build`
+# targets the Pico 2 W; build others with the aliases in .cargo/config.toml.
+[features]
+default = ["rp2350", "wifi", "bt"]
+rp2040 = ["embassy-rp/rp2040"]
+rp2350 = ["embassy-rp/rp235xa"]
+# Radios, default on. Omit for a silent, non-broadcasting device (e.g. a fixed
+# pattern on a Pico W that shouldn't fill the airwaves): the radio stack then
+# isn't compiled at all. `wifi` and `bt` share the CYW43; `bt` adds its HCI.
+wifi = ["dep:cyw43", "dep:cyw43-pio", "dep:embassy-net", "dep:embedded-io-async"]
+bt = ["dep:cyw43", "cyw43/bluetooth", "dep:cyw43-pio", "dep:trouble-host", "dep:bt-hci"]
+
 # --- MIGRATED 2026-07-12 onto the unified networking graph (docs/PORT.md Phase A/B). ---
 # Everything embassy comes from ONE git rev (see [patch] below) so that, as
 # networking lands (cyw43 + trouble + embassy-net + embassy-usb), it all resolves
@@ -13,7 +27,8 @@ description = "LED Animator device firmware — Rust port of the MicroPython pla
 # added in their own phases (C: usb, D: cyw43).
 [dependencies]
 embassy-executor = { version = "0.10", features = ["platform-cortex-m", "executor-thread"] }
-embassy-rp = { version = "0.10", features = ["rp2040", "time-driver", "critical-section-impl"] }
+# Chip feature (rp2040 / rp235xa) comes from the active platform feature above.
+embassy-rp = { version = "0.10", features = ["time-driver", "critical-section-impl"] }
 embassy-time = { version = "0.5" }
 embassy-sync = { version = "0.8" }
 embassy-futures = { version = "0.1" }
@@ -22,16 +37,18 @@ embassy-futures = { version = "0.1" }
 embassy-usb = { version = "0.6" }
 embassy-usb-logger = { version = "0.6" }
 log = "0.4"
-# CYW43 radio (Wi-Fi + BT) over PIO SPI (Phase D). Firmware blobs in cyw43-firmware/.
-cyw43 = { version = "0.7", features = ["bluetooth"] }
-cyw43-pio = { version = "0.10" }
-# BLE control channel (Phase E) — trouble-host over the CYW43 HCI. crates.io
-# (both agree on bt-hci 0.9 — see spike-graph/STATUS.md).
-trouble-host = { version = "0.7", features = ["default-packet-pool-mtu-128", "scan"] }
-bt-hci = { version = "0.9" }
+# Radio stack — OPTIONAL, pulled in only by the `wifi` / `bt` features (see
+# [features] above). A build with neither omits all of this: no CYW43 bring-up,
+# nothing on the airwaves, and the crates aren't compiled or flashed.
+# CYW43 radio over PIO SPI (Phase D) — shared by Wi-Fi + BT; `bt` adds the HCI.
+cyw43 = { version = "0.7", optional = true }
+cyw43-pio = { version = "0.10", optional = true }
+# BLE control channel (Phase E) — trouble-host over the CYW43 HCI.
+trouble-host = { version = "0.7", features = ["default-packet-pool-mtu-128", "scan"], optional = true }
+bt-hci = { version = "0.9", optional = true }
 # Wi-Fi networking (Phase F) — embassy-net (smoltcp) over the CYW43 net driver.
-embassy-net = { version = "0.9", features = ["tcp", "udp", "dhcpv4", "medium-ethernet"] }
-embedded-io-async = "0.7"
+embassy-net = { version = "0.9", features = ["tcp", "udp", "dhcpv4", "medium-ethernet"], optional = true }
+embedded-io-async = { version = "0.7", optional = true }
 
 cortex-m = { version = "0.7.7", features = ["inline-asm"] }
 cortex-m-rt = "0.7.5"

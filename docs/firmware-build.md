@@ -9,6 +9,38 @@ format see [`file-format.md`](file-format.md).
 > player (the rest of this doc) is **dormant** — kept as a fallback, not actively
 > developed. New work goes into the Rust firmware.
 
+## Build matrix — one source, N targets
+
+`firmware-rust/` is a **single source tree** that builds for multiple boards and
+radio configurations, selected by Cargo **features** (Arduino-style board macros,
+done the Rust way). Everything platform-specific lives in **`src/board/`** (the
+`PLATFORM` string, the CYW43 clock divider, …) plus a per-target `memory-<t>.x`;
+the rest of `src/` is written once against `board::*`. Adding a target = one
+feature + one `board/<t>.rs` + one `memory-<t>.x` + a `build.rs` arm.
+
+**Platform** (exactly one; `default = rp2350`): `rp2040` (Pico W, Cortex-M0+) ·
+`rp2350` (Pico 2 W, Cortex-M33). The feature selects the `embassy-rp` chip, the
+target triple, the boot/link script, and (via `build.rs`) `memory-<t>.x`. A
+missing/ambiguous selection is a `compile_error!` in `src/board/mod.rs`.
+
+**Radios** (default on, omit to exclude): `wifi` · `bt`. They gate *optional*
+deps (cyw43 / embassy-net / trouble-host), so a build without them compiles no
+radio stack at all — **nothing on the airwaves, nothing flashed** — for a fixed
+pattern on a board that shouldn't broadcast.
+
+```bash
+cargo build --release          # default = Pico 2 W, Wi-Fi + BT (same as `cargo rp2350`)
+cargo rp2040                   # Pico W, Wi-Fi + BT (alias in .cargo/config.toml)
+# Silent fixed-pattern lamp — no radio stack compiled:
+cargo build --release --no-default-features --features rp2040 --target thumbv6m-none-eabi
+# BT control, no Wi-Fi broadcast:
+cargo build --release --no-default-features --features rp2350,bt
+```
+
+The aliases (`cargo rp2040` / `cargo rp2350`) live in `.cargo/config.toml`; the
+default `cargo build` targets the Pico 2 W. `promote-firmware` (below) is keyed by
+the same platform names.
+
 ## Shipping a Rust firmware build to the website
 
 Firmware development in `firmware-rust/` is **decoupled** from what the site

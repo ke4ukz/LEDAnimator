@@ -11,9 +11,13 @@
 //! `net_device` (embassy-net, Phase F), `bt_device` (trouble-host BLE, Phase E).
 
 use crate::Irqs;
+#[cfg(feature = "bt")]
 use cyw43::bluetooth::BtDriver;
-use cyw43::{Control, Cyw43439, NetDriver, State};
-use cyw43_pio::{PioSpi, DEFAULT_CLOCK_DIVIDER};
+#[cfg(feature = "wifi")]
+use cyw43::NetDriver;
+use cyw43::{Control, Cyw43439, State};
+use crate::board::CYW43_CLOCK_DIVIDER;
+use cyw43_pio::PioSpi;
 use embassy_executor::Spawner;
 use embassy_rp::gpio::{Level, Output};
 use embassy_rp::peripherals::{DMA_CH0, DMA_CH1, PIN_23, PIN_24, PIN_25, PIN_29, PIO0};
@@ -28,11 +32,15 @@ async fn runner_task(runner: cyw43::Runner<'static, Spi, Cyw43439>) -> ! {
     runner.run().await
 }
 
-/// Radio handles for the rest of the firmware.
-#[allow(dead_code)] // net_device (Phase F) / bt_device (Phase E) wired as they land
+/// Radio handles for the rest of the firmware. `net_device` exists only in a
+/// `wifi` build, `bt_device` only in a `bt` build; `control` (Wi-Fi ops + onboard
+/// LED) is common to both.
+#[allow(dead_code)] // some handles go unused depending on the wifi/bt feature mix
 pub struct Radio {
     pub control: Control<'static>,
+    #[cfg(feature = "wifi")]
     pub net_device: NetDriver<'static>,
+    #[cfg(feature = "bt")]
     pub bt_device: BtDriver<'static>,
 }
 
@@ -49,9 +57,9 @@ pub async fn init(
     pin_dio: Peri<'static, PIN_24>,
     pin_clk: Peri<'static, PIN_29>,
 ) -> Radio {
-    // fw/btfw/nvram must be 4-byte aligned (DMA); CLM is a plain byte slice.
+    // fw/nvram must be 4-byte aligned (DMA); CLM is a plain byte slice. btfw is
+    // loaded only in a `bt` build (see below).
     let fw = cyw43::aligned_bytes!("../cyw43-firmware/43439A0.bin");
-    let btfw = cyw43::aligned_bytes!("../cyw43-firmware/43439A0_btfw.bin");
     let clm = include_bytes!("../cyw43-firmware/43439A0_clm.bin");
     let nvram = cyw43::aligned_bytes!("../cyw43-firmware/nvram_rp2040.bin");
 
@@ -61,7 +69,7 @@ pub async fn init(
     let spi = PioSpi::new(
         &mut pio.common,
         pio.sm0,
-        DEFAULT_CLOCK_DIVIDER,
+        CYW43_CLOCK_DIVIDER,
         pio.irq0,
         cs,
         pin_dio, // PIN_24 (DIO)
@@ -72,10 +80,29 @@ pub async fn init(
 
     static STATE: StaticCell<State> = StaticCell::new();
     let state = STATE.init(State::new());
-    let (net_device, bt_device, mut control, runner) =
-        cyw43::new_with_bluetooth(state, pwr, spi, fw, btfw, nvram).await;
+
+    // A `bt` build brings up the BT HCI (new_with_bluetooth, loads btfw); a
+    // Wi-Fi-only build uses plain new() and never loads the BT firmware.
+    #[cfg(feature = "bt")]
+    let (net_device, bt_device, mut control, runner) = {
+        let btfw = cyw43::aligned_bytes!("../cyw43-firmware/43439A0_btfw.bin");
+        cyw43::new_with_bluetooth(state, pwr, spi, fw, btfw, nvram).await
+    };
+    #[cfg(all(feature = "wifi", not(feature = "bt")))]
+    let (net_device, mut control, runner) = cyw43::new(state, pwr, spi, fw, nvram).await;
+
     spawner.spawn(runner_task(runner).unwrap());
     control.init(clm).await;
 
-    Radio { control, net_device, bt_device }
+    // BT-only build: new_with_bluetooth still hands back a net device we don't use.
+    #[cfg(all(feature = "bt", not(feature = "wifi")))]
+    let _ = net_device;
+
+    Radio {
+        control,
+        #[cfg(feature = "wifi")]
+        net_device,
+        #[cfg(feature = "bt")]
+        bt_device,
+    }
 }

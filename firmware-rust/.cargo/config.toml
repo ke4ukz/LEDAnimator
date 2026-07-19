@@ -1,12 +1,32 @@
+# Single source tree, N targets. The DEFAULT build is RP2350 (Pico 2 W, the
+# go-forward). Build another platform by its Cargo feature + target triple — use
+# the aliases below (e.g. `cargo rp2040`). The board differences live in
+# src/board/ + memory-<t>.x; see docs/firmware-build.md.
+#
+# Load + run over USB while a Pico is in BOOTSEL:  picotool load -x -t elf <elf>
+# No probe on this bench, so no `probe-rs run` / RTT — panic-halt + on-strip
+# status + the USB CDC serial log are the debugging channels.
 [build]
-target = "thumbv6m-none-eabi"
+target = "thumbv8m.main-none-eabihf"
 
+# RP2040 (Cortex-M0+): boots via a boot2 CRC block, added by embassy-rp's link-rp.x.
 [target.thumbv6m-none-eabi]
-# Load + run over USB while the Pico is in BOOTSEL:  picotool load -x -t elf <elf>
-# (elf2uf2-rs is also available to make a UF2.)  No probe on this bench, so no
-# `probe-rs run` / RTT — panic-halt + on-strip status is the debugging channel.
 rustflags = [
   "-C", "link-arg=--nmagic",
   "-C", "link-arg=-Tlink.x",
   "-C", "link-arg=-Tlink-rp.x",
 ]
+
+# RP2350 (Cortex-M33): boots via the IMAGE_DEF `.start_block` placed by
+# memory-rp2350.x and injected by embassy-rp's rp235xa feature — no link-rp.x.
+[target.thumbv8m.main-none-eabihf]
+rustflags = [
+  "-C", "link-arg=--nmagic",
+  "-C", "link-arg=-Tlink.x",
+]
+
+# Convenience: build a whole platform in one word. Updated with the radio features
+# (wifi/bt) in Cargo.toml — omit those from the feature list for a silent build.
+[alias]
+rp2040 = "build --release --no-default-features --features rp2040,wifi,bt --target thumbv6m-none-eabi"
+rp2350 = "build --release --no-default-features --features rp2350,wifi,bt --target thumbv8m.main-none-eabihf"

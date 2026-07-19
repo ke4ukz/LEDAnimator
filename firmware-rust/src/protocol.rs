@@ -14,7 +14,7 @@ use littlefs2::path::Path;
 use sha2::{Digest, Sha256};
 
 pub const FW_VERSION: &str = "rust-0.1";
-pub const PLATFORM: &str = "Raspberry Pi Pico W with RP2040";
+use crate::board::PLATFORM;
 
 /// After a failed LOGIN, further attempts are refused for this long (non-blocking
 /// rate limit — a casual brute-force deterrent). Shared across connections.
@@ -230,12 +230,16 @@ pub async fn dispatch(line: &str, fs: &SharedFs, sink: &mut impl LineSink, conn:
         }
 
         "OFF" => {
-            {
+            // Keep the set solid color — OFF renders black regardless (the player
+            // zeroes the strip in Mode::Off), so returning to SOLID restores the
+            // color instead of coming back black. Persist the live color so it also
+            // survives a reboot.
+            let solid = {
                 let mut c = CONTROL.lock().await;
-                c.solid = [0, 0, 0];
                 c.mode = Mode::Off;
-            }
-            persist_state(fs, Mode::Off, [0, 0, 0]).await;
+                c.solid
+            };
+            persist_state(fs, Mode::Off, solid).await;
             notify_state_change();
             sink.send("OK OFF").await;
         }
@@ -376,6 +380,12 @@ pub async fn dispatch(line: &str, fs: &SharedFs, sink: &mut impl LineSink, conn:
             };
             if exists {
                 write_cfg(fs, b"selected.txt\0", arg.as_bytes()).await;
+                // Selecting a pattern clears any factory-reset de-group override, so
+                // the newly-selected pattern's header role (incl. leader) takes effect
+                // on the next boot instead of being forced to standalone.
+                {
+                    let _ = fs.lock().await.remove(cfg_path(b"standalone.txt\0"));
+                }
                 {
                     let mut c = CONTROL.lock().await;
                     c.file.set(arg);
@@ -464,15 +474,19 @@ pub async fn dispatch(line: &str, fs: &SharedFs, sink: &mut impl LineSink, conn:
         }
 
         // --- Wi-Fi provisioning: stash SSID/pass, then WIFICONNECT writes
-        // networks.txt + nudges the manager to join (no reboot). ---
+        // networks.txt + nudges the manager to join (no reboot). Absent in a
+        // `wifi`-less build (the commands then fall through to ERR unknown). ---
+        #[cfg(feature = "wifi")]
         "WIFISSID" => {
             crate::wifi::PENDING.lock().await.0.set(arg);
             sink.send("OK WIFISSID").await;
         }
+        #[cfg(feature = "wifi")]
         "WIFIPASS" => {
             crate::wifi::PENDING.lock().await.1.set(arg);
             sink.send("OK WIFIPASS").await;
         }
+        #[cfg(feature = "wifi")]
         "WIFICONNECT" => {
             let (ssid, pass) = {
                 let p = crate::wifi::PENDING.lock().await;
@@ -488,6 +502,7 @@ pub async fn dispatch(line: &str, fs: &SharedFs, sink: &mut impl LineSink, conn:
                 sink.send("OK WIFICONNECT").await;
             }
         }
+        #[cfg(feature = "wifi")]
         "WIFIFORGET" => {
             {
                 let f = fs.lock().await;
@@ -496,6 +511,7 @@ pub async fn dispatch(line: &str, fs: &SharedFs, sink: &mut impl LineSink, conn:
             crate::wifi::CONNECT_SIG.signal(());
             sink.send("OK WIFIFORGET").await;
         }
+        #[cfg(feature = "wifi")]
         "WIFISTATUS" => {
             let s = crate::wifi::status_line().await;
             sink.send(&s).await;
@@ -525,6 +541,7 @@ pub async fn dispatch(line: &str, fs: &SharedFs, sink: &mut impl LineSink, conn:
         "LOSS" => sink.send("LOSS indicate").await,
         "STARTUP" => sink.send("STARTUP go").await,
         "TEARDOWN" => sink.send("ERR not-leader").await,
+        #[cfg(feature = "wifi")]
         "WIFISCAN" => {
             // Ask the Wi-Fi manager (which owns the radio Control) to scan, then
             // stream the results: WIFISCANLEN <n>, WIFINET <rssi> <ssid> …, WIFISCANEND.
@@ -582,8 +599,13 @@ pub async fn send_snapshot(fs: &SharedFs, sink: &mut impl LineSink) {
     )
     .await;
     let _ = fs; // reserved (auth/free are static enough not to push)
-    let s = crate::wifi::status_line().await;
-    sink.send(&s).await;
+    // Wi-Fi status line — omitted in a `wifi`-less build (the app shows N/A for the
+    // keys it doesn't receive).
+    #[cfg(feature = "wifi")]
+    {
+        let s = crate::wifi::status_line().await;
+        sink.send(&s).await;
+    }
 }
 
 /// Build + send the one-line `INFO` state snapshot. Used both by the `INFO` command and

@@ -1,16 +1,24 @@
 #![no_std]
 #![no_main]
+// A radio-less (silent) build omits the entire control channel, so the protocol /
+// state machinery it would drive is legitimately dead code. Quiet that here for the
+// no-radio combo only, rather than sprinkling per-item allows the full build fails on.
+#![cfg_attr(not(any(feature = "wifi", feature = "bt")), allow(dead_code))]
 
+mod board; // per-platform constants (the single place hardware targets differ)
+#[cfg(feature = "bt")]
 mod ble; // BLE control channel (trouble-host NUS)
 mod fs;
 mod leda;
 mod panic; // registers the #[panic_handler] (LED-0 red flutter)
-mod protocol; // transport-agnostic command dispatch
+mod protocol; // transport-agnostic command dispatch (reached via BLE / Wi-Fi)
+#[cfg(any(feature = "wifi", feature = "bt"))]
 mod radio; // CYW43 Wi-Fi + BT bring-up
 mod recovery; // power-cycle recovery ritual
 mod state; // shared control state (mode / brightness / speed)
 mod status;
 mod usb; // picotool reset interface + CDC serial logger
+#[cfg(feature = "wifi")]
 mod wifi; // Wi-Fi join + TCP control server
 mod ws2812;
 
@@ -95,9 +103,17 @@ async fn main(spawner: Spawner) {
     let alloc = ALLOC.init(Filesystem::allocate());
     // `fs` is now a `&'static` mutex shared by the player, recovery, and the control
     // dispatch (BLE + Wi-Fi). Lock it briefly for each op.
-    let fs: &'static fs::SharedFs = match Filesystem::mount(alloc, storage) {
+    // Mount the config/pattern filesystem. If it won't mount — a blank chip, or a
+    // filesystem left unmountable by a power cut mid-write (e.g. a brownout during
+    // the rapid power-cycle recovery ritual, which rewrites the boot counter every
+    // boot) — reformat a fresh empty fs and try once more, rather than bricking with
+    // a fatal halt. Only a format that ALSO fails (genuinely dead flash) halts with
+    // the RMA code. A successful mount is never touched, so real data is never lost
+    // to a transient hiccup.
+    let fs: &'static fs::SharedFs = match Filesystem::mount_or_else(alloc, storage, |_err, storage, _alloc| {
+        Filesystem::format(storage)
+    }) {
         Ok(f) => FS.init(embassy_sync::mutex::Mutex::new(f)),
-        // Fatal: no readable storage — show the RMA code on LED 0, forever.
         Err(_) => halt_error(&mut ws, buf, status::errors::FS_MOUNT_FAILED).await,
     };
 
@@ -160,21 +176,27 @@ async fn main(spawner: Spawner) {
         load_selected(&g, pbuf)
     };
 
-    // --- Radio bring-up (BootStage::Radio, dim blue). Blocking chip init; a dead
-    // chip hangs here and LED 0 stays blue. Wi-Fi join + BLE start later as tasks. ---
-    buf[0] = status::BootStage::Radio.led0_word();
-    ws.show(&buf[..]).await;
-    let mut radio = radio::init(
-        spawner, p.PIO0, p.DMA_CH0, p.DMA_CH1, p.PIN_23, p.PIN_25, p.PIN_24, p.PIN_29,
-    )
-    .await;
-    radio.control.gpio_set(0, true).await; // onboard LED on = radio alive
-    log::info!("radio up (CYW43 Wi-Fi + BT firmware loaded)");
+    // --- Radio bring-up — only when a radio is enabled. A `wifi`/`bt`-less build
+    // skips CYW43 entirely: nothing on the airwaves, no blobs flashed. BootStage::
+    // Radio, dim blue; blocking chip init, so a dead chip hangs here with LED 0
+    // frozen blue. Wi-Fi join + BLE start later as tasks. ---
+    #[cfg(any(feature = "wifi", feature = "bt"))]
+    let radio = {
+        buf[0] = status::BootStage::Radio.led0_word();
+        ws.show(&buf[..]).await;
+        let mut radio = radio::init(
+            spawner, p.PIO0, p.DMA_CH0, p.DMA_CH1, p.PIN_23, p.PIN_25, p.PIN_24, p.PIN_29,
+        )
+        .await;
+        radio.control.gpio_set(0, true).await; // onboard LED on = radio alive
+        log::info!("radio up (CYW43 Wi-Fi + BT firmware loaded)");
 
-    // Device id = last 3 bytes of the Wi-Fi MAC. Ties the BLE advert (manufacturer
-    // data) to the Wi-Fi hostname suffix so the app sees ONE device across both.
-    let mac = radio.control.address().await;
-    state::set_device_id(&mac);
+        // Device id = last 3 bytes of the Wi-Fi MAC. Ties the BLE advert (manufacturer
+        // data) to the Wi-Fi hostname suffix so the app sees ONE device across both.
+        let mac = radio.control.address().await;
+        state::set_device_id(&mac);
+        radio
+    };
 
     // Seed shared control state from config NOW — before the control channels start —
     // so the BLE advert name (frozen at task startup) is the real device name.
@@ -198,10 +220,23 @@ async fn main(spawner: Spawner) {
         let g = fs.lock().await;
         read_cfg_line(&g, b"render.txt\0")
     };
+    // A factory reset (recovery ritual, 10th short boot) drops a `standalone.txt`
+    // de-group marker. Honor it here: force Standalone / group 0 regardless of the
+    // selected pattern's header, so a device stuck as a leader — whose beacon is
+    // non-connectable, leaving no BLE control channel — can be recovered to a
+    // connectable, app-visible state without any control channel at all. Cleared the
+    // moment a new pattern is selected (see protocol SELECT), so the pattern's own
+    // header role takes over again.
+    let force_standalone = {
+        let g = fs.lock().await;
+        read_cfg_line(&g, b"standalone.txt\0").is_some()
+    };
     // Sync role/group from the pattern header + program from the NN- filename prefix,
     // set BEFORE the control channels start so the BLE task picks leader vs device
     // advertising correctly.
-    let (role, group) = {
+    let (role, group) = if force_standalone {
+        (state::Role::Standalone, 0)
+    } else {
         let pbuf_ref = unsafe { &*addr_of!(PATTERN_BUF) };
         match pat_len.and_then(|n| leda::Pattern::parse(&pbuf_ref[..n])) {
             Some(p) => (state::Role::from_header(p.header.role), p.header.group),
@@ -267,28 +302,32 @@ async fn main(spawner: Spawner) {
 
     // Start the BLE control channel (owns the CYW43 BT HCI + the shared fs for
     // filesystem-backed commands like LIST/SELECT).
+    #[cfg(feature = "bt")]
     spawner.spawn(ble::ble_task(radio.bt_device, fs).unwrap());
 
-    // --- Wi-Fi: always bring up the net stack; the manager joins on demand from
+    // --- Wi-Fi: bring up the net stack; the manager joins on demand from
     // networks.txt (present at boot, or written live by WIFICONNECT). Non-fatal —
     // the pattern plays regardless. TCP control server on :4550. ---
-    // Room for the socket set: up to 3 concurrent TCP control clients + the UDP
-    // discovery responder + DHCP, with margin.
-    static NET_RES: StaticCell<embassy_net::StackResources<8>> = StaticCell::new();
-    let net_res = NET_RES.init(embassy_net::StackResources::new());
-    let (stack, net_runner) = embassy_net::new(
-        radio.net_device,
-        embassy_net::Config::dhcpv4(Default::default()),
-        net_res,
-        0x0123_4567_89ab_cdef,
-    );
-    spawner.spawn(wifi::net_runner_task(net_runner).unwrap());
-    // Three pooled TCP servers so multiple apps can connect at once.
-    spawner.spawn(wifi::tcp_task(stack, fs).unwrap());
-    spawner.spawn(wifi::tcp_task(stack, fs).unwrap());
-    spawner.spawn(wifi::tcp_task(stack, fs).unwrap());
-    spawner.spawn(wifi::discover_task(stack).unwrap());
-    spawner.spawn(wifi::manager_task(radio.control, stack, fs).unwrap());
+    #[cfg(feature = "wifi")]
+    {
+        // Room for the socket set: up to 3 concurrent TCP control clients + the UDP
+        // discovery responder + DHCP, with margin.
+        static NET_RES: StaticCell<embassy_net::StackResources<8>> = StaticCell::new();
+        let net_res = NET_RES.init(embassy_net::StackResources::new());
+        let (stack, net_runner) = embassy_net::new(
+            radio.net_device,
+            embassy_net::Config::dhcpv4(Default::default()),
+            net_res,
+            0x0123_4567_89ab_cdef,
+        );
+        spawner.spawn(wifi::net_runner_task(net_runner).unwrap());
+        // Three pooled TCP servers so multiple apps can connect at once.
+        spawner.spawn(wifi::tcp_task(stack, fs).unwrap());
+        spawner.spawn(wifi::tcp_task(stack, fs).unwrap());
+        spawner.spawn(wifi::tcp_task(stack, fs).unwrap());
+        spawner.spawn(wifi::discover_task(stack).unwrap());
+        spawner.spawn(wifi::manager_task(radio.control, stack, fs).unwrap());
+    }
 
     // Boot complete — brief green LED-0 flash.
     buf[0] = status::BootStage::Complete.led0_word();
@@ -499,7 +538,10 @@ fn read_bright(fs: &fs::Fs) -> u8 {
                 .unwrap_or(100);
             pct.min(100) as u8
         }
-        Err(_) => 255,
+        // Missing bright.txt (blank/formatted fs) → full brightness. 100, not 255:
+        // brightness is a 0..=100 percent everywhere (the Ok arm + state default),
+        // so a 255 here shows as a bogus "255%" until the slider is first touched.
+        Err(_) => 100,
     }
 }
 
