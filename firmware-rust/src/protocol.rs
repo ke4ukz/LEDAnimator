@@ -13,7 +13,7 @@ use heapless::String;
 use littlefs2::path::Path;
 use sha2::{Digest, Sha256};
 
-pub const FW_VERSION: &str = "rust-0.1";
+pub const FW_VERSION: &str = "rust-0.2";
 use crate::board::PLATFORM;
 
 /// After a failed LOGIN, further attempts are refused for this long (non-blocking
