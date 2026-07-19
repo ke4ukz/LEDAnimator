@@ -101,6 +101,8 @@ struct ControlView: View {
                 }
             }
 
+            // Brightness applies in Play and Solid; hidden in Off (nothing is lit).
+            if playback != .off {
             Section {
                 HStack(spacing: 12) {
                     bumpButton("sun.min") { session.setBrightness(bumpedDown(session.brightness, min: 0)) }
@@ -131,7 +133,10 @@ struct ControlView: View {
                     brightnessNote("Above ~85%, bright colors and whites can wash out — color accuracy drops.")
                 }
             }
+            } // Brightness (hidden in Off)
 
+            // Speed applies only to a running pattern; hidden in Solid and Off.
+            if playback == .play {
             Section {
                 HStack(spacing: 12) {
                     bumpButton("tortoise") { session.setSpeed(bumpedDown(session.speed, min: 10)) }
@@ -157,6 +162,7 @@ struct ControlView: View {
                         .font(.caption)
                 }
             }
+            } // Speed (Play only)
 
             // A leader drives the whole group's program and can end the group.
             if let role = session.role, role == "leader" || role == "leader-only" {
@@ -184,6 +190,8 @@ struct ControlView: View {
                 }
             }
 
+            // The pattern list is only relevant while playing a pattern.
+            if playback == .play {
             Section {
                 if session.isLoadingPatterns {
                     VStack(alignment: .leading, spacing: 8) {
@@ -247,6 +255,7 @@ struct ControlView: View {
                 }
                 #endif
             }
+            } // Patterns (Play only)
 
             if let error = session.lastError {
                 Section {
